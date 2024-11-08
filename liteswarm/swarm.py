@@ -1,3 +1,4 @@
+import asyncio
 from collections import deque
 from collections.abc import AsyncGenerator
 from copy import deepcopy
@@ -9,6 +10,7 @@ from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices
 
 from liteswarm.types import (
     Agent,
+    AgentResponse,
     ConversationState,
     Message,
     StreamHandler,
@@ -34,7 +36,15 @@ class Swarm:
         limit: int | None = None,
         roles: list[str] | None = None,
     ) -> list[Message]:
-        """Get the last messages from the full history."""
+        """Get the last messages from the full history.
+
+        Args:
+            limit: The maximum number of messages to return
+            roles: The roles to filter by
+
+        Returns:
+            The last messages from the full history filtered by roles and limit
+        """
         # If no roles specified, use all messages
         if not roles:
             return self.messages[-limit:] if limit else self.messages
@@ -123,63 +133,97 @@ class Swarm:
 
         return messages
 
+    async def _process_tool_call(
+        self,
+        tool_call: ChatCompletionDeltaToolCall,
+        agent: Agent,
+    ) -> ToolCallResult | None:
+        """Process a single tool call concurrently.
+
+        Args:
+            tool_call: The tool call to process
+            agent: The agent that the tool call belongs to
+
+        Returns:
+            The tool call result or None if the tool call is not valid
+        """
+        function_name = tool_call.function.name
+        function_tools_map = {tool.__name__: tool for tool in agent.function_tools}
+
+        if function_name not in function_tools_map:
+            return None
+
+        if self.stream_handler:
+            await self.stream_handler.on_tool_call(tool_call, agent)
+
+        try:
+            args = orjson.loads(tool_call.function.arguments)
+            function_tool = function_tools_map[function_name]
+            function_result = function_tool(**args)
+
+            tool_call_result: ToolCallResult | None = None
+            if isinstance(function_result, Agent):
+                tool_call_result = ToolCallAgentResult(
+                    tool_call=tool_call,
+                    agent=function_result,
+                )
+            else:
+                tool_call_result = ToolCallMessageResult(
+                    tool_call=tool_call,
+                    message={
+                        "role": "tool",
+                        "content": orjson.dumps(function_result).decode(),
+                        "tool_call_id": tool_call.id,
+                    },
+                )
+
+            if self.stream_handler:
+                await self.stream_handler.on_tool_call_result(tool_call_result, agent)
+
+            return tool_call_result
+
+        except Exception as e:
+            if self.stream_handler:
+                await self.stream_handler.on_error(e, agent)
+
+            return None
+
     async def _process_tool_calls(
         self,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
-        """Process tool calls and return messages and new agents."""
-        results: list[ToolCallResult] = []
+        """Process tool calls concurrently and return messages and new agents.
 
+        Args:
+            tool_calls: The tool calls to process
+
+        Returns:
+            The tool call results
+        """
         agent = self.active_agent
         if not agent:
             raise ValueError("No active agent to process tool calls.")
 
-        for tool_call in tool_calls:
-            function_name = tool_call.function.name
-            function_tools_map = {tool.__name__: tool for tool in agent.function_tools}
-            if function_name not in function_tools_map:
-                continue
+        # Process all tool calls concurrently
+        tasks = [self._process_tool_call(tool_call, agent) for tool_call in tool_calls]
 
-            if self.stream_handler:
-                await self.stream_handler.on_tool_call(tool_call, agent)
+        # Gather results and filter out None values
+        results = await asyncio.gather(*tasks)
 
-            try:
-                args = orjson.loads(tool_call.function.arguments)
-                function_tool = function_tools_map[function_name]
-                function_result = function_tool(**args)
-
-                tool_call_result: ToolCallResult | None = None
-                if isinstance(function_result, Agent):
-                    tool_call_result = ToolCallAgentResult(
-                        tool_call=tool_call,
-                        agent=function_result,
-                    )
-                else:
-                    tool_call_result = ToolCallMessageResult(
-                        tool_call=tool_call,
-                        message={
-                            "role": "tool",
-                            "content": orjson.dumps(function_result).decode(),
-                            "tool_call_id": tool_call.id,
-                        },
-                    )
-
-                if self.stream_handler:
-                    await self.stream_handler.on_tool_call_result(tool_call_result, agent)
-
-                results.append(tool_call_result)
-
-            except Exception as e:
-                if self.stream_handler:
-                    await self.stream_handler.on_error(e, agent)
-
-        return results
+        return [result for result in results if result is not None]
 
     async def _get_completion_response(
         self,
         agent_messages: list[Message],
     ) -> AsyncGenerator[TypedDelta, None]:
-        """Get completion response for current active agent."""
+        """Get completion response for current active agent.
+
+        Args:
+            agent_messages: The messages to send to the agent
+
+        Returns:
+            An async generator of completion deltas
+        """
         if not self.active_agent:
             raise ValueError("No active agent")
 
@@ -206,13 +250,65 @@ class Swarm:
 
             yield choice.delta
 
-    async def stream(  # noqa: PLR0912, PLR0915
+    async def _process_agent_response(
+        self,
+        agent_messages: list[Message],
+    ) -> AsyncGenerator[AgentResponse, None]:
+        """Process agent response and yield deltas along with accumulated state.
+
+        Args:
+            agent_messages: The messages to send to the agent
+
+        Returns:
+            An async generator of agent responses
+        """
+        full_content = ""
+        full_tool_calls: list[ChatCompletionDeltaToolCall] = []
+
+        async for delta in self._get_completion_response(agent_messages):
+            # Process partial response content
+            if delta.content:
+                full_content += delta.content
+
+            # Process partial response tool calls
+            if delta.tool_calls:
+                for tool_call in delta.tool_calls:
+                    if not isinstance(tool_call, ChatCompletionDeltaToolCall):
+                        continue
+
+                    if tool_call.id:
+                        full_tool_calls.append(tool_call)
+                    elif full_tool_calls:
+                        last_tool_call = full_tool_calls[-1]
+                        last_tool_call.function.arguments += tool_call.function.arguments
+
+            # Stream the partial response delta
+            if self.stream_handler:
+                await self.stream_handler.on_stream(delta, self.active_agent)
+
+            # Yield both the delta and the current state
+            yield AgentResponse(
+                delta=delta,
+                content=full_content,
+                tool_calls=full_tool_calls,
+            )
+
+    async def stream(
         self,
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
     ) -> AsyncGenerator[TypedDelta, None]:
-        """Stream thoughts from the agent system."""
+        """Stream thoughts from the agent system.
+
+        Args:
+            agent: The agent to stream from
+            prompt: The prompt to send to the agent
+            messages: The messages to send to the agent
+
+        Returns:
+            An async generator of completion deltas
+        """
         if messages:
             self.messages.extend(messages)
 
@@ -234,51 +330,44 @@ class Swarm:
                     if self.stream_handler:
                         await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
-                full_content = ""
-                full_tool_calls: list[ChatCompletionDeltaToolCall] = []
+                # Process agent response and stream deltas
+                last_content = ""
+                last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
-                async for delta in self._get_completion_response(agent_messages):
-                    # Process partial response content
-                    if delta.content:
-                        full_content += delta.content
+                async for agent_response in self._process_agent_response(agent_messages):
+                    # Immediately yield each delta for streaming
+                    yield agent_response.delta
 
-                    # Process partial response tool calls
-                    if delta.tool_calls:
-                        for tool_call in delta.tool_calls:
-                            if not isinstance(tool_call, ChatCompletionDeltaToolCall):
-                                continue
+                    # Update our accumulated state
+                    last_content = agent_response.content
+                    last_tool_calls = agent_response.tool_calls
 
-                            if tool_call.id:
-                                full_tool_calls.append(tool_call)
-                            elif full_tool_calls:
-                                last_tool_call = full_tool_calls[-1]
-                                last_tool_call.function.arguments += tool_call.function.arguments
-
-                    # Stream the partial response delta
-                    if self.stream_handler:
-                        await self.stream_handler.on_stream(delta, self.active_agent)
-
-                    yield delta
-
-                # Create assistant message with content and any tool calls
+                # Create assistant message with final content and tool calls
                 assistant_message = {
                     "role": "assistant",
-                    "content": full_content or None,
+                    "content": last_content or None,
                     "tool_calls": [],
                 }
 
-                # Process any tool calls and collect results
-                if full_tool_calls:
+                if last_tool_calls:
                     # Add tool calls to the assistant message
                     assistant_message["tool_calls"] = [
-                        tool_call.model_dump() for tool_call in full_tool_calls
+                        tool_call.model_dump() for tool_call in last_tool_calls
                     ]
 
-                    for result in await self._process_tool_calls(full_tool_calls):
+                    # Add the assistant message before processing tool calls
+                    self.messages.append(assistant_message)
+                    agent_messages.append(assistant_message)
+
+                    # Process tool calls and get results
+                    results = await self._process_tool_calls(last_tool_calls)
+
+                    # Add tool results to messages
+                    for result in results:
                         match result:
                             case ToolCallMessageResult() as message_result:
-                                self.messages.extend([assistant_message, message_result.message])
-                                agent_messages.extend([assistant_message, message_result.message])
+                                self.messages.append(message_result.message)
+                                agent_messages.append(message_result.message)
 
                             case ToolCallAgentResult() as agent_result:
                                 tool_call_message = {
@@ -287,8 +376,8 @@ class Swarm:
                                     "tool_call_id": result.tool_call.id,
                                 }
 
-                                self.messages.extend([assistant_message, tool_call_message])
-                                agent_messages.extend([assistant_message, tool_call_message])
+                                self.messages.append(tool_call_message)
+                                agent_messages.append(tool_call_message)
                                 self.agent_queue.append(agent_result.agent)
                                 self.active_agent = None
                 else:
@@ -297,13 +386,12 @@ class Swarm:
                     agent_messages.append(assistant_message)
 
                 # Break if we're done (no tools used and no agents queued)
-                if not full_tool_calls and not self.agent_queue:
+                if not last_tool_calls and not self.agent_queue:
                     break
 
         except Exception as e:
             if self.stream_handler:
                 await self.stream_handler.on_error(e, self.active_agent)
-
             raise
 
         finally:
@@ -319,7 +407,16 @@ class Swarm:
         prompt: str,
         messages: list[Message] | None = None,
     ) -> ConversationState:
-        """Execute agent's primary function and return the final conversation state."""
+        """Execute agent's primary function and return the final conversation state.
+
+        Args:
+            agent: The agent to execute
+            prompt: The prompt to send to the agent
+            messages: The messages to send to the agent
+
+        Returns:
+            The final conversation state including the final content and messages
+        """
         full_response = ""
         async for delta in self.stream(agent, prompt, messages):
             if delta.content:
