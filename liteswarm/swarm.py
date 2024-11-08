@@ -364,14 +364,14 @@ class Swarm:
             tool_calls: List of tool calls made by the assistant
             agent_messages: The current conversation messages to update
         """
-        assistant_message = {
+        # Create base assistant message without tool_calls
+        assistant_message: Message = {
             "role": "assistant",
             "content": content or None,
-            "tool_calls": [],
         }
 
         if tool_calls:
-            # Add tool calls to the assistant message
+            # Only add tool_calls if they exist
             assistant_message["tool_calls"] = [tool_call.model_dump() for tool_call in tool_calls]
 
             # Add the assistant message before processing tool calls
