@@ -192,7 +192,7 @@ class Swarm:
         self,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
-        """Process tool calls concurrently and return messages and new agents.
+        """Process tool calls and return messages and new agents.
 
         Args:
             tool_calls: The tool calls to process
@@ -204,10 +204,13 @@ class Swarm:
         if not agent:
             raise ValueError("No active agent to process tool calls.")
 
-        # Process all tool calls concurrently
-        tasks = [self._process_tool_call(tool_call, agent) for tool_call in tool_calls]
+        # Process single tool calls directly
+        if len(tool_calls) == 1:
+            result = await self._process_tool_call(tool_calls[0], agent)
+            return [result] if result is not None else []
 
-        # Gather results and filter out None values
+        # Process multiple tool calls concurrently
+        tasks = [self._process_tool_call(tool_call, agent) for tool_call in tool_calls]
         results = await asyncio.gather(*tasks)
 
         return [result for result in results if result is not None]
