@@ -113,6 +113,12 @@ class StreamResponse(BaseModel):
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
 
 
+class AgentResponse(BaseModel):
+    delta: TypedDelta
+    content: str | None = None
+    tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
+
+
 class ConversationState(BaseModel):
     content: str | None = None
     messages: list[Message]
