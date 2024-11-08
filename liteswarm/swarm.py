@@ -138,14 +138,22 @@ class Swarm:
         tool_call: ChatCompletionDeltaToolCall,
         agent: Agent,
     ) -> ToolCallResult | None:
-        """Process a single tool call concurrently.
+        """Process a single tool call and return its result.
+
+        This method handles the execution of a single function call, including error handling
+        and result transformation. It supports both regular function results and agent switching.
 
         Args:
-            tool_call: The tool call to process
-            agent: The agent that the tool call belongs to
+            tool_call: The tool call to process, containing function name and arguments
+            agent: The agent that initiated the tool call
 
         Returns:
-            The tool call result or None if the tool call is not valid
+            A ToolCallResult object if the call was successful, None if the tool call failed
+            or the function wasn't found
+
+        Raises:
+            ValueError: If the function arguments are invalid
+            Exception: Any exception raised by the function tool itself
         """
         function_name = tool_call.function.name
         function_tools_map = {tool.__name__: tool for tool in agent.function_tools}
@@ -192,13 +200,19 @@ class Swarm:
         self,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
-        """Process tool calls and return messages and new agents.
+        """Process multiple tool calls efficiently.
+
+        For a single tool call, processes it directly to avoid concurrency overhead.
+        For multiple tool calls, processes them concurrently using asyncio.gather().
 
         Args:
-            tool_calls: The tool calls to process
+            tool_calls: List of tool calls to process
 
         Returns:
-            The tool call results
+            List of successful tool call results, filtering out any failed calls
+
+        Raises:
+            ValueError: If there is no active agent to process the tool calls
         """
         agent = self.active_agent
         if not agent:
@@ -257,13 +271,20 @@ class Swarm:
         self,
         agent_messages: list[Message],
     ) -> AsyncGenerator[AgentResponse, None]:
-        """Process agent response and yield deltas along with accumulated state.
+        """Process agent responses and yield updates with accumulated state.
+
+        Streams the agent's responses while maintaining the overall state of the conversation,
+        including accumulated content and tool calls.
 
         Args:
             agent_messages: The messages to send to the agent
 
-        Returns:
-            An async generator of agent responses including deltas and tool calls
+        Yields:
+            AgentResponse objects containing the current delta and accumulated state
+
+        Raises:
+            ValueError: If there is no active agent
+            TypeError: If the response stream is not of the expected type
         """
         full_content = ""
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
@@ -301,11 +322,14 @@ class Swarm:
         result: ToolCallResult,
         agent_messages: list[Message],
     ) -> None:
-        """Handle a single tool call result by updating messages and agent state.
+        """Handle a single tool call result by updating conversation state.
+
+        Updates the message history and agent state based on the tool call result.
+        Handles both message results and agent switching.
 
         Args:
-            result: The tool call result to handle
-            agent_messages: The current agent messages to update
+            result: The tool call result to process
+            agent_messages: The current conversation messages to update
         """
         match result:
             case ToolCallMessageResult() as message_result:
@@ -330,12 +354,15 @@ class Swarm:
         tool_calls: list[ChatCompletionDeltaToolCall],
         agent_messages: list[Message],
     ) -> None:
-        """Process the assistant's response by handling content and tool calls.
+        """Process the assistant's complete response and handle any tool calls.
+
+        Creates an assistant message with the response content and processes any tool calls.
+        Updates the conversation history with results.
 
         Args:
             content: The assistant's response content
-            tool_calls: The tool calls made by the assistant
-            agent_messages: The current agent messages to update
+            tool_calls: List of tool calls made by the assistant
+            agent_messages: The current conversation messages to update
         """
         assistant_message = {
             "role": "assistant",
@@ -365,8 +392,14 @@ class Swarm:
     async def _handle_agent_switch(self) -> list[Message]:
         """Handle switching to the next agent in the queue.
 
+        Manages the transition between agents, including context preparation
+        and notification of the switch through the stream handler.
+
         Returns:
-            The new agent's messages
+            The new agent's prepared context messages
+
+        Raises:
+            IndexError: If there are no agents in the queue
         """
         previous_agent = self.active_agent
         next_agent = self.agent_queue.popleft()
@@ -384,15 +417,26 @@ class Swarm:
         prompt: str,
         messages: list[Message] | None = None,
     ) -> AsyncGenerator[Delta, None]:
-        """Stream thoughts from the agent system.
+        """Stream thoughts and actions from the agent system.
+
+        Manages the entire conversation flow, including:
+        - Initial context setup
+        - Agent response processing
+        - Tool call handling
+        - Agent switching
+        - Error handling and cleanup
 
         Args:
-            agent: The agent to stream from
-            prompt: The prompt to send to the agent
-            messages: The messages to send to the agent
+            agent: The initial agent to start the conversation
+            prompt: The initial prompt to send to the agent
+            messages: Optional list of previous messages for context
 
-        Returns:
-            An async generator of completion deltas
+        Yields:
+            Delta objects containing incremental updates from the agent
+
+        Raises:
+            ValueError: If there is no active agent
+            Exception: Any errors that occur during processing
         """
         if messages:
             self.messages.extend(messages)
@@ -447,15 +491,23 @@ class Swarm:
         prompt: str,
         messages: list[Message] | None = None,
     ) -> ConversationState:
-        """Execute agent's primary function and return the final conversation state.
+        """Execute the agent's task and return the final conversation state.
+
+        A high-level method that manages the entire conversation flow and collects
+        the final results. Uses stream() internally but provides a simpler interface
+        for cases where streaming updates aren't needed.
 
         Args:
-            agent: The agent to execute
-            prompt: The prompt to send to the agent
-            messages: The messages to send to the agent
+            agent: The agent to execute the task
+            prompt: The prompt describing the task
+            messages: Optional list of previous messages for context
 
         Returns:
-            The final conversation state including the final content and messages
+            ConversationState containing the final response content and all messages
+
+        Raises:
+            ValueError: If there is no active agent
+            Exception: Any errors that occur during processing
         """
         full_response = ""
         async for delta in self.stream(agent, prompt, messages):
