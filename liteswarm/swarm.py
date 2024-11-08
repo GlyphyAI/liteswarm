@@ -12,12 +12,12 @@ from liteswarm.types import (
     Agent,
     AgentResponse,
     ConversationState,
+    Delta,
     Message,
     StreamHandler,
     ToolCallAgentResult,
     ToolCallMessageResult,
     ToolCallResult,
-    TypedDelta,
 )
 from liteswarm.utils import function_to_json
 
@@ -215,7 +215,7 @@ class Swarm:
     async def _get_completion_response(
         self,
         agent_messages: list[Message],
-    ) -> AsyncGenerator[TypedDelta, None]:
+    ) -> AsyncGenerator[Delta, None]:
         """Get completion response for current active agent.
 
         Args:
@@ -248,7 +248,7 @@ class Swarm:
             if not isinstance(choice, StreamingChoices):
                 raise TypeError("Expected a StreamingChoices instance.")
 
-            yield choice.delta
+            yield Delta.from_delta(choice.delta)
 
     async def _process_agent_response(
         self,
@@ -260,7 +260,7 @@ class Swarm:
             agent_messages: The messages to send to the agent
 
         Returns:
-            An async generator of agent responses
+            An async generator of agent responses including deltas and tool calls
         """
         full_content = ""
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
@@ -298,7 +298,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-    ) -> AsyncGenerator[TypedDelta, None]:
+    ) -> AsyncGenerator[Delta, None]:
         """Stream thoughts from the agent system.
 
         Args:
