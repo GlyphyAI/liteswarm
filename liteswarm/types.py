@@ -6,6 +6,7 @@ from litellm.types.utils import (
     ChatCompletionDeltaToolCall,
     FunctionCall,
 )
+from litellm.types.utils import Delta as LitellmDelta
 from pydantic import BaseModel, Field
 from typing_extensions import Protocol
 
@@ -13,18 +14,28 @@ Message = dict[str, str | list[Any] | dict[str, Any] | None]
 FunctionTool = Callable[..., Any]
 
 
-class TypedDelta(Protocol):
-    content: str | None
-    role: str | None
-    function_call: FunctionCall | dict | None
-    tool_calls: list[ChatCompletionDeltaToolCall | dict] | None
-    audio: ChatCompletionAudioResponse | None
+class Delta(BaseModel):
+    content: str | None = None
+    role: str | None = None
+    function_call: FunctionCall | dict | None = None
+    tool_calls: list[ChatCompletionDeltaToolCall | dict] | None = None
+    audio: ChatCompletionAudioResponse | None = None
+
+    @classmethod
+    def from_delta(cls, delta: LitellmDelta) -> "Delta":
+        return cls(
+            content=delta.content,
+            role=delta.role,
+            function_call=delta.function_call,
+            tool_calls=delta.tool_calls,
+            audio=delta.audio,
+        )
 
 
 class StreamHandler(Protocol):
     async def on_stream(
         self,
-        chunk: TypedDelta,
+        chunk: Delta,
         agent: Optional["Agent"],
     ) -> None: ...
 
@@ -114,7 +125,7 @@ class StreamResponse(BaseModel):
 
 
 class AgentResponse(BaseModel):
-    delta: TypedDelta
+    delta: Delta
     content: str | None = None
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
 
