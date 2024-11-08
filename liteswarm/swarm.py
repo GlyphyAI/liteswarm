@@ -293,6 +293,88 @@ class Swarm:
                 tool_calls=full_tool_calls,
             )
 
+    async def _handle_tool_call_result(
+        self,
+        result: ToolCallResult,
+        agent_messages: list[Message],
+    ) -> None:
+        """Handle a single tool call result by updating messages and agent state.
+
+        Args:
+            result: The tool call result to handle
+            agent_messages: The current agent messages to update
+        """
+        match result:
+            case ToolCallMessageResult() as message_result:
+                self.messages.append(message_result.message)
+                agent_messages.append(message_result.message)
+
+            case ToolCallAgentResult() as agent_result:
+                tool_call_message = {
+                    "role": "tool",
+                    "content": f"Switching to agent {agent_result.agent.agent_id}",
+                    "tool_call_id": result.tool_call.id,
+                }
+
+                self.messages.append(tool_call_message)
+                agent_messages.append(tool_call_message)
+                self.agent_queue.append(agent_result.agent)
+                self.active_agent = None
+
+    async def _process_assistant_response(
+        self,
+        content: str | None,
+        tool_calls: list[ChatCompletionDeltaToolCall],
+        agent_messages: list[Message],
+    ) -> None:
+        """Process the assistant's response by handling content and tool calls.
+
+        Args:
+            content: The assistant's response content
+            tool_calls: The tool calls made by the assistant
+            agent_messages: The current agent messages to update
+        """
+        assistant_message = {
+            "role": "assistant",
+            "content": content or None,
+            "tool_calls": [],
+        }
+
+        if tool_calls:
+            # Add tool calls to the assistant message
+            assistant_message["tool_calls"] = [tool_call.model_dump() for tool_call in tool_calls]
+
+            # Add the assistant message before processing tool calls
+            self.messages.append(assistant_message)
+            agent_messages.append(assistant_message)
+
+            # Process tool calls and get results
+            results = await self._process_tool_calls(tool_calls)
+
+            # Add tool results to messages
+            for result in results:
+                await self._handle_tool_call_result(result, agent_messages)
+        else:
+            # No tool calls - just append the assistant message
+            self.messages.append(assistant_message)
+            agent_messages.append(assistant_message)
+
+    async def _handle_agent_switch(self) -> list[Message]:
+        """Handle switching to the next agent in the queue.
+
+        Returns:
+            The new agent's messages
+        """
+        previous_agent = self.active_agent
+        next_agent = self.agent_queue.popleft()
+        agent_messages = self._prepare_agent_context(next_agent)
+        self.active_agent = next_agent
+
+        if self.stream_handler:
+            await self.stream_handler.on_agent_switch(previous_agent, next_agent)
+
+        return agent_messages
+
     async def stream(
         self,
         agent: Agent,
@@ -322,68 +404,23 @@ class Swarm:
         try:
             while self.active_agent or self.agent_queue:
                 if not self.active_agent and self.agent_queue:
-                    previous_agent = self.active_agent
-                    next_agent = self.agent_queue.popleft()
-                    agent_messages = self._prepare_agent_context(next_agent)
-                    self.active_agent = next_agent
-
-                    if self.stream_handler:
-                        await self.stream_handler.on_agent_switch(previous_agent, next_agent)
+                    agent_messages = await self._handle_agent_switch()
 
                 # Process agent response and stream deltas
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
                 async for agent_response in self._process_agent_response(agent_messages):
-                    # Immediately yield each delta for streaming
                     yield agent_response.delta
-
-                    # Update our accumulated state
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
 
-                # Create assistant message with final content and tool calls
-                assistant_message = {
-                    "role": "assistant",
-                    "content": last_content or None,
-                    "tool_calls": [],
-                }
-
-                if last_tool_calls:
-                    # Add tool calls to the assistant message
-                    assistant_message["tool_calls"] = [
-                        tool_call.model_dump() for tool_call in last_tool_calls
-                    ]
-
-                    # Add the assistant message before processing tool calls
-                    self.messages.append(assistant_message)
-                    agent_messages.append(assistant_message)
-
-                    # Process tool calls and get results
-                    results = await self._process_tool_calls(last_tool_calls)
-
-                    # Add tool results to messages
-                    for result in results:
-                        match result:
-                            case ToolCallMessageResult() as message_result:
-                                self.messages.append(message_result.message)
-                                agent_messages.append(message_result.message)
-
-                            case ToolCallAgentResult() as agent_result:
-                                tool_call_message = {
-                                    "role": "tool",
-                                    "content": f"Switching to agent {agent_result.agent.agent_id}",
-                                    "tool_call_id": result.tool_call.id,
-                                }
-
-                                self.messages.append(tool_call_message)
-                                agent_messages.append(tool_call_message)
-                                self.agent_queue.append(agent_result.agent)
-                                self.active_agent = None
-                else:
-                    # No tool calls - just append the assistant message
-                    self.messages.append(assistant_message)
-                    agent_messages.append(assistant_message)
+                # Process the assistant's response
+                await self._process_assistant_response(
+                    last_content,
+                    last_tool_calls,
+                    agent_messages,
+                )
 
                 # Break if we're done (no tools used and no agents queued)
                 if not last_tool_calls and not self.agent_queue:
