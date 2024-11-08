@@ -3,13 +3,13 @@ import asyncio
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
 from liteswarm.swarm import Swarm
-from liteswarm.types import Agent, FunctionTool, Message, ToolCallResult, TypedDelta
+from liteswarm.types import Agent, Delta, FunctionTool, Message, ToolCallResult
 
 
 class ConsoleStreamHandler:
     async def on_stream(
         self,
-        chunk: TypedDelta,
+        chunk: Delta,
         agent: Agent | None,
     ) -> None:
         if chunk.content:
@@ -48,9 +48,7 @@ class ConsoleStreamHandler:
         tool_call_result: ToolCallResult,
         agent: Agent | None,
     ) -> None:
-        print(
-            f"[{agent.agent_id if agent else 'unknown'}] Tool call result: {tool_call_result}"
-        )
+        print(f"[{agent.agent_id if agent else 'unknown'}] Tool call result: {tool_call_result}")
 
 
 async def run() -> None:
@@ -66,8 +64,7 @@ async def run() -> None:
             return switch_to_agent
 
         return {
-            f"switch_to_{name}": create_switch_function(agent)
-            for name, agent in agents.items()
+            f"switch_to_{name}": create_switch_function(agent) for name, agent in agents.items()
         }
 
     def create_flutter_team() -> dict[str, Agent]:

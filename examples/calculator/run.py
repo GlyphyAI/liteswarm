@@ -4,13 +4,13 @@ import random
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
 from liteswarm.swarm import Swarm
-from liteswarm.types import Agent, Message, ToolCallResult, TypedDelta
+from liteswarm.types import Agent, Delta, Message, ToolCallResult
 
 
 class ConsoleStreamHandler:
     async def on_stream(
         self,
-        chunk: TypedDelta,
+        chunk: Delta,
         agent: Agent | None,
     ) -> None:
         if chunk.content:
