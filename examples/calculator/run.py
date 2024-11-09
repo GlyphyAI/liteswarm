@@ -31,7 +31,7 @@ async def run() -> None:
             5. If you need to reference a previous calculation, use the exact tool output number
 
         Remember: The tool outputs are the ground truth - never question or modify them. Your role is to coordinate the calculations using the tools, not to perform math yourself.""",
-        function_tools=[calculate_sum, calculate_product, calculate_difference],
+        tools=[calculate_sum, calculate_product, calculate_difference],
         tool_choice="auto",
         parallel_tool_calls=False,
         temperature=0.0,
@@ -50,7 +50,7 @@ async def run() -> None:
         If you're given a list of products, you need to sell one of them.
         If you're given a customer, you need to sell to them.
         Always explain what you're doing and what tools you're using.""",
-        function_tools=[switch_to_math_agent],
+        tools=[switch_to_math_agent],
         tool_choice="auto",
         parallel_tool_calls=True,
         temperature=0.0,

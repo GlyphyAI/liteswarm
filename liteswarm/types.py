@@ -9,7 +9,7 @@ from litellm.types.utils import (
 from pydantic import BaseModel, Field
 from typing_extensions import Protocol, TypedDict
 
-FunctionTool = Callable[..., Any]
+Tool = Callable[..., Any]
 
 
 class Message(TypedDict, total=False):
@@ -80,7 +80,7 @@ class Agent(BaseModel):
     agent_id: str
     model: str
     instructions: str
-    function_tools: list[FunctionTool] = Field(default_factory=list)
+    tools: list[Tool] = Field(default_factory=list)
     tool_choice: str | None = None
     parallel_tool_calls: bool | None = None
     params: dict[str, Any] | None = Field(default_factory=dict)
@@ -95,7 +95,7 @@ class Agent(BaseModel):
         agent_id: str,
         model: str,
         instructions: str,
-        function_tools: list[FunctionTool] | None = None,
+        tools: list[Tool] | None = None,
         tool_choice: str | None = None,
         parallel_tool_calls: bool | None = None,
         **params: Any,
@@ -104,7 +104,7 @@ class Agent(BaseModel):
             agent_id=agent_id,
             model=model,
             instructions=instructions,
-            function_tools=function_tools or [],
+            tools=tools or [],
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
             params=params,

@@ -1,14 +1,14 @@
 import asyncio
 
 from liteswarm.repl import start_repl
-from liteswarm.types import Agent, FunctionTool
+from liteswarm.types import Agent, Tool
 
 
 async def run() -> None:
-    def create_agent_tools(agents: dict[str, Agent]) -> dict[str, FunctionTool]:
+    def create_agent_tools(agents: dict[str, Agent]) -> dict[str, Tool]:
         """Create tool functions to switch between agents."""
 
-        def create_switch_function(agent: Agent) -> FunctionTool:
+        def create_switch_function(agent: Agent) -> Tool:
             def switch_to_agent() -> Agent:
                 """Switch to the specified agent."""
                 return agent
@@ -34,7 +34,7 @@ async def run() -> None:
 
                 After your analysis, ALWAYS use the switch_to_designer() function call.
                 Do not proceed without making this function call.""",
-                function_tools=[],
+                tools=[],
                 tool_choice="auto",
                 temperature=0.0,
             ),
@@ -50,7 +50,7 @@ async def run() -> None:
 
                 After your design work, ALWAYS use the switch_to_engineer() function call.
                 Do not proceed without making this function call.""",
-                function_tools=[],
+                tools=[],
                 tool_choice="auto",
                 temperature=0.0,
             ),
@@ -66,7 +66,7 @@ async def run() -> None:
 
                 After your implementation, ALWAYS use the switch_to_qa() function call.
                 Do not proceed without making this function call.""",
-                function_tools=[],
+                tools=[],
                 tool_choice="auto",
                 temperature=0.0,
             ),
@@ -82,7 +82,7 @@ async def run() -> None:
                 3. If approved, complete your response without making any function calls
 
                 ALWAYS call switch_to_engineer() if any issues are found.""",
-                function_tools=[],
+                tools=[],
                 tool_choice="auto",
                 temperature=0.0,
             ),
@@ -93,7 +93,7 @@ async def run() -> None:
 
         # Add tools to each agent
         for agent in agents.values():
-            agent.function_tools.extend(tools.values())
+            agent.tools.extend(tools.values())
 
         return agents
 

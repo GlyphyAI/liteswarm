@@ -218,7 +218,7 @@ class Swarm:
             Exception: Any exception raised by the function tool itself
         """
         function_name = tool_call.function.name
-        function_tools_map = {tool.__name__: tool for tool in agent.function_tools}
+        function_tools_map = {tool.__name__: tool for tool in agent.tools}
 
         if function_name not in function_tools_map:
             return None
@@ -306,7 +306,7 @@ class Swarm:
         if not self.active_agent:
             raise ValueError("No active agent")
 
-        tools = [function_to_json(tool) for tool in self.active_agent.function_tools]
+        tools = [function_to_json(tool) for tool in self.active_agent.tools]
         agent_params = self.active_agent.params or {}
 
         response_stream = await acompletion(

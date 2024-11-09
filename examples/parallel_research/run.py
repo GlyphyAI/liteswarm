@@ -120,7 +120,7 @@ async def run() -> None:
         5. Make recommendations based on the collected data
 
         Remember to use parallel tool calls efficiently to gather data quickly.""",
-        function_tools=[
+        tools=[
             query_weather_api,
             query_population_data,
             query_tourist_attractions,
