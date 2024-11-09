@@ -155,6 +155,7 @@ class Swarm:
     def _prepare_agent_context(
         self,
         agent: Agent,
+        prompt: str | None = None,
         max_length: int = 6,
         context_size: int = 5,
     ) -> list[Message]:
@@ -162,13 +163,14 @@ class Swarm:
 
         Args:
             agent: The agent to prepare context for
+            prompt: The initial user message to add to the conversation
             max_length: Maximum total messages to include
             context_size: Number of recent messages to keep when truncating
 
         Returns:
             A list of prepared messages for the agent
         """
-        messages = self._get_initial_conversation(agent)
+        messages = self._get_initial_conversation(agent, prompt)
 
         # Get full relevant history
         relevant_history = self._get_last_messages(roles=["user", "assistant", "tool"])
