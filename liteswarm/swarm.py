@@ -363,7 +363,10 @@ class Swarm:
         full_content = ""
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
-        async for delta in self._get_completion_response(agent_messages):
+        async for completion_response in self._get_completion_response(agent_messages):
+            delta = completion_response.delta
+            finish_reason = completion_response.finish_reason
+
             if delta.content:
                 full_content += delta.content
 
@@ -383,6 +386,7 @@ class Swarm:
 
             yield AgentResponse(
                 delta=delta,
+                finish_reason=finish_reason,
                 content=full_content,
                 tool_calls=full_tool_calls,
             )
