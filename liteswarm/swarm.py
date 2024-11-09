@@ -11,6 +11,7 @@ from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices
 from liteswarm.types import (
     Agent,
     AgentResponse,
+    CompletionResponse,
     ConversationState,
     Delta,
     Message,
@@ -295,14 +296,17 @@ class Swarm:
     async def _get_completion_response(
         self,
         agent_messages: list[Message],
-    ) -> AsyncGenerator[Delta, None]:
-        """Get completion response for current active agent.
+    ) -> AsyncGenerator[CompletionResponse, None]:
+        """Get completion response for the currently active agent.
 
         Args:
             agent_messages: The messages to send to the agent
 
-        Returns:
-            An async generator of completion deltas
+        Yields:
+            CompletionResponse objects containing the current delta and finish reason
+
+        Raises:
+            ValueError: If there is no active agent
         """
         if not self.active_agent:
             raise ValueError("No active agent")
@@ -329,7 +333,13 @@ class Swarm:
             if not isinstance(choice, StreamingChoices):
                 raise TypeError("Expected a StreamingChoices instance.")
 
-            yield Delta.from_delta(choice.delta)
+            delta = Delta.from_delta(choice.delta)
+            finish_reason = choice.finish_reason
+
+            yield CompletionResponse(
+                delta=delta,
+                finish_reason=finish_reason,
+            )
 
     async def _process_agent_response(
         self,
