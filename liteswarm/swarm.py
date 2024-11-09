@@ -589,9 +589,9 @@ class Swarm:
         full_response = ""
         response_stream = self.stream(agent, prompt, messages, cleanup)
 
-        async for delta in response_stream:
-            if delta.content:
-                full_response += delta.content
+        async for agent_response in response_stream:
+            if agent_response.content:
+                full_response = agent_response.content
 
         return ConversationState(
             content=full_response,
