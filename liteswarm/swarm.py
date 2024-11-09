@@ -468,6 +468,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
+        cleanup: bool = True,
     ) -> AsyncGenerator[Delta, None]:
         """Stream thoughts and actions from the agent system.
 
@@ -482,6 +483,8 @@ class Swarm:
             agent: The initial agent to start the conversation
             prompt: The initial prompt to send to the agent
             messages: Optional list of previous messages for context
+            cleanup: Whether to clear agent state after completion. If False,
+                maintains the last active agent for subsequent interactions.
 
         Yields:
             Delta objects containing incremental updates from the agent
@@ -505,7 +508,6 @@ class Swarm:
                 if not self.active_agent and self.agent_queue:
                     agent_messages = await self._handle_agent_switch()
 
-                # Process agent response and stream deltas
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
@@ -514,14 +516,12 @@ class Swarm:
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
 
-                # Process the assistant's response
                 await self._process_assistant_response(
                     last_content,
                     last_tool_calls,
                     agent_messages,
                 )
 
-                # Break if we're done (no tools used and no agents queued)
                 if not last_tool_calls and not self.agent_queue:
                     break
 
@@ -534,14 +534,16 @@ class Swarm:
             if self.stream_handler:
                 await self.stream_handler.on_complete(self.messages, self.active_agent)
 
-            self.active_agent = None
-            self.agent_queue.clear()
+            if cleanup:
+                self.active_agent = None
+                self.agent_queue.clear()
 
     async def execute(
         self,
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
+        cleanup: bool = True,
     ) -> ConversationState:
         """Execute the agent's task and return the final conversation state.
 
@@ -553,6 +555,8 @@ class Swarm:
             agent: The agent to execute the task
             prompt: The prompt describing the task
             messages: Optional list of previous messages for context
+            cleanup: Whether to clear agent state after completion. If False,
+                maintains the last active agent for subsequent interactions.
 
         Returns:
             ConversationState containing the final response content and all messages
@@ -562,7 +566,9 @@ class Swarm:
             Exception: Any errors that occur during processing
         """
         full_response = ""
-        async for delta in self.stream(agent, prompt, messages):
+        response_stream = self.stream(agent, prompt, messages, cleanup)
+
+        async for delta in response_stream:
             if delta.content:
                 full_response += delta.content
 
