@@ -36,14 +36,17 @@ class Swarm:
         limit: int | None = None,
         roles: list[str] | None = None,
     ) -> list[Message]:
-        """Get the last messages from the full history.
+        """Retrieve messages from the conversation history with optional filtering.
+
+        Allows filtering the conversation history by message roles (e.g., 'user', 'assistant', 'tool')
+        and limiting the number of messages returned. Messages are returned in chronological order.
 
         Args:
-            limit: The maximum number of messages to return
-            roles: The roles to filter by
+            limit: Maximum number of messages to return. If None, returns all matching messages.
+            roles: List of roles to filter by (e.g., ['user', 'assistant']). If None, returns all roles.
 
         Returns:
-            The last messages from the full history filtered by roles and limit
+            A list of Message objects matching the specified criteria, ordered chronologically.
         """
         # If no roles specified, use all messages
         if not roles:
@@ -61,14 +64,17 @@ class Swarm:
         agent: Agent,
         prompt: str | None = None,
     ) -> list[Message]:
-        """Get the initial conversation for a given agent, including relevant context.
+        """Initialize a conversation with an agent's system instructions and optional prompt.
+
+        Creates the initial conversation state for an agent by setting up the system message
+        with the agent's instructions and optionally adding a user prompt message.
 
         Args:
-            agent: The agent to prepare context for
-            prompt: The message to add to the conversation
+            agent: The agent whose instructions should be used for the system message
+            prompt: Optional initial user message to add to the conversation
 
         Returns:
-            A list of messages for the agent
+            A list of Message objects containing the system instructions and optional prompt
         """
         # Initial system message
         conversation = [Message(role="system", content=agent.instructions)]
@@ -85,15 +91,19 @@ class Swarm:
         max_length: int = 6,
         context_size: int = 5,
     ) -> list[Message]:
-        """Summarize the history to keep the conversation concise.
+        """Summarize a conversation history to maintain a manageable context window.
+
+        Creates a condensed version of the conversation history by keeping the initial task,
+        adding a summary placeholder, and including the most recent messages. This helps
+        maintain context while preventing the conversation from growing too large.
 
         Args:
-            messages: The messages to summarize
-            max_length: The maximum number of messages to return
-            context_size: The number of recent messages to keep when truncating
+            messages: The complete list of messages to summarize
+            max_length: Maximum number of messages to keep before summarizing
+            context_size: Number of recent messages to preserve when summarizing
 
         Returns:
-            A list of summarized messages for the agent
+            A list of Message objects containing the summarized conversation
         """
         if len(messages) <= max_length:
             return messages
@@ -120,13 +130,18 @@ class Swarm:
         self,
         messages: list[Message],
     ) -> list[Message]:
-        """Process tool call messages to maintain tool call context.
+        """Process messages to maintain proper tool call context and relationships.
+
+        Ensures that tool response messages are properly paired with their corresponding
+        tool call messages from the assistant. This maintains the logical flow of tool-based
+        interactions while removing orphaned tool responses.
 
         Args:
-            messages: The messages to process
+            messages: List of messages to process
 
         Returns:
-            A list of processed messages
+            A list of Message objects with properly maintained tool call relationships,
+            where each tool response is preceded by its corresponding tool call
         """
         processed_messages: list[Message] = []
         tool_call_map: dict[str, Message] = {}
