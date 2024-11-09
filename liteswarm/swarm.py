@@ -51,9 +51,7 @@ class Swarm:
         if not roles:
             return self.messages[-limit:] if limit else self.messages
 
-        filtered_messages = [
-            msg for msg in self.messages if msg.get("role") in roles and msg.get("content")
-        ]
+        filtered_messages = [msg for msg in self.messages if msg.role in roles and msg.content]
 
         return filtered_messages[-limit:] if limit else filtered_messages
 
@@ -139,15 +137,14 @@ class Swarm:
         tool_call_map: dict[str, Message] = {}
 
         for message in messages:
-            tool_calls = message.get("tool_calls") or []
-            tool_call_id = message.get("tool_call_id")
-
-            if message.get("role") == "assistant":
+            if message.role == "assistant":
+                tool_calls = message.tool_calls or []
                 for tool_call in tool_calls:
                     if tool_call_id := tool_call.id:
                         tool_call_map[tool_call_id] = message
                 processed_messages.append(message)
-            elif message.get("role") == "tool":
+            elif message.role == "tool":
+                tool_call_id = message.tool_call_id
                 if tool_call_id and tool_call_id in tool_call_map:
                     processed_messages.append(message)
             else:
@@ -185,7 +182,7 @@ class Swarm:
         messages.extend(relevant_history)
 
         # Add a user message if the last message is an assistant message
-        if messages[-1].get("role") == "assistant":
+        if messages[-1].role == "assistant":
             messages.append(
                 Message(
                     role="user",
@@ -306,12 +303,13 @@ class Swarm:
         if not self.active_agent:
             raise ValueError("No active agent")
 
+        messages = [message.model_dump() for message in agent_messages]
         tools = [function_to_json(tool) for tool in self.active_agent.tools]
         agent_params = self.active_agent.params or {}
 
         response_stream = await acompletion(
             model=self.active_agent.model,
-            messages=agent_messages,
+            messages=messages,
             stream=True,
             tools=tools,
             tool_choice=self.active_agent.tool_choice,
@@ -429,7 +427,7 @@ class Swarm:
 
         if tool_calls:
             # Add tool calls to the assistant message
-            assistant_message["tool_calls"] = tool_calls
+            assistant_message.tool_calls = tool_calls
             self.messages.append(assistant_message)
             agent_messages.append(assistant_message)
 
