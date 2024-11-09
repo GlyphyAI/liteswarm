@@ -7,17 +7,21 @@ from litellm.types.utils import (
     FunctionCall,
 )
 from pydantic import BaseModel, Field
-from typing_extensions import Protocol, TypedDict
+from typing_extensions import Protocol
 
 Tool = Callable[..., Any]
 
 
-class Message(TypedDict, total=False):
+class Message(BaseModel):
     role: Literal["assistant", "user", "system", "tool"]
-    content: str | None
-    tool_calls: list[ChatCompletionDeltaToolCall] | None
-    tool_call_id: str | None
-    audio: ChatCompletionAudioResponse | None
+    content: str | None = None
+    tool_calls: list[ChatCompletionDeltaToolCall] | None = None
+    tool_call_id: str | None = None
+    audio: ChatCompletionAudioResponse | None = None
+
+    class Config:  # noqa: D106
+        arbitrary_types_allowed = True
+        extra = "allow"
 
 
 class Delta(BaseModel):
