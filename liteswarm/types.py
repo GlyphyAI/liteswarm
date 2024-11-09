@@ -1,17 +1,23 @@
 from collections.abc import Callable
-from typing import Any, Optional, Self
+from typing import Any, Literal, Optional, Self
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
     ChatCompletionDeltaToolCall,
     FunctionCall,
 )
-from litellm.types.utils import Delta as LitellmDelta
 from pydantic import BaseModel, Field
-from typing_extensions import Protocol
+from typing_extensions import Protocol, TypedDict
 
-Message = dict[str, str | list[Any] | dict[str, Any] | None]
 FunctionTool = Callable[..., Any]
+
+
+class Message(TypedDict, total=False):
+    role: Literal["assistant", "user", "system", "tool"]
+    content: str | None
+    tool_calls: list[ChatCompletionDeltaToolCall] | None
+    tool_call_id: str | None
+    audio: ChatCompletionAudioResponse | None
 
 
 class Delta(BaseModel):
@@ -22,7 +28,7 @@ class Delta(BaseModel):
     audio: ChatCompletionAudioResponse | None = None
 
     @classmethod
-    def from_delta(cls, delta: LitellmDelta) -> "Delta":
+    def from_delta(cls, delta: Any) -> "Delta":
         return cls(
             content=delta.content,
             role=delta.role,
