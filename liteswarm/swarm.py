@@ -487,7 +487,7 @@ class Swarm:
         prompt: str,
         messages: list[Message] | None = None,
         cleanup: bool = True,
-    ) -> AsyncGenerator[Delta, None]:
+    ) -> AsyncGenerator[AgentResponse, None]:
         """Stream thoughts and actions from the agent system.
 
         Manages the entire conversation flow, including:
@@ -505,7 +505,7 @@ class Swarm:
                 maintains the last active agent for subsequent interactions.
 
         Yields:
-            Delta objects containing incremental updates from the agent
+            AgentResponse objects containing incremental updates from the agent
 
         Raises:
             ValueError: If there is no active agent
@@ -532,7 +532,7 @@ class Swarm:
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
                 async for agent_response in self._process_agent_response(self.agent_messages):
-                    yield agent_response.delta
+                    yield agent_response
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
 
