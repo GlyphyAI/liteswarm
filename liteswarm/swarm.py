@@ -8,6 +8,7 @@ import orjson
 from litellm import CustomStreamWrapper, acompletion
 from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices
 
+from liteswarm.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types import (
     Agent,
     AgentResponse,
@@ -26,12 +27,17 @@ litellm.modify_params = True
 
 
 class Swarm:
-    def __init__(self, stream_handler: StreamHandler | None = None) -> None:
+    def __init__(
+        self,
+        stream_handler: StreamHandler | None = None,
+        summarizer: Summarizer | None = None,
+    ) -> None:
         self.active_agent: Agent | None = None
         self.agent_messages: list[Message] = []
         self.agent_queue: deque[Agent] = deque()
         self.stream_handler = stream_handler
         self.messages: list[Message] = []
+        self.summarizer = summarizer or LiteSummarizer()
 
     def _get_last_messages(
         self,
