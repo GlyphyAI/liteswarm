@@ -27,6 +27,7 @@ litellm.modify_params = True
 class Swarm:
     def __init__(self, stream_handler: StreamHandler | None = None) -> None:
         self.active_agent: Agent | None = None
+        self.agent_messages: list[Message] = []
         self.agent_queue: deque[Agent] = deque()
         self.stream_handler = stream_handler
         self.messages: list[Message] = []
@@ -502,19 +503,19 @@ class Swarm:
         if self.active_agent is None:
             self.active_agent = agent
             self.messages.extend(self._get_initial_conversation(agent, prompt))
-            agent_messages = deepcopy(self.messages)
+            self.agent_messages = deepcopy(self.messages)
         else:
             self.agent_queue.append(agent)
 
         try:
             while self.active_agent or self.agent_queue:
                 if not self.active_agent and self.agent_queue:
-                    agent_messages = await self._handle_agent_switch()
+                    self.agent_messages = await self._handle_agent_switch()
 
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
-                async for agent_response in self._process_agent_response(agent_messages):
+                async for agent_response in self._process_agent_response(self.agent_messages):
                     yield agent_response.delta
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
@@ -522,7 +523,7 @@ class Swarm:
                 await self._process_assistant_response(
                     last_content,
                     last_tool_calls,
-                    agent_messages,
+                    self.agent_messages,
                 )
 
                 if not last_tool_calls and not self.agent_queue:
@@ -539,6 +540,7 @@ class Swarm:
 
             if cleanup:
                 self.active_agent = None
+                self.agent_messages = []
                 self.agent_queue.clear()
 
     async def execute(
