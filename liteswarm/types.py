@@ -97,7 +97,9 @@ class AgentResponse(BaseModel):
 
 class ConversationState(BaseModel):
     content: str | None = None
-    messages: list[Message]
+    agent: Agent | None = None
+    agent_messages: list[Message] = Field(default_factory=list)
+    messages: list[Message] = Field(default_factory=list)
 
 
 class StreamHandler(Protocol):
