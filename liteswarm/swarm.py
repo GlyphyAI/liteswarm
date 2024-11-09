@@ -79,6 +79,79 @@ class Swarm:
 
         return conversation
 
+    def _summarize_messages(
+        self,
+        messages: list[Message],
+        max_length: int = 6,
+        context_size: int = 5,
+    ) -> list[Message]:
+        """Summarize the history to keep the conversation concise.
+
+        Args:
+            messages: The messages to summarize
+            max_length: The maximum number of messages to return
+            context_size: The number of recent messages to keep when truncating
+
+        Returns:
+            A list of summarized messages for the agent
+        """
+        if len(messages) <= max_length:
+            return messages
+
+        # Always include the original task
+        first_message = messages[0]
+
+        # Get recent context, ensuring we don't overlap with the first message
+        recent_messages = messages[-context_size:]
+        if first_message in recent_messages:
+            recent_messages.remove(first_message)
+
+        # Create a summary of the previous conversation
+        return [
+            first_message,
+            Message(
+                role="assistant",
+                content="... Previous conversation summarized ...",
+            ),
+            *recent_messages,
+        ]
+
+    def _process_tool_call_messages(
+        self,
+        messages: list[Message],
+    ) -> list[Message]:
+        """Process tool call messages to maintain tool call context.
+
+        Args:
+            messages: The messages to process
+
+        Returns:
+            A list of processed messages
+        """
+        processed_messages: list[Message] = []
+        tool_call_map: dict[str, Message] = {}
+
+        for message in messages:
+            tool_calls = message.get("tool_calls") or []
+            tool_call_id = message.get("tool_call_id")
+
+            if message.get("role") == "assistant":
+                # Store assistant message with tool calls
+                for tool_call in tool_calls:
+                    if tool_call_id := tool_call.id:
+                        tool_call_map[tool_call_id] = message
+
+                processed_messages.append(message)
+            elif message.get("role") == "tool":
+                # Only include tool messages if we have their corresponding tool call
+                if tool_call_id and tool_call_id in tool_call_map:
+                    processed_messages.append(message)
+            else:
+                # Include all other messages
+                processed_messages.append(message)
+
+        return processed_messages
+
     def _prepare_agent_context(
         self,
         agent: Agent,
@@ -91,33 +164,22 @@ class Swarm:
             agent: The agent to prepare context for
             max_length: Maximum total messages to include
             context_size: Number of recent messages to keep when truncating
+
+        Returns:
+            A list of prepared messages for the agent
         """
-        messages: list[Message] = [{"role": "system", "content": agent.instructions}]
+        messages = self._get_initial_conversation(agent)
 
         # Get full relevant history
-        relevant_history = self._get_last_messages(roles=["user", "assistant"])
+        relevant_history = self._get_last_messages(roles=["user", "assistant", "tool"])
 
         # Summarize relevant history if necessary
-        if len(relevant_history) > max_length:
-            # Always include the original task
-            first_message = relevant_history[0]
+        relevant_history = self._summarize_messages(relevant_history, max_length, context_size)
 
-            # Get recent context, ensuring we don't overlap with the first message
-            recent_messages = relevant_history[-context_size:]
-            if first_message in recent_messages:
-                recent_messages.remove(first_message)
+        # Process messages to maintain tool call context
+        relevant_history = self._process_tool_call_messages(relevant_history)
 
-            # Create a summary of the previous conversation
-            relevant_history = [
-                first_message,
-                {
-                    "role": "assistant",
-                    "content": "... Previous conversation summarized ...",
-                },
-                *recent_messages,
-            ]
-
-        # Add relevant history to the messages
+        # Add processed history to the messages
         messages.extend(relevant_history)
 
         # Add a user message if the last message is an assistant message
