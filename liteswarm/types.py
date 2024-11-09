@@ -127,13 +127,6 @@ class ToolCallAgentResult(ToolCallResult):
     agent: Agent
 
 
-class StreamResponse(BaseModel):
-    messages: list[Message]
-    new_agents: list[Agent]
-    content: str | None = None
-    tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
-
-
 class AgentResponse(BaseModel):
     delta: Delta
     content: str | None = None
