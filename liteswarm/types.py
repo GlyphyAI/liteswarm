@@ -91,6 +91,7 @@ class ToolCallAgentResult(ToolCallResult):
 
 class AgentResponse(BaseModel):
     delta: Delta
+    finish_reason: str | None = None
     content: str | None = None
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
 
