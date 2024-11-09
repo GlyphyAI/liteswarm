@@ -2,7 +2,7 @@ import asyncio
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
-from liteswarm.swarm import Swarm
+from liteswarm.repl import start_repl
 from liteswarm.types import Agent, Delta, FunctionTool, Message, ToolCallResult
 
 
@@ -144,26 +144,9 @@ async def run() -> None:
 
         return agents
 
-    # Create stream handler
-    console_handler = ConsoleStreamHandler()
-    client = Swarm(stream_handler=console_handler)
+    agents = create_flutter_team()
 
-    # Create team of agents
-    team = create_flutter_team()
-
-    # Start with Product Manager
-    result = await client.execute(
-        agent=team["product_manager"],
-        prompt="Create a simple TODO list app with a list of tasks and a form to add new tasks",
-    )
-
-    print("\nExecution completed!")
-    print("Final conversation:")
-    for msg in result.messages:
-        if msg["role"] != "system":
-            print(f"\n[{msg['role']}]: {msg['content']}")
-
-    print(f"\n\nResult messages:\n\n{result.messages}")
+    await start_repl(agents["product_manager"])
 
 
 if __name__ == "__main__":

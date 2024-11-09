@@ -1,55 +1,8 @@
 import asyncio
 import random
 
-from litellm.types.utils import ChatCompletionDeltaToolCall
-
-from liteswarm.swarm import Swarm
-from liteswarm.types import Agent, Delta, Message, ToolCallResult
-
-
-class ConsoleStreamHandler:
-    async def on_stream(
-        self,
-        chunk: Delta,
-        agent: Agent | None,
-    ) -> None:
-        if chunk.content:
-            print(f"{chunk.content}", end="", flush=True)
-
-    async def on_error(
-        self,
-        error: Exception,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Error: {str(error)}")
-
-    async def on_agent_switch(
-        self,
-        previous_agent: Agent | None,
-        next_agent: Agent,
-    ) -> None:
-        print(f"[{next_agent.agent_id}] Switched to {next_agent.agent_id}")
-
-    async def on_complete(
-        self,
-        messages: list[Message],
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Completed")
-
-    async def on_tool_call(
-        self,
-        tool_call: ChatCompletionDeltaToolCall,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Tool call: {tool_call}")
-
-    async def on_tool_call_result(
-        self,
-        tool_call_result: ToolCallResult,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Tool call result: {tool_call_result}")
+from liteswarm.repl import start_repl
+from liteswarm.types import Agent
 
 
 async def run() -> None:
@@ -103,15 +56,7 @@ async def run() -> None:
         temperature=0.0,
     )
 
-    console_handler = ConsoleStreamHandler()
-    client = Swarm(stream_handler=console_handler)
-
-    result = await client.execute(
-        agent=sales_agent,
-        prompt="Ok, can you calculate the sum of 100 and 200 and then multiply the result by 3 and then subtract 42 from the result?",
-    )
-
-    print(f"\n\nResult messages:\n\n{result.messages}")
+    await start_repl(sales_agent)
 
 
 if __name__ == "__main__":
