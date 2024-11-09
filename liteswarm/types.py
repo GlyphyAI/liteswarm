@@ -42,44 +42,6 @@ class Delta(BaseModel):
         )
 
 
-class StreamHandler(Protocol):
-    async def on_stream(
-        self,
-        chunk: Delta,
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_error(
-        self,
-        error: Exception,
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_agent_switch(
-        self,
-        previous_agent: Optional["Agent"],
-        next_agent: "Agent",
-    ) -> None: ...
-
-    async def on_complete(
-        self,
-        messages: list[Message],
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_tool_call(
-        self,
-        tool_call: ChatCompletionDeltaToolCall,
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_tool_call_result(
-        self,
-        tool_call_result: "ToolCallResult",
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-
 class Agent(BaseModel):
     agent_id: str
     model: str
@@ -136,3 +98,41 @@ class AgentResponse(BaseModel):
 class ConversationState(BaseModel):
     content: str | None = None
     messages: list[Message]
+
+
+class StreamHandler(Protocol):
+    async def on_stream(
+        self,
+        chunk: Delta,
+        agent: Optional["Agent"],
+    ) -> None: ...
+
+    async def on_error(
+        self,
+        error: Exception,
+        agent: Optional["Agent"],
+    ) -> None: ...
+
+    async def on_agent_switch(
+        self,
+        previous_agent: Optional["Agent"],
+        next_agent: "Agent",
+    ) -> None: ...
+
+    async def on_complete(
+        self,
+        messages: list[Message],
+        agent: Optional["Agent"],
+    ) -> None: ...
+
+    async def on_tool_call(
+        self,
+        tool_call: ChatCompletionDeltaToolCall,
+        agent: Optional["Agent"],
+    ) -> None: ...
+
+    async def on_tool_call_result(
+        self,
+        tool_call_result: "ToolCallResult",
+        agent: Optional["Agent"],
+    ) -> None: ...
