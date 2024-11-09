@@ -89,6 +89,11 @@ class ToolCallAgentResult(ToolCallResult):
     agent: Agent
 
 
+class CompletionResponse(BaseModel):
+    delta: Delta
+    finish_reason: str | None = None
+
+
 class AgentResponse(BaseModel):
     delta: Delta
     finish_reason: str | None = None
