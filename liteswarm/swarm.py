@@ -48,11 +48,9 @@ class Swarm:
         Returns:
             A list of Message objects matching the specified criteria, ordered chronologically.
         """
-        # If no roles specified, use all messages
         if not roles:
             return self.messages[-limit:] if limit else self.messages
 
-        # Otherwise filter by roles
         filtered_messages = [
             msg for msg in self.messages if msg.get("role") in roles and msg.get("content")
         ]
@@ -76,10 +74,8 @@ class Swarm:
         Returns:
             A list of Message objects containing the system instructions and optional prompt
         """
-        # Initial system message
         conversation = [Message(role="system", content=agent.instructions)]
 
-        # Add the current prompt/context
         if prompt:
             conversation.extend([Message(role="user", content=prompt)])
 
@@ -108,15 +104,11 @@ class Swarm:
         if len(messages) <= max_length:
             return messages
 
-        # Always include the original task
         first_message = messages[0]
-
-        # Get recent context, ensuring we don't overlap with the first message
         recent_messages = messages[-context_size:]
         if first_message in recent_messages:
             recent_messages.remove(first_message)
 
-        # Create a summary of the previous conversation
         return [
             first_message,
             Message(
@@ -151,18 +143,14 @@ class Swarm:
             tool_call_id = message.get("tool_call_id")
 
             if message.get("role") == "assistant":
-                # Store assistant message with tool calls
                 for tool_call in tool_calls:
                     if tool_call_id := tool_call.id:
                         tool_call_map[tool_call_id] = message
-
                 processed_messages.append(message)
             elif message.get("role") == "tool":
-                # Only include tool messages if we have their corresponding tool call
                 if tool_call_id and tool_call_id in tool_call_map:
                     processed_messages.append(message)
             else:
-                # Include all other messages
                 processed_messages.append(message)
 
         return processed_messages
@@ -194,7 +182,6 @@ class Swarm:
         # Process messages to maintain tool call context
         relevant_history = self._process_tool_call_messages(relevant_history)
 
-        # Add processed history to the messages
         messages.extend(relevant_history)
 
         # Add a user message if the last message is an assistant message
@@ -365,11 +352,9 @@ class Swarm:
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
         async for delta in self._get_completion_response(agent_messages):
-            # Process partial response content
             if delta.content:
                 full_content += delta.content
 
-            # Process partial response tool calls
             if delta.tool_calls:
                 for tool_call in delta.tool_calls:
                     if not isinstance(tool_call, ChatCompletionDeltaToolCall):
@@ -381,11 +366,9 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            # Stream the partial response delta
             if self.stream_handler:
                 await self.stream_handler.on_stream(delta, self.active_agent)
 
-            # Yield both the delta and the current state
             yield AgentResponse(
                 delta=delta,
                 content=full_content,
@@ -439,17 +422,14 @@ class Swarm:
             tool_calls: List of tool calls made by the assistant
             agent_messages: The current conversation messages to update
         """
-        # Create base assistant message
         assistant_message = Message(
             role="assistant",
             content=content or None,
         )
 
         if tool_calls:
-            # Only add tool_calls if they exist
+            # Add tool calls to the assistant message
             assistant_message["tool_calls"] = tool_calls
-
-            # Add the assistant message before processing tool calls
             self.messages.append(assistant_message)
             agent_messages.append(assistant_message)
 
@@ -460,7 +440,6 @@ class Swarm:
             for result in results:
                 await self._handle_tool_call_result(result, agent_messages)
         else:
-            # No tool calls - just append the assistant message
             self.messages.append(assistant_message)
             agent_messages.append(assistant_message)
 
