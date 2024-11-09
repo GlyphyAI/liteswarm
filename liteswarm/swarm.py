@@ -84,8 +84,8 @@ class Swarm:
     def _summarize_messages(
         self,
         messages: list[Message],
-        max_length: int = 6,
-        context_size: int = 5,
+        max_length: int,
+        context_size: int,
     ) -> list[Message]:
         """Summarize a conversation history to maintain a manageable context window.
 
