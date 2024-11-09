@@ -181,16 +181,17 @@ class Swarm:
         # Process messages to maintain tool call context
         relevant_history = self._process_tool_call_messages(relevant_history)
 
-        messages.extend(relevant_history)
-
-        # Add a user message if the last message is an assistant message
-        if messages[-1].role == "assistant":
-            messages.append(
+        # Make sure the last message is a user message
+        last_message = relevant_history[-1]
+        if last_message.role != "user":
+            relevant_history.append(
                 Message(
                     role="user",
                     content="Please continue with the task based on the context above.",
                 )
             )
+
+        messages.extend(relevant_history)
 
         return messages
 
