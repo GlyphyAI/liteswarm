@@ -84,7 +84,7 @@ class ReplStreamHandler:
         match tool_call_result:
             case ToolCallMessageResult() as tool_call_message_result:
                 print(
-                    f"\n📎 [{agent_id}] Got result for {tool_call_message_result.tool_call.function.name} [{tool_call_message_result.tool_call.id}]: {tool_call_message_result.message.get('content')}"
+                    f"\n📎 [{agent_id}] Got result for {tool_call_message_result.tool_call.function.name} [{tool_call_message_result.tool_call.id}]: {tool_call_message_result.message.content}"
                 )
             case ToolCallAgentResult() as tool_call_agent_result:
                 print(
@@ -127,10 +127,9 @@ class AgentRepl:
         """Print the conversation history."""
         print("\n📝 Conversation History:")
         for msg in self.conversation:
-            if msg.get("role") != "system":
-                role = msg.get("role")
-                content = msg.get("content", "[No content]")
-                print(f"\n[{role}]: {content}")
+            if msg.role != "system":
+                content = msg.content or "[No content]"
+                print(f"\n[{msg.role}]: {content}")
         print("\n" + "=" * 50 + "\n")
 
     def _handle_command(self, command: str) -> bool:
