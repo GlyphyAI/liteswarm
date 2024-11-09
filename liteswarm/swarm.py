@@ -306,7 +306,7 @@ class Swarm:
         if not self.active_agent:
             raise ValueError("No active agent")
 
-        messages = [message.model_dump() for message in agent_messages]
+        messages = [message.model_dump(exclude_none=True) for message in agent_messages]
         tools = [function_to_json(tool) for tool in self.active_agent.tools]
         agent_params = self.active_agent.params or {}
 
