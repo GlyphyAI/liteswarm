@@ -505,7 +505,9 @@ class Swarm:
             self.messages.extend(self._get_initial_conversation(agent, prompt))
             self.agent_messages = deepcopy(self.messages)
         else:
-            self.agent_queue.append(agent)
+            user_message = Message(role="user", content=prompt)
+            self.messages.append(user_message)
+            self.agent_messages.append(user_message)
 
         try:
             while self.active_agent or self.agent_queue:
