@@ -101,13 +101,16 @@ class ReplStreamHandler:
 class AgentRepl:
     """Interactive REPL for agent conversations."""
 
-    def __init__(self, agent: Agent) -> None:
+    def __init__(self, agent: Agent, cleanup: bool = True) -> None:
         """Initialize the REPL with a starting agent.
 
         Args:
             agent: The initial agent to start conversations with
+            cleanup: Whether to clear agent state after completion. If False,
+                    maintains the last active agent for subsequent interactions
         """
         self.agent = agent
+        self.cleanup = cleanup
         self.swarm = Swarm(stream_handler=ReplStreamHandler())
         self.conversation: list[Message] = []
 
@@ -167,6 +170,7 @@ class AgentRepl:
                 agent=self.agent,
                 prompt=query,
                 messages=self.conversation,
+                cleanup=self.cleanup,
             )
             self.conversation = result.messages
             print("\n" + "=" * 50 + "\n")
@@ -209,11 +213,13 @@ class AgentRepl:
                 continue
 
 
-async def start_repl(agent: Agent) -> NoReturn:
+async def start_repl(agent: Agent, cleanup: bool = True) -> NoReturn:
     """Start a REPL session with the given agent.
 
     Args:
         agent: The agent to start the REPL with
+        cleanup: Whether to clear agent state after completion. If False,
+                maintains the last active agent for subsequent interactions
     """
-    repl = AgentRepl(agent)
+    repl = AgentRepl(agent, cleanup)
     await repl.run()
