@@ -1,54 +1,7 @@
 import asyncio
 
-from litellm.types.utils import ChatCompletionDeltaToolCall
-
 from liteswarm.repl import start_repl
-from liteswarm.types import Agent, Delta, FunctionTool, Message, ToolCallResult
-
-
-class ConsoleStreamHandler:
-    async def on_stream(
-        self,
-        chunk: Delta,
-        agent: Agent | None,
-    ) -> None:
-        if chunk.content:
-            print(f"{chunk.content}", end="", flush=True)
-
-    async def on_error(
-        self,
-        error: Exception,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Error: {str(error)}")
-
-    async def on_agent_switch(
-        self,
-        previous_agent: Agent | None,
-        next_agent: Agent,
-    ) -> None:
-        print(f"[{next_agent.agent_id}] Switched to {next_agent.agent_id}")
-
-    async def on_complete(
-        self,
-        messages: list[Message],
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Completed")
-
-    async def on_tool_call(
-        self,
-        tool_call: ChatCompletionDeltaToolCall,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Tool call: {tool_call}")
-
-    async def on_tool_call_result(
-        self,
-        tool_call_result: ToolCallResult,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Tool call result: {tool_call_result}")
+from liteswarm.types import Agent, FunctionTool
 
 
 async def run() -> None:
