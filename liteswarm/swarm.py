@@ -59,20 +59,23 @@ class Swarm:
     def _get_initial_conversation(
         self,
         agent: Agent,
-        message: str | None = None,
+        prompt: str | None = None,
     ) -> list[Message]:
         """Get the initial conversation for a given agent, including relevant context.
 
         Args:
             agent: The agent to prepare context for
-            message: The message to add to the conversation
+            prompt: The message to add to the conversation
+
+        Returns:
+            A list of messages for the agent
         """
         # Initial system message
-        conversation: list[Message] = [{"role": "system", "content": agent.instructions}]
+        conversation = [Message(role="system", content=agent.instructions)]
 
         # Add the current prompt/context
-        if message:
-            conversation.extend([{"role": "user", "content": message}])
+        if prompt:
+            conversation.extend([Message(role="user", content=prompt)])
 
         return conversation
 
@@ -117,18 +120,13 @@ class Swarm:
         # Add relevant history to the messages
         messages.extend(relevant_history)
 
-        # Remove tool calls and ensure user message at end
-        for message in messages:
-            if "tool_calls" in message:
-                del message["tool_calls"]
-
         # Add a user message if the last message is an assistant message
-        if messages[-1]["role"] == "assistant":
+        if messages[-1].get("role") == "assistant":
             messages.append(
-                {
-                    "role": "user",
-                    "content": "Please continue with the task based on the context above.",
-                }
+                Message(
+                    role="user",
+                    content="Please continue with the task based on the context above.",
+                )
             )
 
         return messages
@@ -178,11 +176,11 @@ class Swarm:
             else:
                 tool_call_result = ToolCallMessageResult(
                     tool_call=tool_call,
-                    message={
-                        "role": "tool",
-                        "content": orjson.dumps(function_result).decode(),
-                        "tool_call_id": tool_call.id,
-                    },
+                    message=Message(
+                        role="tool",
+                        content=orjson.dumps(function_result).decode(),
+                        tool_call_id=tool_call.id,
+                    ),
                 )
 
             if self.stream_handler:
@@ -337,11 +335,11 @@ class Swarm:
                 agent_messages.append(message_result.message)
 
             case ToolCallAgentResult() as agent_result:
-                tool_call_message = {
-                    "role": "tool",
-                    "content": f"Switching to agent {agent_result.agent.agent_id}",
-                    "tool_call_id": result.tool_call.id,
-                }
+                tool_call_message = Message(
+                    role="tool",
+                    content=f"Switching to agent {agent_result.agent.agent_id}",
+                    tool_call_id=result.tool_call.id,
+                )
 
                 self.messages.append(tool_call_message)
                 agent_messages.append(tool_call_message)
@@ -364,15 +362,15 @@ class Swarm:
             tool_calls: List of tool calls made by the assistant
             agent_messages: The current conversation messages to update
         """
-        # Create base assistant message without tool_calls
-        assistant_message: Message = {
-            "role": "assistant",
-            "content": content or None,
-        }
+        # Create base assistant message
+        assistant_message = Message(
+            role="assistant",
+            content=content or None,
+        )
 
         if tool_calls:
             # Only add tool_calls if they exist
-            assistant_message["tool_calls"] = [tool_call.model_dump() for tool_call in tool_calls]
+            assistant_message["tool_calls"] = tool_calls
 
             # Add the assistant message before processing tool calls
             self.messages.append(assistant_message)
