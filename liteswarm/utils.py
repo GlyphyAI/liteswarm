@@ -11,7 +11,7 @@ from litellm import Usage
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
 
 from liteswarm.exceptions import CompletionError
-from liteswarm.types import Message
+from liteswarm.types import Message, ResponseCost
 
 T = TypeVar("T")
 
@@ -473,3 +473,29 @@ def combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
         completion_tokens_details=completion_tokens_details,
         prompt_tokens_details=prompt_tokens_details,
     )
+
+
+def combine_response_cost(
+    left: ResponseCost | None,
+    right: ResponseCost | None,
+) -> ResponseCost | None:
+    """Combine two ResponseCost objects by adding their costs.
+
+    Args:
+        left: First ResponseCost object (or None)
+        right: Second ResponseCost object (or None)
+
+    Returns:
+        Combined ResponseCost object, or None if both inputs are None
+    """
+    if left is None:
+        return right
+
+    if right is None:
+        return left
+
+    return ResponseCost(
+        prompt_tokens_cost=left.prompt_tokens_cost + right.prompt_tokens_cost,
+        completion_tokens_cost=left.completion_tokens_cost + right.completion_tokens_cost,
+    )
+
