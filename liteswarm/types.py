@@ -43,6 +43,11 @@ class Delta(BaseModel):
         )
 
 
+class ResponseCost(BaseModel):
+    prompt_tokens_cost: float
+    completion_tokens_cost: float
+
+
 class Agent(BaseModel):
     agent_id: str
     model: str
@@ -94,6 +99,7 @@ class CompletionResponse(BaseModel):
     delta: Delta
     finish_reason: str | None = None
     usage: Usage | None = None
+    response_cost: ResponseCost | None = None
 
 
 class AgentResponse(BaseModel):
@@ -102,6 +108,7 @@ class AgentResponse(BaseModel):
     content: str | None = None
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
     usage: Usage | None = None
+    response_cost: ResponseCost | None = None
 
 
 class ConversationState(BaseModel):
@@ -110,6 +117,7 @@ class ConversationState(BaseModel):
     agent_messages: list[Message] = Field(default_factory=list)
     messages: list[Message] = Field(default_factory=list)
     usage: Usage | None = None
+    response_cost: ResponseCost | None = None
 
 
 class StreamHandler(Protocol):
