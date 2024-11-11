@@ -4,6 +4,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
+from numbers import Number
 from typing import Any, TypeVar, Union, get_type_hints
 
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
@@ -370,3 +371,47 @@ def safe_get_attr(
     value = getattr(obj, attr, default)
     return value if isinstance(value, expected_type) else default
 
+
+def combine_dicts(
+    left: dict[str, Any] | None,
+    right: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Combine two dictionaries by adding their numeric values and preserving non-numeric ones.
+
+    Args:
+        left: First dictionary (or None)
+        right: Second dictionary (or None)
+
+    Returns:
+        Combined dictionary where:
+        - Numeric values are added together
+        - Non-numeric values from left dict are preserved
+        - Keys unique to right dict are included
+        Returns None if both inputs are None
+
+    Example:
+        >>> combine_dicts({"a": 1, "b": "text"}, {"a": 2, "c": 3.5})
+        {"a": 3, "b": "text", "c": 3.5}
+    """
+    if left is None:
+        return right
+
+    if right is None:
+        return left
+
+    result = {}
+
+    all_keys = set(left) | set(right)
+
+    for key in all_keys:
+        left_value = left.get(key)
+        right_value = right.get(key)
+
+        if isinstance(left_value, Number) and isinstance(right_value, Number):
+            result[key] = left_value + right_value  # type: ignore
+        elif key in left:
+            result[key] = left_value
+        else:
+            result[key] = right_value
+
+    return result
