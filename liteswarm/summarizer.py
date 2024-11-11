@@ -7,6 +7,7 @@ from litellm import acompletion
 from litellm.types.utils import Choices, ModelResponse
 
 from liteswarm.types import Message
+from liteswarm.utils import filter_tool_call_pairs
 
 logger = logging.getLogger(__name__)
 
@@ -58,56 +59,6 @@ class LiteSummarizer:
         self.preserve_recent = preserve_recent
         self.chunk_size = chunk_size
 
-    def _filter_tool_call_pairs(
-        self,
-        messages: list[Message],
-    ) -> list[Message]:
-        """Filter messages to maintain only complete tool call/result pairs.
-
-        Args:
-            messages: List of messages to filter
-
-        Returns:
-            List of messages with only complete tool call/result pairs
-        """
-        # Find valid tool call/result pairs
-        tool_call_ids = set()
-        tool_result_ids = set()
-
-        for message in messages:
-            if message.role == "assistant" and message.tool_calls:
-                for tool_call in message.tool_calls:
-                    if tool_call.id:
-                        tool_call_ids.add(tool_call.id)
-            elif message.role == "tool" and message.tool_call_id:
-                tool_result_ids.add(message.tool_call_id)
-
-        valid_tool_ids = tool_call_ids.intersection(tool_result_ids)
-
-        # Filter messages to maintain valid tool call/result pairs
-        filtered_messages = []
-
-        for message in messages:
-            if message.role == "assistant" and message.tool_calls:
-                filtered_tool_calls = [
-                    tool_call for tool_call in message.tool_calls if tool_call.id in valid_tool_ids
-                ]
-
-                msg = Message(
-                    role=message.role,
-                    content=message.content,
-                    tool_calls=filtered_tool_calls or None,
-                )
-
-                filtered_messages.append(msg)
-            elif message.role == "tool":
-                if message.tool_call_id in valid_tool_ids:
-                    filtered_messages.append(message)
-            else:
-                filtered_messages.append(message)
-
-        return filtered_messages
-
     def _group_messages_for_summary(self, messages: list[Message]) -> GroupedMessages:
         """Group messages into those that should be preserved and those that can be summarized.
 
@@ -129,10 +80,10 @@ class LiteSummarizer:
         to_summarize = non_system_messages[: -self.preserve_recent]
 
         if not to_summarize:
-            return self._filter_tool_call_pairs(to_preserve), []
+            return filter_tool_call_pairs(to_preserve), []
 
-        filtered_to_preserve = self._filter_tool_call_pairs(to_preserve)
-        filtered_to_summarize = self._filter_tool_call_pairs(to_summarize)
+        filtered_to_preserve = filter_tool_call_pairs(to_preserve)
+        filtered_to_summarize = filter_tool_call_pairs(to_summarize)
 
         return filtered_to_preserve, filtered_to_summarize
 
@@ -186,7 +137,7 @@ class LiteSummarizer:
         def add_chunk() -> None:
             """Add a chunk of messages to the list of chunks."""
             if current_chunk:
-                filtered_chunk = self._filter_tool_call_pairs(current_chunk)
+                filtered_chunk = filter_tool_call_pairs(current_chunk)
                 if filtered_chunk:
                     chunks.append(filtered_chunk)
                 current_chunk.clear()

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Union, get_type_hints
 
+from liteswarm.types import Message
+
 
 @dataclass
 class Parameter:
@@ -226,3 +228,56 @@ def function_to_json(
         Dict containing the function schema
     """
     return FunctionConverter.function_to_json(func, description)
+
+
+def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
+    """Filter messages to maintain only complete tool call/result pairs.
+
+    This utility function ensures that:
+    1. Tool calls have corresponding tool results
+    2. Tool results have corresponding tool calls
+    3. Orphaned tool calls or results are filtered out
+
+    Args:
+        messages: List of messages to filter
+
+    Returns:
+        List of messages with only complete tool call/result pairs
+    """
+    # Find valid tool call/result pairs
+    tool_call_ids = set()
+    tool_result_ids = set()
+
+    for message in messages:
+        if message.role == "assistant" and message.tool_calls:
+            for tool_call in message.tool_calls:
+                if tool_call.id:
+                    tool_call_ids.add(tool_call.id)
+        elif message.role == "tool" and message.tool_call_id:
+            tool_result_ids.add(message.tool_call_id)
+
+    valid_tool_ids = tool_call_ids.intersection(tool_result_ids)
+
+    # Filter messages to maintain valid tool call/result pairs
+    filtered_messages = []
+
+    for message in messages:
+        if message.role == "assistant" and message.tool_calls:
+            filtered_tool_calls = [
+                tool_call for tool_call in message.tool_calls if tool_call.id in valid_tool_ids
+            ]
+
+            msg = Message(
+                role=message.role,
+                content=message.content,
+                tool_calls=filtered_tool_calls or None,
+            )
+
+            filtered_messages.append(msg)
+        elif message.role == "tool":
+            if message.tool_call_id in valid_tool_ids:
+                filtered_messages.append(message)
+        else:
+            filtered_messages.append(message)
+
+    return filtered_messages
