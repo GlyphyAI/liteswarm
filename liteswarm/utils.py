@@ -1,10 +1,19 @@
+import asyncio
 import inspect
-from collections.abc import Callable
+import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Union, get_type_hints
+from typing import Any, TypeVar, Union, get_type_hints
 
+from litellm.exceptions import RateLimitError, ServiceUnavailableError
+
+from liteswarm.exceptions import CompletionError
 from liteswarm.types import Message
+
+T = TypeVar("T")
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -279,3 +288,59 @@ def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
             filtered_messages.append(message)
 
     return filtered_messages
+
+
+async def retry_with_exponential_backoff(
+    operation: Callable[..., Awaitable[T]],
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 10.0,
+    backoff_factor: float = 2.0,
+) -> T:
+    """Execute an operation with exponential backoff retry logic.
+
+    Args:
+        operation: Async operation to execute
+        max_retries: Maximum number of retry attempts
+        initial_delay: Initial delay between retries in seconds
+        max_delay: Maximum delay between retries in seconds
+        backoff_factor: Factor to multiply delay by after each retry
+
+    Returns:
+        The result of the operation if successful
+
+    Raises:
+        The last error encountered if all retries fail
+    """
+    last_error: Exception | None = None
+    delay = initial_delay
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await operation()
+        except (RateLimitError, ServiceUnavailableError) as e:
+            last_error = e
+            if attempt == max_retries:
+                break
+
+            # Calculate next delay with exponential backoff
+            delay = min(delay * backoff_factor, max_delay)
+
+            logger.warning(
+                "Attempt %d/%d failed: %s. Retrying in %.1f seconds...",
+                attempt + 1,
+                max_retries + 1,
+                str(e),
+                delay,
+            )
+
+            await asyncio.sleep(delay)
+
+    if last_error:
+        error_type = last_error.__class__.__name__
+        raise CompletionError(
+            f"Operation failed after {max_retries + 1} attempts: {error_type}",
+            last_error,
+        )
+
+    raise CompletionError("Operation failed with unknown error", Exception("Unknown error"))
