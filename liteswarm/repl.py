@@ -112,6 +112,7 @@ class AgentRepl:
         agent: Agent,
         summarizer: Summarizer | None = None,
         include_usage: bool = False,
+        include_cost: bool = False,
         cleanup: bool = True,
     ) -> None:
         """Initialize the REPL with a starting agent.
@@ -120,6 +121,7 @@ class AgentRepl:
             agent: The initial agent to start conversations with
             summarizer: A summarizer to use for summarizing conversation history
             include_usage: Whether to include usage in the REPL stats
+            include_cost: Whether to include cost statistics in responses
             cleanup: Whether to clear agent state after completion. If False,
                     maintains the last active agent for subsequent interactions
         """
@@ -129,6 +131,7 @@ class AgentRepl:
             stream_handler=ReplStreamHandler(),
             summarizer=summarizer,
             include_usage=include_usage,
+            include_cost=include_cost,
         )
         self.conversation: list[Message] = []
         self.usage: Usage | None = None
@@ -176,6 +179,16 @@ class AgentRepl:
                 print("\nCompletion Token Details:")
                 for key, value in self.usage.completion_tokens_details:
                     print(f"  {key}: {value:,}")
+
+        if self.response_cost:
+            total_cost = (
+                self.response_cost.prompt_tokens_cost + self.response_cost.completion_tokens_cost
+            )
+
+            print("\nResponse Cost:")
+            print(f"  Prompt tokens: ${self.response_cost.prompt_tokens_cost:.4f}")
+            print(f"  Completion tokens: ${self.response_cost.completion_tokens_cost:.4f}")
+            print(f"  Total cost: ${total_cost:.4f}")
 
         print("\nActive Agent:")
         if self.swarm.active_agent:
@@ -229,6 +242,7 @@ class AgentRepl:
             )
             self.conversation = result.messages
             self.usage = result.usage
+            self.response_cost = result.response_cost
             print("\n" + "=" * 50 + "\n")
         except Exception as e:
             print(f"\n❌ Error processing query: {str(e)}", file=sys.stderr)
@@ -273,6 +287,7 @@ async def start_repl(
     agent: Agent,
     summarizer: Summarizer | None = None,
     include_usage: bool = False,
+    include_cost: bool = False,
     cleanup: bool = True,
 ) -> NoReturn:
     """Start a REPL session with the given agent.
@@ -281,8 +296,9 @@ async def start_repl(
         agent: The agent to start the REPL with
         summarizer: A summarizer to use for summarizing conversation history
         include_usage: Whether to include usage in the REPL stats
+        include_cost: Whether to include cost statistics in the REPL stats
         cleanup: Whether to clear agent state after completion. If False,
                 maintains the last active agent for subsequent interactions
     """
-    repl = AgentRepl(agent, summarizer, include_usage, cleanup)
+    repl = AgentRepl(agent, summarizer, include_usage, include_cost, cleanup)
     await repl.run()
