@@ -397,73 +397,71 @@ class Swarm:
                 tool_calls=full_tool_calls,
             )
 
-    async def _handle_tool_call_result(
+    async def _process_tool_call_result(
         self,
         result: ToolCallResult,
-        agent_messages: list[Message],
-    ) -> None:
-        """Handle a single tool call result by updating conversation state.
+    ) -> Message:
+        """Process a tool call result and return a message to update the conversation.
 
-        Updates the message history and agent state based on the tool call result.
+        Updates message history and agent state based on the tool call result.
         Handles both message results and agent switching.
 
         Args:
-            result: The tool call result to process
-            agent_messages: The current conversation messages to update
+            result: Tool call result to process
+
+        Returns:
+            Message to update the conversation history
         """
+        tool_message: Message
+
         match result:
             case ToolCallMessageResult() as message_result:
-                self.messages.append(message_result.message)
-                agent_messages.append(message_result.message)
+                tool_message = message_result.message
 
             case ToolCallAgentResult() as agent_result:
-                tool_call_message = Message(
+                tool_message = Message(
                     role="tool",
                     content=f"Switching to agent {agent_result.agent.agent_id}",
                     tool_call_id=result.tool_call.id,
                 )
 
-                self.messages.append(tool_call_message)
-                agent_messages.append(tool_call_message)
                 self.agent_queue.append(agent_result.agent)
                 self.active_agent = None
+
+        return tool_message
 
     async def _process_assistant_response(
         self,
         content: str | None,
         tool_calls: list[ChatCompletionDeltaToolCall],
-        agent_messages: list[Message],
-    ) -> None:
-        """Process the assistant's complete response and handle any tool calls.
+    ) -> list[Message]:
+        """Process the assistant's response and any tool calls.
 
-        Creates an assistant message with the response content and processes any tool calls.
-        Updates the conversation history with results.
+        Creates messages from the assistant's response and processes any tool calls,
+        maintaining proper message order and relationships.
 
         Args:
-            content: The assistant's response content
-            tool_calls: List of tool calls made by the assistant
-            agent_messages: The current conversation messages to update
+            content: Text content of the assistant's response
+            tool_calls: List of tool calls to process
+
+        Returns:
+            List of messages including assistant response and tool results
         """
-        assistant_message = Message(
-            role="assistant",
-            content=content or None,
-        )
+        messages: list[Message] = [
+            Message(
+                role="assistant",
+                content=content or None,
+                tool_calls=tool_calls if tool_calls else None,
+            )
+        ]
 
         if tool_calls:
-            # Add tool calls to the assistant message
-            assistant_message.tool_calls = tool_calls
-            self.messages.append(assistant_message)
-            agent_messages.append(assistant_message)
+            tool_call_results = await self._process_tool_calls(tool_calls)
+            for tool_call_result in tool_call_results:
+                tool_message = await self._process_tool_call_result(tool_call_result)
+                messages.append(tool_message)
 
-            # Process tool calls and get results
-            results = await self._process_tool_calls(tool_calls)
-
-            # Add tool results to messages
-            for result in results:
-                await self._handle_tool_call_result(result, agent_messages)
-        else:
-            self.messages.append(assistant_message)
-            agent_messages.append(assistant_message)
+        return messages
 
     async def _handle_agent_switch(self) -> list[Message]:
         """Handle switching to the next agent in the queue.
@@ -542,11 +540,13 @@ class Swarm:
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
 
-                await self._process_assistant_response(
+                new_messages = await self._process_assistant_response(
                     last_content,
                     last_tool_calls,
-                    self.agent_messages,
                 )
+
+                self.full_history.extend(new_messages)
+                self.agent_messages.extend(new_messages)
 
                 if not last_tool_calls and not self.agent_queue:
                     break
