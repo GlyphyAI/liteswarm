@@ -5,6 +5,7 @@ from litellm.types.utils import (
     ChatCompletionAudioResponse,
     ChatCompletionDeltaToolCall,
     FunctionCall,
+    Usage,
 )
 from pydantic import BaseModel, Field
 from typing_extensions import Protocol
@@ -92,6 +93,7 @@ class ToolCallAgentResult(ToolCallResult):
 class CompletionResponse(BaseModel):
     delta: Delta
     finish_reason: str | None = None
+    usage: Usage | None = None
 
 
 class AgentResponse(BaseModel):
@@ -99,6 +101,7 @@ class AgentResponse(BaseModel):
     finish_reason: str | None = None
     content: str | None = None
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
+    usage: Usage | None = None
 
 
 class ConversationState(BaseModel):
@@ -106,6 +109,7 @@ class ConversationState(BaseModel):
     agent: Agent | None = None
     agent_messages: list[Message] = Field(default_factory=list)
     messages: list[Message] = Field(default_factory=list)
+    usage: Usage | None = None
 
 
 class StreamHandler(Protocol):
