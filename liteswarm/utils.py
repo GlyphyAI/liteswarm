@@ -344,3 +344,29 @@ async def retry_with_exponential_backoff(
         )
 
     raise CompletionError("Operation failed with unknown error", Exception("Unknown error"))
+
+
+def safe_get_attr(
+    obj: Any,
+    attr: str,
+    expected_type: type[T],
+    default: T | None = None,
+) -> T | None:
+    """Safely get and validate an attribute of an object.
+
+    Args:
+        obj: Object to get attribute from
+        attr: Name of the attribute to get
+        expected_type: Expected type of the attribute
+        default: Default value to return if the attribute does not exist or is not of the expected type
+
+    Returns:
+        The attribute value if it exists and matches the expected type, None otherwise
+
+    Example:
+        usage = safe_get_attr(chunk, "usage", Usage)
+        tool_call = safe_get_attr(delta, "tool_call", ChatCompletionDeltaToolCall)
+    """
+    value = getattr(obj, attr, default)
+    return value if isinstance(value, expected_type) else default
+
