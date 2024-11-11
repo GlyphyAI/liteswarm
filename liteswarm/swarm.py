@@ -409,13 +409,16 @@ class Swarm:
         if self.stream_handler:
             await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
-    async def _update_working_history(self) -> None:
+    async def _update_working_history(self, force: bool = False) -> None:
         """Update working history by summarizing full history when needed.
+
+        Args:
+            force: Whether to force summarization even if not needed
 
         Checks if working history needs summarization and updates it using
         the full history while maintaining token limits and context coherence.
         """
-        if self.summarizer.needs_summarization(self.working_history):
+        if force or self.summarizer.needs_summarization(self.working_history):
             self.working_history = await self.summarizer.summarize_history(self.full_history)
 
     async def stream(
