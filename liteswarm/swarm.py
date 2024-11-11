@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections import deque
 from collections.abc import AsyncGenerator
 
@@ -23,6 +24,8 @@ from liteswarm.types import (
 from liteswarm.utils import function_to_json
 
 litellm.modify_params = True
+
+logger = logging.getLogger(__name__)
 
 
 class Swarm:
@@ -203,6 +206,8 @@ class Swarm:
         messages = [message.model_dump(exclude_none=True) for message in agent_messages]
         tools = [function_to_json(tool) for tool in self.active_agent.tools]
         agent_params = self.active_agent.params or {}
+
+        logger.debug("Sending messages to agent [%s]: %s", self.active_agent.agent_id, messages)
 
         response_stream = await acompletion(
             model=self.active_agent.model,

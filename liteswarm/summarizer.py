@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Sequence
 from typing import Protocol
 
@@ -6,6 +7,8 @@ from litellm import acompletion
 from litellm.types.utils import Choices, ModelResponse
 
 from liteswarm.types import Message
+
+logger = logging.getLogger(__name__)
 
 GroupedMessages = tuple[list[Message], list[Message]]
 
@@ -141,7 +144,7 @@ class LiteSummarizer:
             Message(role="user", content=self.summarize_prompt),
         ]
 
-        # print(f"\n\n[DEBUG] Summarizing messages: {summary_messages}\n\n")
+        logger.debug("Summarizing messages: %s", summary_messages)
 
         response = await acompletion(
             model=self.model,
@@ -149,7 +152,7 @@ class LiteSummarizer:
             stream=False,
         )
 
-        # print(f"\n\n[DEBUG] Summarization response: {response}\n\n")
+        logger.debug("Summarization response: %s", response)
 
         if not isinstance(response, ModelResponse):
             raise TypeError("Expected a CompletionResponse instance.")
@@ -274,5 +277,12 @@ class LiteSummarizer:
             )
 
         final_messages.extend(to_preserve)
+
+        logger.debug(
+            "Final message count: %d (preserved=%d, summaries=%d)",
+            len(final_messages),
+            len(to_preserve),
+            len(summaries),
+        )
 
         return final_messages
