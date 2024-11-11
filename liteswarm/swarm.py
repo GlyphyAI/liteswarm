@@ -18,12 +18,15 @@ from liteswarm.types import (
     ConversationState,
     Delta,
     Message,
+    ResponseCost,
     StreamHandler,
     ToolCallAgentResult,
     ToolCallMessageResult,
     ToolCallResult,
 )
 from liteswarm.utils import (
+    calculate_response_cost,
+    combine_response_cost,
     combine_usage,
     function_to_json,
     retry_with_exponential_backoff,
@@ -59,6 +62,7 @@ class Swarm:
         stream_handler: StreamHandler | None = None,
         summarizer: Summarizer | None = None,
         include_usage: bool = False,
+        include_cost: bool = False,
         max_retries: int = 3,
         initial_retry_delay: float = 1.0,
         max_retry_delay: float = 10.0,
@@ -70,6 +74,7 @@ class Swarm:
             stream_handler: Optional handler for streaming events
             summarizer: Optional summarizer for managing conversation history
             include_usage: Whether to include token usage statistics in responses
+            include_cost: Whether to include cost statistics in responses
             max_retries: Maximum number of retry attempts for API calls
             initial_retry_delay: Initial delay between retries in seconds
             max_retry_delay: Maximum delay between retries in seconds
@@ -83,6 +88,7 @@ class Swarm:
         self.working_history: list[Message] = []
         self.summarizer = summarizer or LiteSummarizer()
         self.include_usage = include_usage
+        self.include_cost = include_cost
 
         # Retry configuration
         self.max_retries = max_retries
@@ -346,11 +352,16 @@ class Swarm:
                 delta = Delta.from_delta(choice.delta)
                 finish_reason = choice.finish_reason
                 usage = safe_get_attr(chunk, "usage", Usage)
+                response_cost: ResponseCost | None = None
+
+                if usage and self.include_cost:
+                    response_cost = calculate_response_cost(model=agent.model, usage=usage)
 
                 yield CompletionResponse(
                     delta=delta,
                     finish_reason=finish_reason,
                     usage=usage,
+                    response_cost=response_cost,
                 )
 
         except ContextLengthError:
@@ -411,6 +422,7 @@ class Swarm:
                 content=full_content,
                 tool_calls=full_tool_calls,
                 usage=completion_response.usage,
+                response_cost=completion_response.response_cost,
             )
 
     async def _process_tool_call_result(
@@ -623,12 +635,15 @@ class Swarm:
         full_response = ""
         full_usage: Usage | None = None
         response_stream = self.stream(agent, prompt, messages, cleanup)
+        response_cost: ResponseCost | None = None
 
         async for agent_response in response_stream:
             if agent_response.content:
                 full_response = agent_response.content
             if agent_response.usage:
                 full_usage = combine_usage(full_usage, agent_response.usage)
+            if agent_response.response_cost:
+                response_cost = combine_response_cost(response_cost, agent_response.response_cost)
 
         return ConversationState(
             content=full_response,
@@ -636,4 +651,5 @@ class Swarm:
             agent_messages=self.agent_messages,
             messages=self.full_history,
             usage=full_usage,
+            response_cost=response_cost,
         )
