@@ -169,14 +169,16 @@ class Swarm:
         if not agent:
             raise ValueError("No active agent to process tool calls.")
 
-        # Process single tool calls directly
-        if len(tool_calls) == 1:
-            result = await self._process_tool_call(tool_calls[0], agent)
-            return [result] if result is not None else []
-
-        # Process multiple tool calls concurrently
         tasks = [self._process_tool_call(tool_call, agent) for tool_call in tool_calls]
-        results = await asyncio.gather(*tasks)
+
+        results: list[ToolCallResult | None]
+        match len(tasks):
+            case 0:
+                results = []
+            case 1:
+                results = [await tasks[0]]
+            case _:
+                results = await asyncio.gather(*tasks)
 
         return [result for result in results if result is not None]
 
