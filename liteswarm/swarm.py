@@ -7,7 +7,7 @@ import litellm
 import orjson
 from litellm import CustomStreamWrapper, acompletion
 from litellm.exceptions import ContextWindowExceededError
-from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices
+from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices, Usage
 
 from liteswarm.exceptions import CompletionError, ContextLengthError
 from liteswarm.summarizer import LiteSummarizer, Summarizer
@@ -23,7 +23,12 @@ from liteswarm.types import (
     ToolCallMessageResult,
     ToolCallResult,
 )
-from liteswarm.utils import function_to_json, retry_with_exponential_backoff
+from liteswarm.utils import (
+    combine_usage,
+    function_to_json,
+    retry_with_exponential_backoff,
+    safe_get_attr,
+)
 
 litellm.modify_params = True
 
@@ -340,10 +345,12 @@ class Swarm:
 
                 delta = Delta.from_delta(choice.delta)
                 finish_reason = choice.finish_reason
+                usage = safe_get_attr(chunk, "usage", Usage)
 
                 yield CompletionResponse(
                     delta=delta,
                     finish_reason=finish_reason,
+                    usage=usage,
                 )
 
         except ContextLengthError:
@@ -403,6 +410,7 @@ class Swarm:
                 finish_reason=finish_reason,
                 content=full_content,
                 tool_calls=full_tool_calls,
+                usage=completion_response.usage,
             )
 
     async def _process_tool_call_result(
@@ -613,15 +621,19 @@ class Swarm:
             Exception: Any errors during processing
         """
         full_response = ""
+        full_usage: Usage | None = None
         response_stream = self.stream(agent, prompt, messages, cleanup)
 
         async for agent_response in response_stream:
             if agent_response.content:
                 full_response = agent_response.content
+            if agent_response.usage:
+                full_usage = combine_usage(full_usage, agent_response.usage)
 
         return ConversationState(
             content=full_response,
             agent=self.active_agent,
             agent_messages=self.agent_messages,
             messages=self.full_history,
+            usage=full_usage,
         )
