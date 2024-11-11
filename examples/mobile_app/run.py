@@ -147,6 +147,7 @@ async def run() -> None:
     await start_repl(
         agents["router"],
         include_usage=True,
+        include_cost=True,
         cleanup=False,
     )
 
