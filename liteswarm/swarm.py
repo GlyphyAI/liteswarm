@@ -6,9 +6,10 @@ from collections.abc import AsyncGenerator
 import litellm
 import orjson
 from litellm import CustomStreamWrapper, acompletion
+from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices
 
-from liteswarm.exceptions import CompletionError
+from liteswarm.exceptions import CompletionError, ContextLengthError
 from liteswarm.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types import (
     Agent,
@@ -206,13 +207,83 @@ class Swarm:
 
         return [result for result in results if result is not None]
 
+    async def _create_completion(
+        self,
+        agent: Agent,
+        messages: list[Message],
+    ) -> CustomStreamWrapper:
+        """Create a completion request with the given agent and messages.
+
+        Args:
+            agent: The agent to use for completion
+            messages: The messages to send
+
+        Returns:
+            Response stream from the completion
+
+        Raises:
+            ValueError: If agent parameters are invalid
+            TypeError: If response is not of expected type
+        """
+        formatted_messages = [msg.model_dump(exclude_none=True) for msg in messages]
+        tools = [function_to_json(tool) for tool in agent.tools]
+        agent_params = agent.params or {}
+
+        response_stream = await acompletion(
+            model=agent.model,
+            messages=formatted_messages,
+            stream=True,
+            tools=tools,
+            tool_choice=agent.tool_choice,
+            parallel_tool_calls=agent.parallel_tool_calls,
+            **agent_params,
+        )
+
+        if not isinstance(response_stream, CustomStreamWrapper):
+            raise TypeError("Expected a CustomStreamWrapper instance.")
+
+        return response_stream
+
+    async def _try_with_reduced_context(self) -> CustomStreamWrapper:
+        """Attempt to get completion with reduced context.
+
+        This method:
+        1. Updates working history with more aggressive summarization
+        2. Prepares new messages with reduced context
+        3. Attempts completion with reduced context
+
+        Returns:
+            Response stream from the completion
+
+        Raises:
+            ContextLengthError: If context is still too large after reduction
+            ValueError: If there is no active agent
+        """
+        if not self.active_agent:
+            raise ValueError("No active agent")
+
+        await self._update_working_history(force=True)
+
+        reduced_messages = await self._prepare_agent_context(self.active_agent)
+
+        try:
+            return await self._create_completion(self.active_agent, reduced_messages)
+        except ContextWindowExceededError as e:
+            raise ContextLengthError(
+                "Context window exceeded even after reduction attempt",
+                original_error=e,
+                current_length=len(reduced_messages),
+            ) from e
+
     async def _get_completion_response(
         self,
         agent_messages: list[Message],
     ) -> AsyncGenerator[CompletionResponse, None]:
         """Get completion response for the currently active agent.
 
-        Handles API errors with exponential backoff retry logic.
+        Handles API errors with:
+        1. Exponential backoff for transient errors (rate limits, service unavailable)
+        2. Context reduction for context window exceeded errors
 
         Args:
             agent_messages: The messages to send to the agent
@@ -223,28 +294,25 @@ class Swarm:
         Raises:
             ValueError: If there is no active agent
             CompletionError: If completion fails after all retries
+            ContextLengthError: If context window is exceeded and can't be reduced
             TypeError: If response is not of expected type
         """
         agent = self.active_agent
         if not agent:
             raise ValueError("No active agent")
 
-        messages = [message.model_dump(exclude_none=True) for message in agent_messages]
-        tools = [function_to_json(tool) for tool in agent.tools]
-        agent_params = agent.params or {}
-
-        logger.debug("Sending messages to agent [%s]: %s", agent.agent_id, messages)
+        logger.debug(
+            "Sending messages to agent [%s]: %s",
+            agent.agent_id,
+            agent_messages,
+        )
 
         async def get_response() -> CustomStreamWrapper:
-            return await acompletion(  # type: ignore
-                model=agent.model,
-                messages=messages,
-                stream=True,
-                tools=tools,
-                tool_choice=agent.tool_choice,
-                parallel_tool_calls=agent.parallel_tool_calls,
-                **agent_params,
-            )
+            try:
+                return await self._create_completion(agent, agent_messages)
+            except ContextWindowExceededError:
+                logger.warning("Context window exceeded, attempting to reduce context size")
+                return await self._try_with_reduced_context()
 
         try:
             response_stream = await retry_with_exponential_backoff(
@@ -267,6 +335,9 @@ class Swarm:
                     delta=delta,
                     finish_reason=finish_reason,
                 )
+
+        except ContextLengthError:
+            raise
 
         except CompletionError:
             raise
