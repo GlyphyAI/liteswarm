@@ -144,7 +144,11 @@ async def run() -> None:
 
     agents = create_flutter_team()
 
-    await start_repl(agents["router"], cleanup=False)
+    await start_repl(
+        agents["router"],
+        include_usage=True,
+        cleanup=False,
+    )
 
 
 if __name__ == "__main__":
