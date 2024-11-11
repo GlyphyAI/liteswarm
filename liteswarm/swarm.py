@@ -8,6 +8,7 @@ import orjson
 from litellm import CustomStreamWrapper, acompletion
 from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices
 
+from liteswarm.exceptions import CompletionError
 from liteswarm.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types import (
     Agent,
@@ -21,7 +22,7 @@ from liteswarm.types import (
     ToolCallMessageResult,
     ToolCallResult,
 )
-from liteswarm.utils import function_to_json
+from liteswarm.utils import function_to_json, retry_with_exponential_backoff
 
 litellm.modify_params = True
 
@@ -47,11 +48,25 @@ class Swarm:
         summarizer: Handles conversation summarization
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         stream_handler: StreamHandler | None = None,
         summarizer: Summarizer | None = None,
+        max_retries: int = 3,
+        initial_retry_delay: float = 1.0,
+        max_retry_delay: float = 10.0,
+        backoff_factor: float = 2.0,
     ) -> None:
+        """Initialize the Swarm.
+
+        Args:
+            stream_handler: Optional handler for streaming events
+            summarizer: Optional summarizer for managing conversation history
+            max_retries: Maximum number of retry attempts for API calls
+            initial_retry_delay: Initial delay between retries in seconds
+            max_retry_delay: Maximum delay between retries in seconds
+            backoff_factor: Factor to multiply delay by after each retry
+        """
         self.active_agent: Agent | None = None
         self.agent_messages: list[Message] = []
         self.agent_queue: deque[Agent] = deque()
@@ -59,6 +74,12 @@ class Swarm:
         self.full_history: list[Message] = []
         self.working_history: list[Message] = []
         self.summarizer = summarizer or LiteSummarizer()
+
+        # Retry configuration
+        self.max_retries = max_retries
+        self.initial_retry_delay = initial_retry_delay
+        self.max_retry_delay = max_retry_delay
+        self.backoff_factor = backoff_factor
 
     async def _prepare_agent_context(
         self,
@@ -191,6 +212,8 @@ class Swarm:
     ) -> AsyncGenerator[CompletionResponse, None]:
         """Get completion response for the currently active agent.
 
+        Handles API errors with exponential backoff retry logic.
+
         Args:
             agent_messages: The messages to send to the agent
 
@@ -199,41 +222,57 @@ class Swarm:
 
         Raises:
             ValueError: If there is no active agent
+            CompletionError: If completion fails after all retries
+            TypeError: If response is not of expected type
         """
-        if not self.active_agent:
+        agent = self.active_agent
+        if not agent:
             raise ValueError("No active agent")
 
         messages = [message.model_dump(exclude_none=True) for message in agent_messages]
-        tools = [function_to_json(tool) for tool in self.active_agent.tools]
-        agent_params = self.active_agent.params or {}
+        tools = [function_to_json(tool) for tool in agent.tools]
+        agent_params = agent.params or {}
 
-        logger.debug("Sending messages to agent [%s]: %s", self.active_agent.agent_id, messages)
+        logger.debug("Sending messages to agent [%s]: %s", agent.agent_id, messages)
 
-        response_stream = await acompletion(
-            model=self.active_agent.model,
-            messages=messages,
-            stream=True,
-            tools=tools,
-            tool_choice=self.active_agent.tool_choice,
-            parallel_tool_calls=self.active_agent.parallel_tool_calls,
-            **agent_params,
-        )
-
-        if not isinstance(response_stream, CustomStreamWrapper):
-            raise TypeError("Expected a CustomStreamWrapper instance.")
-
-        async for chunk in response_stream:
-            choice = chunk.choices[0]
-            if not isinstance(choice, StreamingChoices):
-                raise TypeError("Expected a StreamingChoices instance.")
-
-            delta = Delta.from_delta(choice.delta)
-            finish_reason = choice.finish_reason
-
-            yield CompletionResponse(
-                delta=delta,
-                finish_reason=finish_reason,
+        async def get_response() -> CustomStreamWrapper:
+            return await acompletion(  # type: ignore
+                model=agent.model,
+                messages=messages,
+                stream=True,
+                tools=tools,
+                tool_choice=agent.tool_choice,
+                parallel_tool_calls=agent.parallel_tool_calls,
+                **agent_params,
             )
+
+        try:
+            response_stream = await retry_with_exponential_backoff(
+                get_response,
+                max_retries=self.max_retries,
+                initial_delay=self.initial_retry_delay,
+                max_delay=self.max_retry_delay,
+                backoff_factor=self.backoff_factor,
+            )
+
+            async for chunk in response_stream:
+                choice = chunk.choices[0]
+                if not isinstance(choice, StreamingChoices):
+                    raise TypeError("Expected a StreamingChoices instance.")
+
+                delta = Delta.from_delta(choice.delta)
+                finish_reason = choice.finish_reason
+
+                yield CompletionResponse(
+                    delta=delta,
+                    finish_reason=finish_reason,
+                )
+
+        except CompletionError:
+            raise
+
+        except Exception as e:
+            raise CompletionError("Failed to get completion response", e) from e
 
     async def _process_agent_response(
         self,
