@@ -237,3 +237,74 @@ class LiteSummarizer:
         )
 
         return final_messages
+
+
+class TruncationSummarizer:
+    """A simple summarizer that truncates old messages and keeps only recent ones.
+
+    This summarizer is useful when:
+    1. You want to minimize API calls
+    2. Exact history preservation isn't critical
+    3. You need predictable token usage
+    4. You want faster processing
+    """
+
+    def __init__(
+        self,
+        max_history_length: int = 50,
+        preserve_recent: int = 25,
+    ) -> None:
+        """Initialize the truncation summarizer.
+
+        Args:
+            max_history_length: Maximum number of messages to keep before truncating
+            preserve_recent: Number of recent messages to preserve when truncating
+        """
+        self.max_history_length = max_history_length
+        self.preserve_recent = preserve_recent
+
+    def needs_summarization(self, messages: Sequence[Message]) -> bool:
+        """Determine if the conversation history needs truncation."""
+        return len(messages) > self.max_history_length
+
+    async def summarize(self, messages: Sequence[Message]) -> str:
+        """Create a simple message indicating truncation (for protocol compatibility)."""
+        raise NotImplementedError("Truncation summarizer does not support summarization.")
+
+    async def summarize_history(self, messages: list[Message]) -> list[Message]:
+        """Truncate conversation history while preserving recent messages.
+
+        This method:
+        1. Removes system messages (they should be added by the agent)
+        2. Keeps only the most recent messages
+        3. Ensures tool call/result pairs stay together
+
+        Args:
+            messages: The complete list of messages to process
+
+        Returns:
+            A list of Message objects containing only the most recent messages
+        """
+        if not messages:
+            return []
+
+        # Filter out system messages
+        non_system_messages = [msg for msg in messages if msg.role != "system"]
+
+        if len(non_system_messages) <= self.preserve_recent:
+            return filter_tool_call_pairs(non_system_messages)
+
+        # Keep only the most recent messages
+        recent_messages = non_system_messages[-self.preserve_recent :]
+
+        # Filter tool calls to maintain pairs
+        filtered_messages = filter_tool_call_pairs(recent_messages)
+
+        logger.debug(
+            "Truncated message count: %d (from=%d, preserved=%d)",
+            len(filtered_messages),
+            len(messages),
+            self.preserve_recent,
+        )
+
+        return filtered_messages
