@@ -1,7 +1,6 @@
 import asyncio
 from collections import deque
 from collections.abc import AsyncGenerator
-from copy import deepcopy
 
 import litellm
 import orjson
