@@ -36,172 +36,36 @@ class Swarm:
         self.agent_messages: list[Message] = []
         self.agent_queue: deque[Agent] = deque()
         self.stream_handler = stream_handler
-        self.messages: list[Message] = []
+        self.full_history: list[Message] = []
+        self.working_history: list[Message] = []
         self.summarizer = summarizer or LiteSummarizer()
 
-    def _get_last_messages(
-        self,
-        limit: int | None = None,
-        roles: list[str] | None = None,
-    ) -> list[Message]:
-        """Retrieve messages from the conversation history with optional filtering.
-
-        Allows filtering the conversation history by message roles (e.g., 'user', 'assistant', 'tool')
-        and limiting the number of messages returned. Messages are returned in chronological order.
-
-        Args:
-            limit: Maximum number of messages to return. If None, returns all matching messages.
-            roles: List of roles to filter by (e.g., ['user', 'assistant']). If None, returns all roles.
-
-        Returns:
-            A list of Message objects matching the specified criteria, ordered chronologically.
-        """
-        if not roles:
-            return self.messages[-limit:] if limit else self.messages
-
-        filtered_messages = [msg for msg in self.messages if msg.role in roles and msg.content]
-
-        return filtered_messages[-limit:] if limit else filtered_messages
-
-    def _get_initial_conversation(
+    async def _prepare_agent_context(
         self,
         agent: Agent,
         prompt: str | None = None,
     ) -> list[Message]:
-        """Initialize a conversation with an agent's system instructions and optional prompt.
+        """Prepare the agent's context using the working history.
 
-        Creates the initial conversation state for an agent by setting up the system message
-        with the agent's instructions and optionally adding a user prompt message.
+        Creates initial context for an agent by combining:
+        1. Agent's system instructions
+        2. Optional user prompt
+        3. Filtered working history (excluding system messages)
 
         Args:
-            agent: The agent whose instructions should be used for the system message
-            prompt: Optional initial user message to add to the conversation
+            agent: The agent whose context is being prepared
+            prompt: Optional initial user message to add
 
         Returns:
-            A list of Message objects containing the system instructions and optional prompt
+            List of messages representing the agent's context
         """
-        conversation = [Message(role="system", content=agent.instructions)]
-
+        initial_messages = [Message(role="system", content=agent.instructions)]
         if prompt:
-            conversation.extend([Message(role="user", content=prompt)])
+            initial_messages.append(Message(role="user", content=prompt))
 
-        return conversation
+        filtered_history = [msg for msg in self.working_history if msg.role != "system"]
 
-    def _summarize_messages(
-        self,
-        messages: list[Message],
-        max_length: int,
-        context_size: int,
-    ) -> list[Message]:
-        """Summarize a conversation history to maintain a manageable context window.
-
-        Creates a condensed version of the conversation history by keeping the initial task,
-        adding a summary placeholder, and including the most recent messages. This helps
-        maintain context while preventing the conversation from growing too large.
-
-        Args:
-            messages: The complete list of messages to summarize
-            max_length: Maximum number of messages to keep before summarizing
-            context_size: Number of recent messages to preserve when summarizing
-
-        Returns:
-            A list of Message objects containing the summarized conversation
-        """
-        if len(messages) <= max_length:
-            return messages
-
-        first_message = messages[0]
-        recent_messages = messages[-context_size:]
-        if first_message in recent_messages:
-            recent_messages.remove(first_message)
-
-        return [
-            first_message,
-            Message(
-                role="assistant",
-                content="... Previous conversation summarized ...",
-            ),
-            *recent_messages,
-        ]
-
-    def _process_tool_call_messages(
-        self,
-        messages: list[Message],
-    ) -> list[Message]:
-        """Process messages to maintain proper tool call context and relationships.
-
-        Ensures that tool response messages are properly paired with their corresponding
-        tool call messages from the assistant. This maintains the logical flow of tool-based
-        interactions while removing orphaned tool responses.
-
-        Args:
-            messages: List of messages to process
-
-        Returns:
-            A list of Message objects with properly maintained tool call relationships,
-            where each tool response is preceded by its corresponding tool call
-        """
-        processed_messages: list[Message] = []
-        tool_call_map: dict[str, Message] = {}
-
-        for message in messages:
-            if message.role == "assistant":
-                tool_calls = message.tool_calls or []
-                for tool_call in tool_calls:
-                    if tool_call_id := tool_call.id:
-                        tool_call_map[tool_call_id] = message
-                processed_messages.append(message)
-            elif message.role == "tool":
-                tool_call_id = message.tool_call_id
-                if tool_call_id and tool_call_id in tool_call_map:
-                    processed_messages.append(message)
-            else:
-                processed_messages.append(message)
-
-        return processed_messages
-
-    def _prepare_agent_context(
-        self,
-        agent: Agent,
-        prompt: str | None = None,
-        max_length: int = 6,
-        context_size: int = 5,
-    ) -> list[Message]:
-        """Prepare context for a new agent, maintaining conversation history.
-
-        Args:
-            agent: The agent to prepare context for
-            prompt: The initial user message to add to the conversation
-            max_length: Maximum total messages to include
-            context_size: Number of recent messages to keep when truncating
-
-        Returns:
-            A list of prepared messages for the agent
-        """
-        messages = self._get_initial_conversation(agent, prompt)
-
-        # Get full relevant history
-        relevant_history = self._get_last_messages(roles=["user", "assistant", "tool"])
-
-        # Summarize relevant history if necessary
-        relevant_history = self._summarize_messages(relevant_history, max_length, context_size)
-
-        # Process messages to maintain tool call context
-        relevant_history = self._process_tool_call_messages(relevant_history)
-
-        # Make sure the last message is a user message
-        last_message = relevant_history[-1]
-        if last_message.role != "user":
-            relevant_history.append(
-                Message(
-                    role="user",
-                    content="Please continue with the task based on the context above.",
-                )
-            )
-
-        messages.extend(relevant_history)
-
-        return messages
+        return initial_messages + filtered_history
 
     async def _process_tool_call(
         self,
@@ -463,27 +327,33 @@ class Swarm:
 
         return messages
 
-    async def _handle_agent_switch(self) -> list[Message]:
+    async def _handle_agent_switch(self) -> None:
         """Handle switching to the next agent in the queue.
 
-        Manages the transition between agents, including context preparation
-        and notification of the switch through the stream handler.
-
-        Returns:
-            The new agent's prepared context messages
+        Manages the transition between agents by:
+        1. Updating agent state
+        2. Preparing new agent's context
+        3. Notifying stream handler of the switch
 
         Raises:
             IndexError: If there are no agents in the queue
         """
         previous_agent = self.active_agent
         next_agent = self.agent_queue.popleft()
-        agent_messages = self._prepare_agent_context(next_agent)
+        self.agent_messages = await self._prepare_agent_context(next_agent)
         self.active_agent = next_agent
 
         if self.stream_handler:
             await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
-        return agent_messages
+    async def _update_working_history(self) -> None:
+        """Update working history by summarizing full history when needed.
+
+        Checks if working history needs summarization and updates it using
+        the full history while maintaining token limits and context coherence.
+        """
+        if self.summarizer.needs_summarization(self.working_history):
+            self.working_history = await self.summarizer.summarize_history(self.full_history)
 
     async def stream(
         self,
@@ -516,21 +386,25 @@ class Swarm:
             Exception: Any errors that occur during processing
         """
         if messages:
-            self.messages.extend(messages)
+            self.full_history = messages.copy()
+            await self._update_working_history()
 
         if self.active_agent is None:
             self.active_agent = agent
-            self.messages.extend(self._get_initial_conversation(agent, prompt))
-            self.agent_messages = deepcopy(self.messages)
+            initial_context = await self._prepare_agent_context(agent, prompt)
+            self.full_history = initial_context.copy()
+            self.working_history = initial_context.copy()
+            self.agent_messages = initial_context.copy()
         else:
             user_message = Message(role="user", content=prompt)
-            self.messages.append(user_message)
+            self.full_history.append(user_message)
+            self.working_history.append(user_message)
             self.agent_messages.append(user_message)
 
         try:
             while self.active_agent or self.agent_queue:
                 if not self.active_agent and self.agent_queue:
-                    self.agent_messages = await self._handle_agent_switch()
+                    await self._handle_agent_switch()
 
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
@@ -546,7 +420,10 @@ class Swarm:
                 )
 
                 self.full_history.extend(new_messages)
+                self.working_history.extend(new_messages)
                 self.agent_messages.extend(new_messages)
+
+                await self._update_working_history()
 
                 if not last_tool_calls and not self.agent_queue:
                     break
@@ -558,7 +435,7 @@ class Swarm:
 
         finally:
             if self.stream_handler:
-                await self.stream_handler.on_complete(self.messages, self.active_agent)
+                await self.stream_handler.on_complete(self.full_history, self.active_agent)
 
             if cleanup:
                 self.active_agent = None
