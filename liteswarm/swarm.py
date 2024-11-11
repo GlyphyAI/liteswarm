@@ -480,5 +480,5 @@ class Swarm:
             content=full_response,
             agent=self.active_agent,
             agent_messages=self.agent_messages,
-            messages=self.messages,
+            messages=self.full_history,
         )
