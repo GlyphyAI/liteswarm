@@ -3,6 +3,7 @@ from typing import NoReturn
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
+from liteswarm.summarizer import Summarizer
 from liteswarm.swarm import Swarm
 from liteswarm.types import (
     Agent,
@@ -11,11 +12,16 @@ from liteswarm.types import (
     ToolCallAgentResult,
     ToolCallMessageResult,
     ToolCallResult,
+    Usage,
 )
 
 
 class ReplStreamHandler:
     """Stream handler for REPL interface with better formatting."""
+
+    def __init__(self) -> None:
+        """Initialize the stream handler with usage tracking."""
+        self._last_agent = None
 
     async def on_stream(
         self,
@@ -101,18 +107,31 @@ class ReplStreamHandler:
 class AgentRepl:
     """Interactive REPL for agent conversations."""
 
-    def __init__(self, agent: Agent, cleanup: bool = True) -> None:
+    def __init__(
+        self,
+        agent: Agent,
+        summarizer: Summarizer | None = None,
+        include_usage: bool = False,
+        cleanup: bool = True,
+    ) -> None:
         """Initialize the REPL with a starting agent.
 
         Args:
             agent: The initial agent to start conversations with
+            summarizer: A summarizer to use for summarizing conversation history
+            include_usage: Whether to include usage in the REPL stats
             cleanup: Whether to clear agent state after completion. If False,
                     maintains the last active agent for subsequent interactions
         """
         self.agent = agent
         self.cleanup = cleanup
-        self.swarm = Swarm(stream_handler=ReplStreamHandler())
+        self.swarm = Swarm(
+            stream_handler=ReplStreamHandler(),
+            summarizer=summarizer,
+            include_usage=include_usage,
+        )
         self.conversation: list[Message] = []
+        self.usage: Usage | None = None
 
     def _print_welcome(self) -> None:
         """Print welcome message and usage instructions."""
@@ -123,6 +142,7 @@ class AgentRepl:
         print("  /help    - Show this help message")
         print("  /clear   - Clear conversation history")
         print("  /history - Show conversation history")
+        print("  /stats   - Show conversation statistics")
         print("\nEnter your queries and press Enter. Use commands above to control the REPL.")
         print("\n" + "=" * 50 + "\n")
 
@@ -133,6 +153,39 @@ class AgentRepl:
             if msg.role != "system":
                 content = msg.content or "[No content]"
                 print(f"\n[{msg.role}]: {content}")
+        print("\n" + "=" * 50 + "\n")
+
+    def _print_stats(self) -> None:
+        """Print conversation statistics."""
+        print("\n📊 Conversation Statistics:")
+        print(f"Full history length: {len(self.conversation)} messages")
+        print(f"Working history length: {len(self.swarm.working_history)} messages")
+
+        if self.usage:
+            print("\nToken Usage:")
+            print(f"  Prompt tokens: {self.usage.prompt_tokens or 0:,}")
+            print(f"  Completion tokens: {self.usage.completion_tokens or 0:,}")
+            print(f"  Total tokens: {self.usage.total_tokens or 0:,}")
+
+            if self.usage.prompt_tokens_details:
+                print("\nPrompt Token Details:")
+                for key, value in self.usage.prompt_tokens_details:
+                    print(f"  {key}: {value:,}")
+
+            if self.usage.completion_tokens_details:
+                print("\nCompletion Token Details:")
+                for key, value in self.usage.completion_tokens_details:
+                    print(f"  {key}: {value:,}")
+
+        print("\nActive Agent:")
+        if self.swarm.active_agent:
+            print(f"  ID: {self.swarm.active_agent.agent_id}")
+            print(f"  Model: {self.swarm.active_agent.model}")
+            print(f"  Tools: {len(self.swarm.active_agent.tools)} available")
+        else:
+            print("  None")
+
+        print(f"\nPending agents in queue: {len(self.swarm.agent_queue)}")
         print("\n" + "=" * 50 + "\n")
 
     def _handle_command(self, command: str) -> bool:
@@ -155,6 +208,8 @@ class AgentRepl:
                 print("\n🧹 Conversation history cleared")
             case "/history":
                 self._print_history()
+            case "/stats":
+                self._print_stats()
             case _:
                 print("\n❌ Unknown command. Type /help for available commands.")
         return False
@@ -173,6 +228,7 @@ class AgentRepl:
                 cleanup=self.cleanup,
             )
             self.conversation = result.messages
+            self.usage = result.usage
             print("\n" + "=" * 50 + "\n")
         except Exception as e:
             print(f"\n❌ Error processing query: {str(e)}", file=sys.stderr)
@@ -213,13 +269,20 @@ class AgentRepl:
                 continue
 
 
-async def start_repl(agent: Agent, cleanup: bool = True) -> NoReturn:
+async def start_repl(
+    agent: Agent,
+    summarizer: Summarizer | None = None,
+    include_usage: bool = False,
+    cleanup: bool = True,
+) -> NoReturn:
     """Start a REPL session with the given agent.
 
     Args:
         agent: The agent to start the REPL with
+        summarizer: A summarizer to use for summarizing conversation history
+        include_usage: Whether to include usage in the REPL stats
         cleanup: Whether to clear agent state after completion. If False,
                 maintains the last active agent for subsequent interactions
     """
-    repl = AgentRepl(agent, cleanup)
+    repl = AgentRepl(agent, summarizer, include_usage, cleanup)
     await repl.run()
