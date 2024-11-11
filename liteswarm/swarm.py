@@ -230,17 +230,24 @@ class Swarm:
         """
         formatted_messages = [msg.model_dump(exclude_none=True) for msg in messages]
         tools = [function_to_json(tool) for tool in agent.tools]
-        agent_params = agent.params or {}
+        stream_options = {"include_usage": True} if self.include_usage else None
 
-        response_stream = await acompletion(
-            model=agent.model,
-            messages=formatted_messages,
-            stream=True,
-            tools=tools,
-            tool_choice=agent.tool_choice,
-            parallel_tool_calls=agent.parallel_tool_calls,
-            **agent_params,
-        )
+        completion_kwargs = {
+            "model": agent.model,
+            "messages": formatted_messages,
+            "tools": tools,
+            "tool_choice": agent.tool_choice,
+            "parallel_tool_calls": agent.parallel_tool_calls,
+            "stream": True,
+            "stream_options": stream_options,
+        }
+
+        agent_kwargs = agent.params or {}
+        for key, value in agent_kwargs.items():
+            if key not in completion_kwargs:
+                completion_kwargs[key] = value
+
+        response_stream = await acompletion(**completion_kwargs)
 
         if not isinstance(response_stream, CustomStreamWrapper):
             raise TypeError("Expected a CustomStreamWrapper instance.")
