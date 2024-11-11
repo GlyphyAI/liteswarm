@@ -27,6 +27,24 @@ litellm.modify_params = True
 
 
 class Swarm:
+    """A class that manages conversations with AI agents and their interactions.
+
+    The Swarm class handles:
+    1. Message history management (both full and working history)
+    2. Agent switching and tool execution
+    3. Conversation summarization
+    4. Streaming responses and tool calls
+
+    Attributes:
+        active_agent: Currently active agent handling the conversation
+        agent_messages: Messages relevant to current agent's context
+        agent_queue: Queue of agents waiting to be activated
+        stream_handler: Optional handler for streaming events
+        full_history: Complete conversation history
+        working_history: Summarized history within token limits
+        summarizer: Handles conversation summarization
+    """
+
     def __init__(
         self,
         stream_handler: StreamHandler | None = None,
@@ -74,19 +92,19 @@ class Swarm:
     ) -> ToolCallResult | None:
         """Process a single tool call and return its result.
 
-        This method handles the execution of a single function call, including error handling
-        and result transformation. It supports both regular function results and agent switching.
+        Handles the execution of a function call, including error handling
+        and result transformation. Supports both regular function results
+        and agent switching.
 
         Args:
-            tool_call: The tool call to process, containing function name and arguments
-            agent: The agent that initiated the tool call
+            tool_call: Tool call to process, containing function name and arguments
+            agent: Agent that initiated the tool call
 
         Returns:
-            A ToolCallResult object if the call was successful, None if the tool call failed
-            or the function wasn't found
+            ToolCallResult if successful, None if failed or function not found
 
         Raises:
-            ValueError: If the function arguments are invalid
+            ValueError: If function arguments are invalid
             Exception: Any exception raised by the function tool itself
         """
         function_name = tool_call.function.name
@@ -143,10 +161,10 @@ class Swarm:
             tool_calls: List of tool calls to process
 
         Returns:
-            List of successful tool call results, filtering out any failed calls
+            List of successful tool call results, filtering out failed calls
 
         Raises:
-            ValueError: If there is no active agent to process the tool calls
+            ValueError: If there is no active agent to process tool calls
         """
         agent = self.active_agent
         if not agent:
@@ -362,28 +380,25 @@ class Swarm:
         messages: list[Message] | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream thoughts and actions from the agent system.
+        """Stream agent responses and manage the conversation flow.
 
-        Manages the entire conversation flow, including:
-        - Initial context setup
-        - Agent response processing
-        - Tool call handling
-        - Agent switching
-        - Error handling and cleanup
+        Handles the complete conversation lifecycle including:
+        1. History initialization and management
+        2. Agent responses and tool calls
+        3. Agent switching
+        4. History summarization
 
         Args:
-            agent: The initial agent to start the conversation
-            prompt: The initial prompt to send to the agent
-            messages: Optional list of previous messages for context
-            cleanup: Whether to clear agent state after completion. If False,
-                maintains the last active agent for subsequent interactions.
+            agent: Initial agent to handle the conversation
+            prompt: Initial user prompt
+            messages: Optional previous conversation history
+            cleanup: Whether to clear agent state after completion
 
         Yields:
-            AgentResponse objects containing incremental updates from the agent
+            AgentResponse objects containing response content and state
 
         Raises:
-            ValueError: If there is no active agent
-            Exception: Any errors that occur during processing
+            Exception: Any errors during conversation processing
         """
         if messages:
             self.full_history = messages.copy()
@@ -456,18 +471,17 @@ class Swarm:
         for cases where streaming updates aren't needed.
 
         Args:
-            agent: The agent to execute the task
-            prompt: The prompt describing the task
-            messages: Optional list of previous messages for context
-            cleanup: Whether to clear agent state after completion. If False,
-                maintains the last active agent for subsequent interactions.
+            agent: Agent to execute the task
+            prompt: Prompt describing the task
+            messages: Optional previous messages for context
+            cleanup: Whether to clear agent state after completion
 
         Returns:
-            ConversationState containing the final response content and all messages
+            ConversationState containing final response and complete history
 
         Raises:
             ValueError: If there is no active agent
-            Exception: Any errors that occur during processing
+            Exception: Any errors during processing
         """
         full_response = ""
         response_stream = self.stream(agent, prompt, messages, cleanup)
