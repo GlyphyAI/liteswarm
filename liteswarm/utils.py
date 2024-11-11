@@ -7,6 +7,7 @@ from enum import Enum
 from numbers import Number
 from typing import Any, TypeVar, Union, get_type_hints
 
+from litellm import Usage
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
 
 from liteswarm.exceptions import CompletionError
@@ -415,3 +416,60 @@ def combine_dicts(
             result[key] = right_value
 
     return result
+
+
+def combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
+    """Combine two Usage objects by adding their token counts.
+
+    This function handles:
+    1. Cases where either usage is None
+    2. Addition of all token counts
+    3. Preservation of token details if present
+
+    Args:
+        left: First Usage object (or None)
+        right: Second Usage object (or None)
+
+    Returns:
+        Combined Usage object, or None if both inputs are None
+
+    Example:
+        >>> total = combine_usage(response1.usage, response2.usage)
+        >>> print(f"Total tokens: {total.total_tokens if total else 0}")
+    """
+    if left is None:
+        return right
+
+    if right is None:
+        return left
+
+    prompt_tokens = (left.prompt_tokens or 0) + (right.prompt_tokens or 0)
+    completion_tokens = (left.completion_tokens or 0) + (right.completion_tokens or 0)
+    total_tokens = (left.total_tokens or 0) + (right.total_tokens or 0)
+
+    lhs_reasoning_tokens = safe_get_attr(left, "reasoning_tokens", int) or 0
+    rhs_reasoning_tokens = safe_get_attr(right, "reasoning_tokens", int) or 0
+    reasoning_tokens = lhs_reasoning_tokens + rhs_reasoning_tokens
+
+    lhs_completion_tokens_details = safe_get_attr(left, "completion_tokens_details", dict)
+    rhs_completion_tokens_details = safe_get_attr(right, "completion_tokens_details", dict)
+    completion_tokens_details = combine_dicts(
+        lhs_completion_tokens_details,
+        rhs_completion_tokens_details,
+    )
+
+    lhs_prompt_tokens_details = safe_get_attr(left, "prompt_tokens_details", dict)
+    rhs_prompt_tokens_details = safe_get_attr(right, "prompt_tokens_details", dict)
+    prompt_tokens_details = combine_dicts(
+        lhs_prompt_tokens_details,
+        rhs_prompt_tokens_details,
+    )
+
+    return Usage(
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+        reasoning_tokens=reasoning_tokens,
+        completion_tokens_details=completion_tokens_details,
+        prompt_tokens_details=prompt_tokens_details,
+    )
