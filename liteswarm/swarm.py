@@ -53,6 +53,7 @@ class Swarm:
         self,
         stream_handler: StreamHandler | None = None,
         summarizer: Summarizer | None = None,
+        include_usage: bool = False,
         max_retries: int = 3,
         initial_retry_delay: float = 1.0,
         max_retry_delay: float = 10.0,
@@ -63,6 +64,7 @@ class Swarm:
         Args:
             stream_handler: Optional handler for streaming events
             summarizer: Optional summarizer for managing conversation history
+            include_usage: Whether to include token usage statistics in responses
             max_retries: Maximum number of retry attempts for API calls
             initial_retry_delay: Initial delay between retries in seconds
             max_retry_delay: Maximum delay between retries in seconds
@@ -75,6 +77,7 @@ class Swarm:
         self.full_history: list[Message] = []
         self.working_history: list[Message] = []
         self.summarizer = summarizer or LiteSummarizer()
+        self.include_usage = include_usage
 
         # Retry configuration
         self.max_retries = max_retries
