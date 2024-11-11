@@ -8,6 +8,7 @@ from numbers import Number
 from typing import Any, TypeVar, Union, get_type_hints
 
 from litellm import Usage
+from litellm.cost_calculator import cost_per_token
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
 
 from liteswarm.exceptions import CompletionError
@@ -499,3 +500,23 @@ def combine_response_cost(
         completion_tokens_cost=left.completion_tokens_cost + right.completion_tokens_cost,
     )
 
+
+def calculate_response_cost(model: str, usage: Usage) -> ResponseCost:
+    """Calculate the cost of a response based on the usage object.
+
+    Args:
+        model: The model used for the response
+        usage: The usage object for the response
+
+    Returns:
+        The cost of the response
+    """
+    prompt_tokens_cost, completion_tokens_cost = cost_per_token(
+        model=model,
+        usage_object=usage,
+    )
+
+    return ResponseCost(
+        prompt_tokens_cost=prompt_tokens_cost,
+        completion_tokens_cost=completion_tokens_cost,
+    )
