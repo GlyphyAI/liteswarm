@@ -68,6 +68,7 @@ class LiteSummarizer:
     3. Preserves tool call/result relationships
     4. Processes chunks concurrently for efficiency
     5. Excludes system messages from summarization
+    6. Supports fallback to another summarizer on failure
 
     Attributes:
         model: The LLM model to use for summarization
@@ -76,6 +77,7 @@ class LiteSummarizer:
         max_history_length: Maximum number of messages before summarization
         preserve_recent: Number of recent messages to keep unchanged
         chunk_size: Number of messages to summarize in each chunk
+        fallback_summarizer: Optional summarizer to use if LLM summarization fails
     """
 
     def __init__(  # noqa: PLR0913
@@ -86,7 +88,19 @@ class LiteSummarizer:
         max_history_length: int = 50,
         preserve_recent: int = 25,
         chunk_size: int = 25,
+        fallback_summarizer: Summarizer | None = None,
     ) -> None:
+        """Initialize the LiteLLM-based summarizer.
+
+        Args:
+            model: The LLM model to use for summarization
+            system_prompt: Custom system prompt for the summarization model
+            summarize_prompt: Custom prompt template for summarization requests
+            max_history_length: Maximum number of messages before summarization
+            preserve_recent: Number of recent messages to keep unchanged
+            chunk_size: Number of messages to summarize in each chunk
+            fallback_summarizer: Optional summarizer to use if LLM summarization fails
+        """
         self.model = model
         self.system_prompt = system_prompt or (
             "You are a helpful assistant that creates clear and concise summaries of conversations. "
@@ -103,6 +117,10 @@ class LiteSummarizer:
         self.max_history_length = max_history_length
         self.preserve_recent = preserve_recent
         self.chunk_size = chunk_size
+        self.fallback_summarizer = fallback_summarizer or TruncationSummarizer(
+            max_history_length=max_history_length,
+            preserve_recent=preserve_recent,
+        )
 
     def _group_messages_for_summary(self, messages: list[Message]) -> GroupedMessages:
         """Group messages into those to preserve and those to summarize.
@@ -267,12 +285,8 @@ class LiteSummarizer:
     async def summarize_history(self, messages: list[Message]) -> list[Message]:
         """Summarize conversation history while preserving important context.
 
-        This method:
-        1. Separates messages into preserved and summarized groups
-        2. Processes older messages in chunks concurrently
-        3. Combines summaries with preserved recent messages
-        4. Maintains chronological order and context
-        5. Preserves tool call/result relationships
+        This method attempts to summarize using the LLM first, and if that fails
+        and fallback is enabled, uses the fallback summarizer.
 
         Args:
             messages: The complete list of messages to process
@@ -282,52 +296,66 @@ class LiteSummarizer:
 
         Raises:
             TypeError: If LLM responses are not of the expected type
-            ValueError: If summarization fails
+            ValueError: If summarization fails and fallback is disabled or not available
         """
         if not messages:
             return []
 
-        # Split messages into those to preserve and those to summarize
-        to_preserve, to_summarize = self._group_messages_for_summary(messages)
-        if not to_summarize:
-            return to_preserve
+        try:
+            # Split messages into those to preserve and those to summarize
+            to_preserve, to_summarize = self._group_messages_for_summary(messages)
+            if not to_summarize:
+                return to_preserve
 
-        # Create chunks that preserve tool call/result pairs
-        chunks = self._create_message_chunks(to_summarize)
-        tasks = [self._summarize_message_chunk(chunk) for chunk in chunks]
+            # Create chunks that preserve tool call/result pairs
+            chunks = self._create_message_chunks(to_summarize)
+            tasks = [self._summarize_message_chunk(chunk) for chunk in chunks]
 
-        # Run summarization tasks concurrently
-        summaries: list[str]
-        match len(tasks):
-            case 0:
-                summaries = []
-            case 1:
-                summaries = [await tasks[0]]
-            case _:
-                summaries = await asyncio.gather(*tasks)
+            # Run summarization tasks concurrently
+            summaries: list[str]
+            match len(tasks):
+                case 0:
+                    summaries = []
+                case 1:
+                    summaries = [await tasks[0]]
+                case _:
+                    summaries = await asyncio.gather(*tasks)
 
-        # Combine summaries and preserved messages chronologically
-        final_messages = []
+            # Combine summaries and preserved messages chronologically
+            final_messages = []
 
-        if summaries:
-            combined_summary = "\n\n".join(summaries)
-            final_messages.append(
-                Message(
-                    role="assistant",
-                    content=f"Previous conversation history:\n{combined_summary}",
+            if summaries:
+                combined_summary = "\n\n".join(summaries)
+                final_messages.append(
+                    Message(
+                        role="assistant",
+                        content=f"Previous conversation history:\n{combined_summary}",
+                    )
                 )
+
+            final_messages.extend(to_preserve)
+
+            logger.debug(
+                "Final message count: %d (preserved=%d, summaries=%d)",
+                len(final_messages),
+                len(to_preserve),
+                len(summaries),
             )
 
-        final_messages.extend(to_preserve)
+            return final_messages
 
-        logger.debug(
-            "Final message count: %d (preserved=%d, summaries=%d)",
-            len(final_messages),
-            len(to_preserve),
-            len(summaries),
-        )
+        except Exception as e:
+            if self.fallback_summarizer:
+                logger.warning(
+                    "LLM summarization failed, falling back to %s: %s",
+                    self.fallback_summarizer.__class__.__name__,
+                    str(e),
+                )
 
-        return final_messages
+                return await self.fallback_summarizer.summarize_history(messages)
+
+            logger.error("Summarization failed and no fallback available: %s", str(e))
+            raise
 
 
 class TruncationSummarizer:
