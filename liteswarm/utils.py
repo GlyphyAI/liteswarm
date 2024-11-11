@@ -71,9 +71,7 @@ class FunctionConverter:
             return wrapped_schema
 
         except ValueError as e:
-            raise ValueError(
-                f"Failed to convert function {func.__name__}: {str(e)}"
-            ) from e
+            raise ValueError(f"Failed to convert function {func.__name__}: {str(e)}") from e
 
     @classmethod
     def _process_parameters(
