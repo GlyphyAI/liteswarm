@@ -267,8 +267,8 @@ class Swarm:
 
         return response_stream
 
-    async def _try_with_reduced_context(self) -> CustomStreamWrapper:
-        """Attempt to get completion with reduced context.
+    async def _retry_completion_with_trimmed_history(self) -> CustomStreamWrapper:
+        """Attempt completion with a trimmed message history.
 
         This method:
         1. Updates the working history to fit the active agent's token limit
@@ -335,7 +335,7 @@ class Swarm:
                 return await self._create_completion(agent, agent_messages)
             except ContextWindowExceededError:
                 logger.warning("Context window exceeded, attempting to reduce context size")
-                return await self._try_with_reduced_context()
+                return await self._retry_completion_with_trimmed_history()
 
         try:
             response_stream = await retry_with_exponential_backoff(
