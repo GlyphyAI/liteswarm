@@ -29,8 +29,10 @@ from liteswarm.utils import (
     combine_response_cost,
     combine_usage,
     function_to_json,
+    history_exceeds_token_limit,
     retry_with_exponential_backoff,
     safe_get_attr,
+    trim_messages,
 )
 
 litellm.modify_params = True
@@ -510,17 +512,29 @@ class Swarm:
         if self.stream_handler:
             await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
-    async def _update_working_history(self, force: bool = False) -> None:
-        """Update working history by summarizing full history when needed.
+    async def _update_working_history(self) -> None:
+        """Update the working history by either summarizing or trimming messages.
 
-        Args:
-            force: Whether to force summarization even if not needed
+        This method maintains the working history within token limits by:
+        1. Summarizing the full history if the summarizer determines it's necessary
+           (e.g., when history length or complexity exceeds defined thresholds)
+        2. Trimming the history if it exceeds the model's token limit but doesn't
+           yet need summarization
 
-        Checks if working history needs summarization and updates it using
-        the full history while maintaining token limits and context coherence.
+        The working history is updated in place, while the full history remains
+        unchanged to preserve the complete conversation record.
+
+        Note:
+            - Summarization takes precedence over trimming
+            - Trimming only occurs if there's an active agent (to determine token limits)
+            - If neither summarization nor trimming is needed, the working history
+              remains unchanged
         """
-        if force or self.summarizer.needs_summarization(self.working_history):
+        if self.summarizer.needs_summarization(self.working_history):
             self.working_history = await self.summarizer.summarize_history(self.full_history)
+        elif self.active_agent:
+            if history_exceeds_token_limit(self.working_history, self.active_agent.model):
+                self.working_history = trim_messages(self.full_history, self.active_agent.model)
 
     async def stream(
         self,
