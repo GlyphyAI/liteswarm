@@ -299,27 +299,64 @@ class Swarm:
                 current_length=len(reduced_messages),
             ) from e
 
+    async def _continue_generation(
+        self,
+        previous_content: str,
+        agent: Agent,
+    ) -> CustomStreamWrapper:
+        """Continue generation after hitting output token limit.
+
+        Args:
+            previous_content: Content generated so far
+            agent: Agent to use for continuation
+
+        Returns:
+            Response stream for the continuation
+
+        Raises:
+            ValueError: If agent parameters are invalid
+        """
+        continuation_messages = [
+            Message(role="system", content=agent.instructions),
+            Message(role="assistant", content=previous_content),
+            Message(
+                role="user",
+                content="Please continue your previous response.",
+            ),
+        ]
+
+        return await self._create_completion(agent, continuation_messages)
+
     async def _get_completion_response(
         self,
         agent_messages: list[Message],
     ) -> AsyncGenerator[CompletionResponse, None]:
         """Get completion response for the currently active agent.
 
-        Handles API errors with:
-        1. Exponential backoff for transient errors (rate limits, service unavailable)
-        2. Context reduction for context window exceeded errors
+        This method handles the process of obtaining a completion response from the active agent,
+        including handling API errors and managing response continuations when the output token
+        limit is reached.
+
+        The method performs the following:
+        1. Sends the initial completion request and handles context window errors by retrying
+           with a trimmed message history.
+        2. Streams the response, yielding each delta as it is received.
+        3. Automatically continues the response if the output token limit is reached, ensuring
+           seamless conversation flow.
+        4. Collects and yields usage statistics and response costs if configured.
 
         Args:
-            agent_messages: The messages to send to the agent
+            agent_messages: The messages to send to the agent for completion.
 
         Yields:
-            CompletionResponse objects containing the current delta and finish reason
+            CompletionResponse objects containing the current delta, finish reason, usage statistics,
+            and response cost.
 
         Raises:
-            ValueError: If there is no active agent
-            CompletionError: If completion fails after all retries
-            ContextLengthError: If context window is exceeded and can't be reduced
-            TypeError: If response is not of expected type
+            ValueError: If there is no active agent.
+            CompletionError: If completion fails after all retries.
+            ContextLengthError: If context window is exceeded and can't be reduced.
+            TypeError: If response is not of expected type.
         """
         agent = self.active_agent
         if not agent:
@@ -331,48 +368,68 @@ class Swarm:
             agent_messages,
         )
 
-        async def get_response() -> CustomStreamWrapper:
+        async def get_initial_response() -> CustomStreamWrapper:
             try:
                 return await self._create_completion(agent, agent_messages)
             except ContextWindowExceededError:
                 logger.warning("Context window exceeded, attempting to reduce context size")
                 return await self._retry_completion_with_trimmed_history()
 
+        accumulated_content: str = ""
+        current_stream: CustomStreamWrapper | None = None
+
         try:
-            response_stream = await retry_with_exponential_backoff(
-                get_response,
-                max_retries=self.max_retries,
-                initial_delay=self.initial_retry_delay,
-                max_delay=self.max_retry_delay,
-                backoff_factor=self.backoff_factor,
-            )
+            while True:
+                if current_stream is None:
+                    current_stream = await retry_with_exponential_backoff(
+                        get_initial_response,
+                        max_retries=self.max_retries,
+                        initial_delay=self.initial_retry_delay,
+                        max_delay=self.max_retry_delay,
+                        backoff_factor=self.backoff_factor,
+                    )
 
-            async for chunk in response_stream:
-                choice = chunk.choices[0]
-                if not isinstance(choice, StreamingChoices):
-                    raise TypeError("Expected a StreamingChoices instance.")
+                async for chunk in current_stream:
+                    choice = chunk.choices[0]
+                    if not isinstance(choice, StreamingChoices):
+                        raise TypeError("Expected a StreamingChoices instance.")
 
-                delta = Delta.from_delta(choice.delta)
-                finish_reason = choice.finish_reason
-                usage = safe_get_attr(chunk, "usage", Usage)
-                response_cost: ResponseCost | None = None
+                    delta = Delta.from_delta(choice.delta)
+                    finish_reason = choice.finish_reason
+                    usage = safe_get_attr(chunk, "usage", Usage)
+                    response_cost = None
 
-                if usage and self.include_cost:
-                    response_cost = calculate_response_cost(model=agent.model, usage=usage)
+                    if delta.content:
+                        accumulated_content += delta.content
 
-                yield CompletionResponse(
-                    delta=delta,
-                    finish_reason=finish_reason,
-                    usage=usage,
-                    response_cost=response_cost,
-                )
+                    if usage and self.include_cost:
+                        response_cost = calculate_response_cost(model=agent.model, usage=usage)
 
-        except ContextLengthError:
-            raise
+                    yield CompletionResponse(
+                        delta=delta,
+                        finish_reason=finish_reason,
+                        usage=usage,
+                        response_cost=response_cost,
+                    )
+
+                    if finish_reason == "length":
+                        logger.info("Response truncated due to length, continuing generation")
+                        current_stream = await self._continue_generation(
+                            accumulated_content,
+                            agent,
+                        )
+
+                        # This break will exit the `for` loop, but the `while` loop
+                        # will continue to process the response continuation
+                        break
+
+                else:
+                    break
 
         except CompletionError:
             raise
-
+        except ContextLengthError:
+            raise
         except Exception as e:
             raise CompletionError("Failed to get completion response", e) from e
 
