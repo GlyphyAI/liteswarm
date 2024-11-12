@@ -15,6 +15,7 @@ from liteswarm.types import (
     ToolCallResult,
     Usage,
 )
+from liteswarm.utils import combine_response_cost, combine_usage
 
 
 class ReplStreamHandler:
@@ -247,8 +248,8 @@ class AgentRepl:
                 cleanup=self.cleanup,
             )
             self.conversation = result.messages
-            self.usage = result.usage
-            self.response_cost = result.response_cost
+            self.usage = combine_usage(self.usage, result.usage)
+            self.response_cost = combine_response_cost(self.response_cost, result.response_cost)
             print("\n" + "=" * 50 + "\n")
         except Exception as e:
             print(f"\n❌ Error processing query: {str(e)}", file=sys.stderr)
