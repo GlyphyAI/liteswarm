@@ -90,9 +90,11 @@ class Swarm:
         self.active_agent: Agent | None = None
         self.agent_messages: list[Message] = []
         self.agent_queue: deque[Agent] = deque()
-        self.stream_handler = stream_handler or LiteStreamHandler()
         self.full_history: list[Message] = []
         self.working_history: list[Message] = []
+
+        # General properties
+        self.stream_handler = stream_handler or LiteStreamHandler()
         self.summarizer = summarizer or LiteSummarizer()
         self.include_usage = include_usage
         self.include_cost = include_cost
