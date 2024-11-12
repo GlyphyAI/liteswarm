@@ -7,7 +7,7 @@ import litellm
 import orjson
 from litellm import CustomStreamWrapper, acompletion
 from litellm.exceptions import ContextWindowExceededError
-from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices, Usage
+from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 
 from liteswarm.exceptions import CompletionError, ContextLengthError
 from liteswarm.stream_handler import LiteStreamHandler, StreamHandler
@@ -332,7 +332,7 @@ class Swarm:
 
         return await self._create_completion(agent, continuation_messages)
 
-    async def _get_completion_response(  # noqa: PLR0912
+    async def _get_completion_response(
         self,
         agent_messages: list[Message],
     ) -> AsyncGenerator[CompletionResponse, None]:
@@ -373,16 +373,75 @@ class Swarm:
             agent_messages,
         )
 
+        accumulated_content: str = ""
+        current_stream: CustomStreamWrapper | None = None
+        continuation_count = 0
+
         async def get_initial_response() -> CustomStreamWrapper:
+            """Get the initial response from the agent.
+
+            Returns:
+                Stream wrapper for the initial response
+
+            Raises:
+                ContextWindowExceededError: If the context window is exceeded
+            """
             try:
                 return await self._create_completion(agent, agent_messages)
             except ContextWindowExceededError:
                 logger.warning("Context window exceeded, attempting to reduce context size")
                 return await self._retry_completion_with_trimmed_history()
 
-        accumulated_content: str = ""
-        current_stream: CustomStreamWrapper | None = None
-        continuation_count = 0
+        async def process_stream_chunk(chunk: ModelResponse) -> CompletionResponse:
+            """Process a stream chunk and return a completion response.
+
+            Args:
+                chunk: The stream chunk to process
+
+            Returns:
+                CompletionResponse containing the processed delta, finish reason, usage, and response cost
+            """
+            choice = chunk.choices[0]
+            if not isinstance(choice, StreamingChoices):
+                raise TypeError("Expected a StreamingChoices instance.")
+
+            delta = Delta.from_delta(choice.delta)
+            finish_reason = choice.finish_reason
+            usage = safe_get_attr(chunk, "usage", Usage)
+            response_cost = None
+
+            if usage and self.include_cost:
+                response_cost = calculate_response_cost(model=agent.model, usage=usage)
+
+            return CompletionResponse(
+                delta=delta,
+                finish_reason=finish_reason,
+                usage=usage,
+                response_cost=response_cost,
+            )
+
+        async def continue_generation() -> CustomStreamWrapper | None:
+            """Continue the generation of a response.
+
+            Returns:
+                Stream wrapper for the continuation, or None if the maximum number of
+                continuations is reached
+            """
+            if continuation_count >= self.max_response_continuations:
+                logger.warning(
+                    "Maximum response continuations (%d) reached",
+                    self.max_response_continuations,
+                )
+
+                return None
+
+            logger.info(
+                "Response continuation %d/%d",
+                continuation_count,
+                self.max_response_continuations,
+            )
+
+            return await self._continue_generation(accumulated_content, agent)
 
         try:
             while continuation_count < self.max_response_continuations:
@@ -396,50 +455,13 @@ class Swarm:
                     )
 
                 async for chunk in current_stream:
-                    choice = chunk.choices[0]
-                    if not isinstance(choice, StreamingChoices):
-                        raise TypeError("Expected a StreamingChoices instance.")
+                    yield (response := await process_stream_chunk(chunk))
 
-                    delta = Delta.from_delta(choice.delta)
-                    finish_reason = choice.finish_reason
-                    usage = safe_get_attr(chunk, "usage", Usage)
-                    response_cost = None
-
-                    if delta.content:
-                        accumulated_content += delta.content
-
-                    if usage and self.include_cost:
-                        response_cost = calculate_response_cost(model=agent.model, usage=usage)
-
-                    yield CompletionResponse(
-                        delta=delta,
-                        finish_reason=finish_reason,
-                        usage=usage,
-                        response_cost=response_cost,
-                    )
-
-                    if finish_reason == "length":
+                    if response.finish_reason == "length":
                         continuation_count += 1
-                        if continuation_count >= self.max_response_continuations:
-                            logger.warning(
-                                "Maximum response continuations (%d) reached",
-                                self.max_response_continuations,
-                            )
-
-                            # This will return control back to the method caller
-                            # as soon as the maximum number of continuations is reached
+                        current_stream = await continue_generation()
+                        if current_stream is None:
                             return
-
-                        logger.info(
-                            "Response continuation %d/%d",
-                            continuation_count,
-                            self.max_response_continuations,
-                        )
-
-                        current_stream = await self._continue_generation(
-                            accumulated_content,
-                            agent,
-                        )
 
                         # This break will exit the `for` loop, but the `while` loop
                         # will continue to process the response continuation
