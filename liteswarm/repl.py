@@ -30,6 +30,10 @@ class ReplStreamHandler:
     ) -> None:
         """Handle streaming content from agents."""
         if chunk.content:
+            # Show a continuation indicator if the response ended due to a length limit
+            if getattr(chunk, "finish_reason", None) == "length":
+                print("\n[...continuing...]", end="", flush=True)
+
             # Only print agent ID prefix for the first character of a new message
             if not hasattr(self, "_last_agent") or self._last_agent != agent:
                 agent_id = agent.agent_id if agent else "unknown"
