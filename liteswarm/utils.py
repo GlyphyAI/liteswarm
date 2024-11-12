@@ -10,6 +10,7 @@ from typing import Any, TypeVar, Union, get_type_hints
 from litellm import Usage
 from litellm.cost_calculator import cost_per_token
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
+from litellm.utils import get_max_tokens, token_counter
 from litellm.utils import trim_messages as litellm_trim_messages
 from pydantic import ValidationError
 
@@ -316,6 +317,25 @@ def trim_messages(messages: list[Message], model: str | None = None) -> list[Mes
             continue
 
     return final_messages
+
+
+def history_exceeds_token_limit(messages: list[Message], model: str) -> bool:
+    """Check if the history exceeds the token limit for the model.
+
+    Args:
+        messages: List of messages to check
+        model: The model to check against
+
+    Returns:
+        True if the history exceeds the token limit, False otherwise
+    """
+    max_tokens = get_max_tokens(model)
+    if max_tokens is None:
+        return False
+
+    history_tokens = token_counter(model, messages=messages)
+
+    return history_tokens > max_tokens
 
 
 async def retry_with_exponential_backoff(
