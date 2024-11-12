@@ -118,8 +118,8 @@ class Swarm:
 
         Creates initial context for an agent by combining:
         1. Agent's system instructions
-        2. Optional user prompt
-        3. Filtered working history (excluding system messages)
+        2. Filtered working history (excluding system messages)
+        3. Optional user prompt
 
         Args:
             agent: The agent whose context is being prepared
@@ -128,13 +128,13 @@ class Swarm:
         Returns:
             List of messages representing the agent's context
         """
-        initial_messages = [Message(role="system", content=agent.instructions)]
+        history = [msg for msg in self.working_history if msg.role != "system"]
+        messages = [Message(role="system", content=agent.instructions), *history]
+
         if prompt:
-            initial_messages.append(Message(role="user", content=prompt))
+            messages.append(Message(role="user", content=prompt))
 
-        filtered_history = [msg for msg in self.working_history if msg.role != "system"]
-
-        return initial_messages + filtered_history
+        return messages
 
     async def _process_tool_call(
         self,
