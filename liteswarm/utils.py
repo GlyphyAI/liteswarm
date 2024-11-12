@@ -12,7 +12,6 @@ from litellm.cost_calculator import cost_per_token
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
 from litellm.utils import get_max_tokens, token_counter
 from litellm.utils import trim_messages as litellm_trim_messages
-from pydantic import ValidationError
 
 from liteswarm.exceptions import CompletionError
 from liteswarm.types import Message, ResponseCost
@@ -331,17 +330,12 @@ def trim_messages(messages: list[Message], model: str | None = None) -> list[Mes
     Returns:
         List of trimmed messages
     """
-    dict_messages = [message.model_dump(exclude_none=True) for message in messages]
+    dict_messages = dump_messages(messages)
     trimmed_messages = litellm_trim_messages(dict_messages, model)
+    if isinstance(trimmed_messages, tuple):
+        trimmed_messages = trimmed_messages[0]
 
-    final_messages: list[Message] = []
-    for message in trimmed_messages:
-        try:
-            final_messages.append(Message.model_validate(message))
-        except ValidationError:
-            continue
-
-    return final_messages
+    return load_messages(trimmed_messages)
 
 
 def history_exceeds_token_limit(messages: list[Message], model: str) -> bool:
