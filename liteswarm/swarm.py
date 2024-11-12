@@ -70,6 +70,8 @@ class Swarm:
         initial_retry_delay: float = 1.0,
         max_retry_delay: float = 10.0,
         backoff_factor: float = 2.0,
+        max_response_continuations: int = 5,
+        max_agent_switches: int = 10,
     ) -> None:
         """Initialize the Swarm.
 
@@ -82,6 +84,8 @@ class Swarm:
             initial_retry_delay: Initial delay between retries in seconds
             max_retry_delay: Maximum delay between retries in seconds
             backoff_factor: Factor to multiply delay by after each retry
+            max_response_continuations: Maximum number of response continuations allowed
+            max_agent_switches: Maximum number of agent switches allowed in a conversation
         """
         self.active_agent: Agent | None = None
         self.agent_messages: list[Message] = []
@@ -98,6 +102,10 @@ class Swarm:
         self.initial_retry_delay = initial_retry_delay
         self.max_retry_delay = max_retry_delay
         self.backoff_factor = backoff_factor
+
+        # Safety limits
+        self.max_response_continuations = max_response_continuations
+        self.max_agent_switches = max_agent_switches
 
     async def _prepare_agent_context(
         self,
@@ -327,7 +335,7 @@ class Swarm:
 
         return await self._create_completion(agent, continuation_messages)
 
-    async def _get_completion_response(
+    async def _get_completion_response(  # noqa: PLR0912
         self,
         agent_messages: list[Message],
     ) -> AsyncGenerator[CompletionResponse, None]:
@@ -377,9 +385,10 @@ class Swarm:
 
         accumulated_content: str = ""
         current_stream: CustomStreamWrapper | None = None
+        continuation_count = 0
 
         try:
-            while True:
+            while continuation_count < self.max_response_continuations:
                 if current_stream is None:
                     current_stream = await retry_with_exponential_backoff(
                         get_initial_response,
@@ -413,7 +422,23 @@ class Swarm:
                     )
 
                     if finish_reason == "length":
-                        logger.info("Response truncated due to length, continuing generation")
+                        continuation_count += 1
+                        if continuation_count >= self.max_response_continuations:
+                            logger.warning(
+                                "Maximum response continuations (%d) reached",
+                                self.max_response_continuations,
+                            )
+
+                            # This will return control back to the method caller
+                            # as soon as the maximum number of continuations is reached
+                            return
+
+                        logger.info(
+                            "Response continuation %d/%d",
+                            continuation_count,
+                            self.max_response_continuations,
+                        )
+
                         current_stream = await self._continue_generation(
                             accumulated_content,
                             agent,
@@ -594,7 +619,7 @@ class Swarm:
             if history_exceeds_token_limit(self.working_history, self.active_agent.model):
                 self.working_history = trim_messages(self.full_history, self.active_agent.model)
 
-    async def stream(
+    async def stream(  # noqa: PLR0912
         self,
         agent: Agent,
         prompt: str,
@@ -637,9 +662,26 @@ class Swarm:
             self.working_history.append(user_message)
             self.agent_messages.append(user_message)
 
+        agent_switch_count = 0
+
         try:
             while self.active_agent or self.agent_queue:
                 if not self.active_agent and self.agent_queue:
+                    agent_switch_count += 1
+                    if agent_switch_count > self.max_agent_switches:
+                        logger.warning(
+                            "Maximum agent switches (%d) reached",
+                            self.max_agent_switches,
+                        )
+
+                        break
+
+                    logger.info(
+                        "Agent switch %d/%d",
+                        agent_switch_count,
+                        self.max_agent_switches,
+                    )
+
                     await self._handle_agent_switch()
 
                 last_content = ""
