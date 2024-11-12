@@ -7,6 +7,7 @@ from litellm.types.utils import (
     FunctionCall,
     Usage,
 )
+from litellm.types.utils import Delta as LiteDelta
 from pydantic import BaseModel, Field
 from typing_extensions import Protocol
 
@@ -33,7 +34,7 @@ class Delta(BaseModel):
     audio: ChatCompletionAudioResponse | None = None
 
     @classmethod
-    def from_delta(cls, delta: Any) -> "Delta":
+    def from_delta(cls, delta: LiteDelta) -> "Delta":
         return cls(
             content=delta.content,
             role=delta.role,
