@@ -717,6 +717,7 @@ class Swarm:
         1. Gets the next agent from the queue
         2. Updates the active agent and agent messages
         3. Notifies the stream handler of the switch
+        4. Preserves conversation history for the new agent
 
         Args:
             switch_count: Current number of agent switches in the conversation
@@ -729,7 +730,6 @@ class Swarm:
                 "Maximum agent switches (%d) reached",
                 self.max_agent_switches,
             )
-
             return False
 
         if not self.agent_queue:
@@ -744,10 +744,11 @@ class Swarm:
         next_agent = self.agent_queue.popleft()
         next_agent.state = "active"
 
-        await self.stream_handler.on_agent_switch(self.active_agent, next_agent)
-
+        previous_agent = self.active_agent
         self.active_agent = next_agent
         self.agent_messages = await self._prepare_agent_context(next_agent)
+
+        await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
         return True
 
