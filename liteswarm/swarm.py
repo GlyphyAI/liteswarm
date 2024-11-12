@@ -24,6 +24,7 @@ from liteswarm.types import (
     ToolCallAgentResult,
     ToolCallMessageResult,
     ToolCallResult,
+    ToolMessage,
 )
 from liteswarm.utils import (
     calculate_response_cost,
@@ -209,8 +210,8 @@ class Swarm:
     async def _process_tool_call_result(
         self,
         result: ToolCallResult,
-    ) -> Message:
-        """Process a tool call result and return a message to update the conversation.
+    ) -> ToolMessage:
+        """Process a tool call result and prepare the appropriate message response.
 
         Updates message history and agent state based on the tool call result.
         Handles both message results and agent switching.
@@ -226,17 +227,16 @@ class Swarm:
         """
         match result:
             case ToolCallMessageResult() as message_result:
-                return message_result.message
+                return ToolMessage(message=message_result.message)
 
             case ToolCallAgentResult() as agent_result:
-                self.agent_queue.append(agent_result.agent)
-                if self.active_agent:
-                    self.active_agent.state = "stale"
-
-                return Message(
-                    role="tool",
-                    content=f"Switching to agent {agent_result.agent.id}",
-                    tool_call_id=result.tool_call.id,
+                return ToolMessage(
+                    message=Message(
+                        role="tool",
+                        content=f"Switching to agent {agent_result.agent.id}",
+                        tool_call_id=result.tool_call.id,
+                    ),
+                    agent=agent_result.agent,
                 )
 
             case _:
@@ -595,7 +595,11 @@ class Swarm:
             tool_call_results = await self._process_tool_calls(agent, tool_calls)
             for tool_call_result in tool_call_results:
                 tool_message = await self._process_tool_call_result(tool_call_result)
-                messages.append(tool_message)
+                if tool_message.agent:
+                    agent.state = "stale"
+                    self.agent_queue.append(tool_message.agent)
+
+                messages.append(tool_message.message)
 
         return messages
 
