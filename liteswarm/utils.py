@@ -10,6 +10,8 @@ from typing import Any, TypeVar, Union, get_type_hints
 from litellm import Usage
 from litellm.cost_calculator import cost_per_token
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
+from litellm.utils import trim_messages as litellm_trim_messages
+from pydantic import ValidationError
 
 from liteswarm.exceptions import CompletionError
 from liteswarm.types import Message, ResponseCost
@@ -291,6 +293,29 @@ def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
             filtered_messages.append(message)
 
     return filtered_messages
+
+
+def trim_messages(messages: list[Message], model: str | None = None) -> list[Message]:
+    """Trim messages to the maximum token limit for the model.
+
+    Args:
+        messages: List of messages to trim
+        model: The model to use for trimming
+
+    Returns:
+        List of trimmed messages
+    """
+    dict_messages = [message.model_dump(exclude_none=True) for message in messages]
+    trimmed_messages = litellm_trim_messages(dict_messages, model)
+
+    final_messages: list[Message] = []
+    for message in trimmed_messages:
+        try:
+            final_messages.append(Message.model_validate(message))
+        except ValidationError:
+            continue
+
+    return final_messages
 
 
 async def retry_with_exponential_backoff(
