@@ -271,7 +271,7 @@ class Swarm:
         """Attempt to get completion with reduced context.
 
         This method:
-        1. Updates working history with more aggressive summarization
+        1. Updates the working history to fit the active agent's token limit
         2. Prepares new messages with reduced context
         3. Attempts completion with reduced context
 
@@ -285,7 +285,7 @@ class Swarm:
         if not self.active_agent:
             raise ValueError("No active agent")
 
-        await self._update_working_history(force=True)
+        await self._update_working_history()
 
         reduced_messages = await self._prepare_agent_context(self.active_agent)
 
