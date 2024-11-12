@@ -64,7 +64,7 @@ class Agent(BaseModel):
     @classmethod
     def create(  # noqa: PLR0913
         cls,
-        agent_id: str,
+        id: str,
         model: str,
         instructions: str,
         tools: list[Tool] | None = None,
@@ -73,7 +73,7 @@ class Agent(BaseModel):
         **params: Any,
     ) -> Self:
         return cls(
-            agent_id=agent_id,
+            id=id,
             model=model,
             instructions=instructions,
             tools=tools or [],
