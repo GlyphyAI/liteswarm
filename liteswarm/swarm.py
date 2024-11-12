@@ -136,8 +136,8 @@ class Swarm:
 
     async def _process_tool_call(
         self,
-        tool_call: ChatCompletionDeltaToolCall,
         agent: Agent,
+        tool_call: ChatCompletionDeltaToolCall,
     ) -> ToolCallResult | None:
         """Process a single tool call and return its result.
 
@@ -146,8 +146,8 @@ class Swarm:
         and agent switching.
 
         Args:
-            tool_call: Tool call to process, containing function name and arguments
             agent: Agent that initiated the tool call
+            tool_call: Tool call to process, containing function name and arguments
 
         Returns:
             ToolCallResult if successful, None if failed or function not found
@@ -216,7 +216,7 @@ class Swarm:
         if not agent:
             raise ValueError("No active agent to process tool calls.")
 
-        tasks = [self._process_tool_call(tool_call, agent) for tool_call in tool_calls]
+        tasks = [self._process_tool_call(agent, tool_call) for tool_call in tool_calls]
 
         results: list[ToolCallResult | None]
         match len(tasks):
@@ -273,7 +273,10 @@ class Swarm:
 
         return response_stream
 
-    async def _retry_completion_with_trimmed_history(self) -> CustomStreamWrapper:
+    async def _retry_completion_with_trimmed_history(
+        self,
+        agent: Agent,
+    ) -> CustomStreamWrapper:
         """Attempt completion with a trimmed message history.
 
         This method:
@@ -281,22 +284,21 @@ class Swarm:
         2. Prepares new messages with reduced context
         3. Attempts completion with reduced context
 
+        Args:
+            agent: Agent to use for completion
+
         Returns:
             Response stream from the completion
 
         Raises:
             ContextLengthError: If context is still too large after reduction
-            ValueError: If there is no active agent
         """
-        if not self.active_agent:
-            raise ValueError("No active agent")
-
         await self._update_working_history()
 
-        reduced_messages = await self._prepare_agent_context(self.active_agent)
+        reduced_messages = await self._prepare_agent_context(agent)
 
         try:
-            return await self._create_completion(self.active_agent, reduced_messages)
+            return await self._create_completion(agent, reduced_messages)
         except ContextWindowExceededError as e:
             raise ContextLengthError(
                 "Context window exceeded even after reduction attempt",
@@ -306,20 +308,17 @@ class Swarm:
 
     async def _continue_generation(
         self,
-        previous_content: str,
         agent: Agent,
+        previous_content: str,
     ) -> CustomStreamWrapper:
         """Continue generation after hitting output token limit.
 
         Args:
-            previous_content: Content generated so far
             agent: Agent to use for continuation
+            previous_content: Content generated so far
 
         Returns:
             Response stream for the continuation
-
-        Raises:
-            ValueError: If agent parameters are invalid
         """
         continuation_messages = [
             Message(role="system", content=agent.instructions),
