@@ -333,172 +333,226 @@ class Swarm:
 
     async def _get_completion_response(
         self,
+        agent: Agent,
         agent_messages: list[Message],
     ) -> AsyncGenerator[CompletionResponse, None]:
-        """Get completion response for the currently active agent.
+        """Stream completion responses from the agent, handling continuations and errors.
 
-        This method handles the process of obtaining a completion response from the active agent,
-        including handling API errors and managing response continuations when the output token
-        limit is reached.
-
-        The method performs the following:
-        1. Sends the initial completion request and handles context window errors by retrying
-           with a trimmed message history.
-        2. Streams the response, yielding each delta as it is received.
-        3. Automatically continues the response if the output token limit is reached, ensuring
-           seamless conversation flow.
-        4. Collects and yields usage statistics and response costs if configured.
+        This method manages the streaming response lifecycle, including:
+        1. Getting the initial response stream
+        2. Processing stream chunks into completion responses
+        3. Handling response continuations when output length limits are reached
+        4. Managing errors and retries
 
         Args:
-            agent_messages: The messages to send to the agent for completion.
+            agent: Agent to use for completion
+            agent_messages: Messages to send to the agent
 
         Yields:
-            CompletionResponse objects containing the current delta, finish reason, usage statistics,
-            and response cost.
+            CompletionResponse objects containing:
+            - Current response delta
+            - Finish reason
+            - Token usage statistics (if enabled)
+            - Response cost (if enabled)
 
         Raises:
-            ValueError: If there is no active agent.
-            CompletionError: If completion fails after all retries.
-            ContextLengthError: If context window is exceeded and can't be reduced.
-            TypeError: If response is not of expected type.
+            CompletionError: If completion fails after all retries
+            ContextLengthError: If context window is exceeded and can't be reduced
         """
-        agent = self.active_agent
-        if not agent:
-            raise ValueError("No active agent")
-
         logger.debug(
             "Sending messages to agent [%s]: %s",
             agent.agent_id,
             agent_messages,
         )
 
-        accumulated_content: str = ""
-        current_stream: CustomStreamWrapper | None = None
+        accumulated_content = ""
         continuation_count = 0
-
-        async def get_initial_response() -> CustomStreamWrapper:
-            """Get the initial response from the agent.
-
-            Returns:
-                Stream wrapper for the initial response
-
-            Raises:
-                ContextWindowExceededError: If the context window is exceeded
-            """
-            try:
-                return await self._create_completion(agent, agent_messages)
-            except ContextWindowExceededError:
-                logger.warning("Context window exceeded, attempting to reduce context size")
-                return await self._retry_completion_with_trimmed_history()
-
-        async def process_stream_chunk(chunk: ModelResponse) -> CompletionResponse:
-            """Process a stream chunk and return a completion response.
-
-            Args:
-                chunk: The stream chunk to process
-
-            Returns:
-                CompletionResponse containing the processed delta, finish reason, usage, and response cost
-            """
-            choice = chunk.choices[0]
-            if not isinstance(choice, StreamingChoices):
-                raise TypeError("Expected a StreamingChoices instance.")
-
-            delta = Delta.from_delta(choice.delta)
-            finish_reason = choice.finish_reason
-            usage = safe_get_attr(chunk, "usage", Usage)
-            response_cost = None
-
-            if usage and self.include_cost:
-                response_cost = calculate_response_cost(model=agent.model, usage=usage)
-
-            return CompletionResponse(
-                delta=delta,
-                finish_reason=finish_reason,
-                usage=usage,
-                response_cost=response_cost,
-            )
-
-        async def continue_generation() -> CustomStreamWrapper | None:
-            """Continue the generation of a response.
-
-            Returns:
-                Stream wrapper for the continuation, or None if the maximum number of
-                continuations is reached
-            """
-            if continuation_count >= self.max_response_continuations:
-                logger.warning(
-                    "Maximum response continuations (%d) reached",
-                    self.max_response_continuations,
-                )
-
-                return None
-
-            logger.info(
-                "Response continuation %d/%d",
-                continuation_count,
-                self.max_response_continuations,
-            )
-
-            return await self._continue_generation(accumulated_content, agent)
+        current_stream = await self._get_initial_stream(agent, agent_messages)
 
         try:
             while continuation_count < self.max_response_continuations:
-                if current_stream is None:
-                    current_stream = await retry_with_exponential_backoff(
-                        get_initial_response,
-                        max_retries=self.max_retries,
-                        initial_delay=self.initial_retry_delay,
-                        max_delay=self.max_retry_delay,
-                        backoff_factor=self.backoff_factor,
-                    )
+                if not current_stream:
+                    break
 
                 async for chunk in current_stream:
-                    yield (response := await process_stream_chunk(chunk))
+                    response = await self._process_stream_chunk(agent, chunk)
+                    if response.delta.content:
+                        accumulated_content += response.delta.content
+
+                    yield response
 
                     if response.finish_reason == "length":
                         continuation_count += 1
-                        current_stream = await continue_generation()
-                        if current_stream is None:
-                            return
+                        current_stream = await self._handle_continuation(
+                            agent,
+                            continuation_count,
+                            accumulated_content,
+                        )
 
                         # This break will exit the `for` loop, but the `while` loop
                         # will continue to process the response continuation
                         break
-
                 else:
                     break
 
-        except CompletionError:
-            raise
-        except ContextLengthError:
+        except (CompletionError, ContextLengthError):
             raise
         except Exception as e:
             raise CompletionError("Failed to get completion response", e) from e
 
-    async def _process_agent_response(
+    async def _get_initial_stream(
         self,
+        agent: Agent,
         agent_messages: list[Message],
-    ) -> AsyncGenerator[AgentResponse, None]:
-        """Process agent responses and yield updates with accumulated state.
+    ) -> CustomStreamWrapper:
+        """Create initial completion stream with retry and context reduction.
 
-        Streams the agent's responses while maintaining the overall state of the conversation,
-        including accumulated content and tool calls.
+        This method:
+        1. Attempts to create a completion stream with the given messages
+        2. On context window errors, retries with reduced context
+        3. Uses exponential backoff for retries
 
         Args:
-            agent_messages: The messages to send to the agent
+            agent: Agent to use for completion
+            agent_messages: Messages to send to the agent
 
-        Yields:
-            AgentResponse objects containing the current delta and accumulated state
+        Returns:
+            Stream wrapper for the completion response
 
         Raises:
-            ValueError: If there is no active agent
-            TypeError: If the response stream is not of the expected type
+            CompletionError: If completion fails after all retries
+            ContextLengthError: If context window is exceeded and can't be reduced
+        """
+
+        async def get_initial_response() -> CustomStreamWrapper:
+            try:
+                return await self._create_completion(agent, agent_messages)
+            except ContextWindowExceededError:
+                logger.warning("Context window exceeded, attempting to reduce context size")
+                return await self._retry_completion_with_trimmed_history(agent)
+
+        return await retry_with_exponential_backoff(
+            get_initial_response,
+            max_retries=self.max_retries,
+            initial_delay=self.initial_retry_delay,
+            max_delay=self.max_retry_delay,
+            backoff_factor=self.backoff_factor,
+        )
+
+    async def _process_stream_chunk(
+        self,
+        agent: Agent,
+        chunk: ModelResponse,
+    ) -> CompletionResponse:
+        """Convert a raw stream chunk into a structured completion response.
+
+        This method:
+        1. Extracts delta and finish reason from the chunk
+        2. Processes usage statistics if enabled
+        3. Calculates response cost if enabled
+
+        Args:
+            agent: Agent to use for model and cost calculation
+            chunk: Raw response chunk from the model
+
+        Returns:
+            Structured completion response with delta, finish reason, and optional stats
+
+        Raises:
+            TypeError: If chunk format is invalid
+        """
+        choice = chunk.choices[0]
+        if not isinstance(choice, StreamingChoices):
+            raise TypeError("Expected a StreamingChoices instance.")
+
+        delta = Delta.from_delta(choice.delta)
+        finish_reason = choice.finish_reason
+        usage = safe_get_attr(chunk, "usage", Usage)
+        response_cost = None
+
+        if usage and self.include_cost:
+            response_cost = calculate_response_cost(
+                model=agent.model,
+                usage=usage,
+            )
+
+        return CompletionResponse(
+            delta=delta,
+            finish_reason=finish_reason,
+            usage=usage,
+            response_cost=response_cost,
+        )
+
+    async def _handle_continuation(
+        self,
+        agent: Agent,
+        continuation_count: int,
+        accumulated_content: str,
+    ) -> CustomStreamWrapper | None:
+        """Create a continuation stream when response length limit is reached.
+
+        This method:
+        1. Checks if maximum continuations are reached
+        2. Creates a new completion stream with accumulated content
+        3. Logs continuation progress
+
+        Args:
+            agent: Agent to use for continuation
+            continuation_count: Number of continuations so far
+            accumulated_content: Content generated up to this point
+
+        Returns:
+            New stream for continuation, or None if max continuations reached
+        """
+        if continuation_count >= self.max_response_continuations:
+            logger.warning(
+                "Maximum response continuations (%d) reached",
+                self.max_response_continuations,
+            )
+
+            return None
+
+        logger.info(
+            "Response continuation %d/%d",
+            continuation_count,
+            self.max_response_continuations,
+        )
+
+        return await self._continue_generation(agent, accumulated_content)
+
+    async def _process_agent_response(
+        self,
+        agent: Agent,
+        agent_messages: list[Message],
+    ) -> AsyncGenerator[AgentResponse, None]:
+        """Stream agent responses while maintaining conversation state.
+
+        This method:
+        1. Streams completion responses from the agent
+        2. Accumulates content and tool calls
+        3. Notifies the stream handler of updates
+        4. Yields responses with the current conversation state
+
+        Args:
+            agent: Agent to use for completion
+            agent_messages: Messages to send to the agent
+
+        Yields:
+            AgentResponse objects containing:
+            - Current response delta
+            - Accumulated content
+            - Accumulated tool calls
+            - Token usage statistics (if enabled)
+            - Response cost (if enabled)
+
+        Raises:
+            CompletionError: If completion fails after all retries
+            ContextLengthError: If context window is exceeded and can't be reduced
         """
         full_content = ""
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
-        async for completion_response in self._get_completion_response(agent_messages):
+        async for completion_response in self._get_completion_response(agent, agent_messages):
             delta = completion_response.delta
             finish_reason = completion_response.finish_reason
 
@@ -737,7 +791,10 @@ class Swarm:
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
-                async for agent_response in self._process_agent_response(self.agent_messages):
+                async for agent_response in self._process_agent_response(
+                    self.active_agent,
+                    self.agent_messages,
+                ):
                     yield agent_response
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
