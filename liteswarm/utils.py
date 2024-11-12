@@ -358,7 +358,8 @@ def history_exceeds_token_limit(messages: list[Message], model: str) -> bool:
     if max_tokens is None:
         return False
 
-    history_tokens = token_counter(model, messages=messages)
+    dict_messages = dump_messages(messages)
+    history_tokens = token_counter(model, messages=dict_messages)
 
     return history_tokens > max_tokens
 
