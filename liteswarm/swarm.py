@@ -363,7 +363,7 @@ class Swarm:
         """
         logger.debug(
             "Sending messages to agent [%s]: %s",
-            agent.agent_id,
+            agent.id,
             agent_messages,
         )
 
@@ -607,7 +607,7 @@ class Swarm:
             case ToolCallAgentResult() as agent_result:
                 tool_message = Message(
                     role="tool",
-                    content=f"Switching to agent {agent_result.agent.agent_id}",
+                    content=f"Switching to agent {agent_result.agent.id}",
                     tool_call_id=result.tool_call.id,
                 )
 
