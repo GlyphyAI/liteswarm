@@ -176,6 +176,7 @@ class Swarm:
 
     async def _process_tool_calls(
         self,
+        agent: Agent,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
         """Process multiple tool calls efficiently.
@@ -192,10 +193,6 @@ class Swarm:
         Raises:
             ValueError: If there is no active agent to process tool calls
         """
-        agent = self.active_agent
-        if not agent:
-            raise ValueError("No active agent to process tool calls.")
-
         tasks = [self._process_tool_call(agent, tool_call) for tool_call in tool_calls]
 
         results: list[ToolCallResult | None]
@@ -570,6 +567,7 @@ class Swarm:
 
     async def _process_assistant_response(
         self,
+        agent: Agent,
         content: str | None,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[Message]:
@@ -594,7 +592,7 @@ class Swarm:
         ]
 
         if tool_calls:
-            tool_call_results = await self._process_tool_calls(tool_calls)
+            tool_call_results = await self._process_tool_calls(agent, tool_calls)
             for tool_call_result in tool_call_results:
                 tool_message = await self._process_tool_call_result(tool_call_result)
                 messages.append(tool_message)
@@ -826,6 +824,7 @@ class Swarm:
                     last_tool_calls = agent_response.tool_calls
 
                 new_messages = await self._process_assistant_response(
+                    self.active_agent,
                     last_content,
                     last_tool_calls,
                 )
