@@ -296,6 +296,31 @@ def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
     return filtered_messages
 
 
+def dump_messages(messages: list[Message]) -> list[dict[str, Any]]:
+    """Dump messages to a list of dictionaries.
+
+    Args:
+        messages: List of messages to dump
+
+    Returns:
+        List of dictionaries
+    """
+    return [message.model_dump(exclude_none=True) for message in messages]
+
+
+def load_messages(dicts: list[dict[str, Any]], strict: bool = False) -> list[Message]:
+    """Load messages from a list of dictionaries.
+
+    Args:
+        dicts: List of dictionaries to load
+        strict: Whether to use strict validation
+
+    Returns:
+        List of messages
+    """
+    return [Message.model_validate(dict, strict=strict) for dict in dicts]
+
+
 def trim_messages(messages: list[Message], model: str | None = None) -> list[Message]:
     """Trim messages to the maximum token limit for the model.
 
