@@ -180,19 +180,26 @@ class Swarm:
         agent: Agent,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
-        """Process multiple tool calls efficiently.
+        """Process multiple tool calls efficiently and concurrently.
 
-        For a single tool call, processes it directly to avoid concurrency overhead.
-        For multiple tool calls, processes them concurrently using asyncio.gather().
+        This method handles the execution of multiple tool calls, optimizing for both
+        single and multiple call scenarios:
+        - For a single tool call: Processes directly to avoid concurrency overhead
+        - For multiple tool calls: Uses asyncio.gather() for concurrent execution
 
         Args:
-            tool_calls: List of tool calls to process
+            agent: Agent that initiated the tool calls
+            tool_calls: List of tool calls to process, each containing function name and arguments
 
         Returns:
-            List of successful tool call results, filtering out failed calls
+            List of successful ToolCallResult objects. Failed tool calls are filtered out.
+            Each result can be either:
+            - ToolCallMessageResult: Contains the function's return value
+            - ToolCallAgentResult: Contains a new agent for switching
 
-        Raises:
-            ValueError: If there is no active agent to process tool calls
+        Note:
+            Tool calls that fail or reference unknown functions are silently filtered out
+            of the results rather than raising exceptions.
         """
         tasks = [self._process_tool_call(agent, tool_call) for tool_call in tool_calls]
 
@@ -213,17 +220,26 @@ class Swarm:
     ) -> ToolMessage:
         """Process a tool call result and prepare the appropriate message response.
 
-        Updates message history and agent state based on the tool call result.
-        Handles both message results and agent switching.
+        This method handles two types of tool call results:
+        1. Message results: Function return values that should be added to conversation
+        2. Agent results: Requests to switch to a new agent
 
         Args:
-            result: Tool call result to process
+            result: The tool call result to process, either:
+                - ToolCallMessageResult containing a function's return value
+                - ToolCallAgentResult containing a new agent to switch to
 
         Returns:
-            Message to update the conversation history
+            ToolMessage containing:
+            - message: The message to add to conversation history
+            - agent: Optional new agent to switch to (None for message results)
 
         Raises:
-            TypeError: If result instance is not a subclass of ToolCallResult
+            TypeError: If result is not a recognized ToolCallResult subclass
+
+        Note:
+            For agent switches, creates a message indicating the switch is occurring
+            while also including the new agent in the return value.
         """
         match result:
             case ToolCallMessageResult() as message_result:
@@ -571,17 +587,28 @@ class Swarm:
         content: str | None,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[Message]:
-        """Process the assistant's response and any tool calls.
+        """Process the assistant's response and execute any tool calls.
 
-        Creates messages from the assistant's response and processes any tool calls,
-        maintaining proper message order and relationships.
+        This method handles the complete assistant response cycle:
+        1. Creates an assistant message with the text response and/or tool calls
+        2. Processes any tool calls and their results
+        3. Handles potential agent switches from tool calls
+        4. Maintains proper message ordering and relationships
 
         Args:
-            content: Text content of the assistant's response
-            tool_calls: List of tool calls to process
+            agent: Agent that generated the response
+            content: Text content of the assistant's response, may be None if only tool calls
+            tool_calls: List of tool calls to process, may be empty if only text response
 
         Returns:
-            List of messages including assistant response and tool results
+            List of messages including:
+            - The initial assistant message (with content and/or tool calls)
+            - Any tool response messages
+            - Any agent switch notification messages
+
+        Note:
+            If a tool call results in an agent switch, the current agent's state
+            is marked as "stale" and the new agent is added to the queue.
         """
         messages: list[Message] = [
             Message(
