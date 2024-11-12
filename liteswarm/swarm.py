@@ -28,6 +28,7 @@ from liteswarm.utils import (
     calculate_response_cost,
     combine_response_cost,
     combine_usage,
+    dump_messages,
     function_to_json,
     history_exceeds_token_limit,
     retry_with_exponential_backoff,
@@ -241,13 +242,13 @@ class Swarm:
             ValueError: If agent parameters are invalid
             TypeError: If response is not of expected type
         """
-        formatted_messages = [msg.model_dump(exclude_none=True) for msg in messages]
+        dict_messages = dump_messages(messages)
         tools = [function_to_json(tool) for tool in agent.tools]
         stream_options = {"include_usage": True} if self.include_usage else None
 
         completion_kwargs = {
             "model": agent.model,
-            "messages": formatted_messages,
+            "messages": dict_messages,
             "tools": tools,
             "tool_choice": agent.tool_choice,
             "parallel_tool_calls": agent.parallel_tool_calls,
