@@ -9,6 +9,7 @@ from liteswarm.types import (
     Agent,
     Delta,
     Message,
+    ResponseCost,
     ToolCallAgentResult,
     ToolCallMessageResult,
     ToolCallResult,
@@ -139,6 +140,7 @@ class AgentRepl:
         )
         self.conversation: list[Message] = []
         self.usage: Usage | None = None
+        self.response_cost: ResponseCost | None = None
 
     def _print_welcome(self) -> None:
         """Print welcome message and usage instructions."""
