@@ -651,24 +651,6 @@ class Swarm:
 
         return messages
 
-    async def _handle_agent_switch(self) -> None:
-        """Handle switching to the next agent in the queue.
-
-        Manages the transition between agents by:
-        1. Updating agent state
-        2. Preparing new agent's context
-        3. Notifying stream handler of the switch
-
-        Raises:
-            IndexError: If there are no agents in the queue
-        """
-        previous_agent = self.active_agent
-        next_agent = self.agent_queue.popleft()
-        self.agent_messages = await self._prepare_agent_context(next_agent)
-        self.active_agent = next_agent
-
-        await self.stream_handler.on_agent_switch(previous_agent, next_agent)
-
     async def _update_working_history(self) -> None:
         """Update the working history by either summarizing or trimming messages.
 
@@ -715,6 +697,8 @@ class Swarm:
 
         if self.active_agent is None:
             self.active_agent = agent
+            self.active_agent.state = "active"
+
             initial_context = await self._prepare_agent_context(agent, prompt)
             self.full_history = initial_context.copy()
             self.working_history = initial_context.copy()
@@ -724,6 +708,47 @@ class Swarm:
             self.full_history.append(user_message)
             self.working_history.append(user_message)
             self.agent_messages.append(user_message)
+
+    async def _handle_agent_switch(self, switch_count: int) -> bool:
+        """Switch to the next agent in the queue.
+
+        This method:
+        1. Gets the next agent from the queue
+        2. Updates the active agent and agent messages
+        3. Notifies the stream handler of the switch
+
+        Args:
+            switch_count: Current number of agent switches in the conversation
+
+        Returns:
+            True if the switch was successful, False otherwise
+        """
+        if switch_count >= self.max_agent_switches:
+            logger.warning(
+                "Maximum agent switches (%d) reached",
+                self.max_agent_switches,
+            )
+
+            return False
+
+        if not self.agent_queue:
+            return False
+
+        logger.info(
+            "Agent switch %d/%d",
+            switch_count,
+            self.max_agent_switches,
+        )
+
+        next_agent = self.agent_queue.popleft()
+        next_agent.state = "active"
+
+        await self.stream_handler.on_agent_switch(self.active_agent, next_agent)
+
+        self.active_agent = next_agent
+        self.agent_messages = await self._prepare_agent_context(next_agent)
+
+        return True
 
     async def stream(
         self,
@@ -756,41 +781,15 @@ class Swarm:
 
         agent_switch_count = 0
 
-        async def switch_agent() -> bool:
-            """Switch to the next agent in the queue.
-
-            Returns:
-                True if the agent switch was successful, False if the maximum number of
-                agent switches is reached
-            """
-            if agent_switch_count > self.max_agent_switches:
-                logger.warning(
-                    "Maximum agent switches (%d) reached",
-                    self.max_agent_switches,
-                )
-
-                return False
-
-            logger.info(
-                "Agent switch %d/%d",
-                agent_switch_count,
-                self.max_agent_switches,
-            )
-
-            await self._handle_agent_switch()
-
-            return True
-
         try:
             while self.active_agent or self.agent_queue:
-                if not self.active_agent and self.agent_queue:
-                    agent_switch_count += 1
-                    agent_switched = await switch_agent()
-                    if not agent_switched:
-                        break
-
                 if not self.active_agent:
                     break
+
+                if self.active_agent.state == "stale":
+                    agent_switch_count += 1
+                    if not await self._handle_agent_switch(agent_switch_count):
+                        break
 
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
