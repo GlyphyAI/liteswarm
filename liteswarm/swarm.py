@@ -571,7 +571,7 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            await self.stream_handler.on_stream(delta, self.active_agent)
+            await self.stream_handler.on_stream(delta, agent)
 
             yield AgentResponse(
                 delta=delta,
@@ -662,7 +662,7 @@ class Swarm:
 
         return messages
 
-    async def _update_working_history(self) -> None:
+    async def _update_working_history(self, agent: Agent) -> None:
         """Update the working history by either summarizing or trimming messages.
 
         This method maintains the working history within token limits by:
@@ -682,14 +682,10 @@ class Swarm:
         """
         if self.summarizer.needs_summarization(self._working_history):
             self._working_history = await self.summarizer.summarize_history(self._full_history)
-        elif self._active_agent:
-            if history_exceeds_token_limit(self._working_history, self._active_agent.model):
-                self._working_history = trim_messages(self._full_history, self._active_agent.model)
+        elif history_exceeds_token_limit(self._working_history, agent.model):
+            self._working_history = trim_messages(self._full_history, agent.model)
 
-    async def _retry_completion_with_trimmed_history(
-        self,
-        agent: Agent,
-    ) -> CustomStreamWrapper:
+    async def _retry_completion_with_trimmed_history(self, agent: Agent) -> CustomStreamWrapper:
         """Attempt completion with a trimmed message history.
 
         This method:
@@ -706,7 +702,7 @@ class Swarm:
         Raises:
             ContextLengthError: If context is still too large after reduction
         """
-        await self._update_working_history()
+        await self._update_working_history(agent)
 
         reduced_messages = await self._prepare_agent_context(agent)
 
@@ -741,7 +737,7 @@ class Swarm:
         """
         if messages:
             self._full_history = copy.deepcopy(messages)
-            await self._update_working_history()
+            await self._update_working_history(agent)
 
         if self._active_agent is None:
             self._active_agent = agent
@@ -865,7 +861,7 @@ class Swarm:
                 self._working_history.extend(new_messages)
                 self._agent_messages.extend(new_messages)
 
-                await self._update_working_history()
+                await self._update_working_history(self._active_agent)
 
                 if not last_tool_calls and not self._agent_queue:
                     break
