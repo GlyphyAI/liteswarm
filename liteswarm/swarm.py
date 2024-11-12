@@ -110,32 +110,7 @@ class Swarm:
         self.max_response_continuations = max_response_continuations
         self.max_agent_switches = max_agent_switches
 
-    async def _prepare_agent_context(
-        self,
-        agent: Agent,
-        prompt: str | None = None,
-    ) -> list[Message]:
-        """Prepare the agent's context using the working history.
-
-        Creates initial context for an agent by combining:
-        1. Agent's system instructions
-        2. Filtered working history (excluding system messages)
-        3. Optional user prompt
-
-        Args:
-            agent: The agent whose context is being prepared
-            prompt: Optional initial user message to add
-
-        Returns:
-            List of messages representing the agent's context
-        """
-        history = [msg for msg in self.working_history if msg.role != "system"]
-        messages = [Message(role="system", content=agent.instructions), *history]
-
-        if prompt:
-            messages.append(Message(role="user", content=prompt))
-
-        return messages
+    # MARK: Tool Processing
 
     async def _process_tool_call(
         self,
@@ -232,6 +207,44 @@ class Swarm:
 
         return [result for result in results if result is not None]
 
+    async def _process_tool_call_result(
+        self,
+        result: ToolCallResult,
+    ) -> Message:
+        """Process a tool call result and return a message to update the conversation.
+
+        Updates message history and agent state based on the tool call result.
+        Handles both message results and agent switching.
+
+        Args:
+            result: Tool call result to process
+
+        Returns:
+            Message to update the conversation history
+
+        Raises:
+            TypeError: If result instance is not a subclass of ToolCallResult
+        """
+        match result:
+            case ToolCallMessageResult() as message_result:
+                return message_result.message
+
+            case ToolCallAgentResult() as agent_result:
+                self.agent_queue.append(agent_result.agent)
+                if self.active_agent:
+                    self.active_agent.state = "stale"
+
+                return Message(
+                    role="tool",
+                    content=f"Switching to agent {agent_result.agent.id}",
+                    tool_call_id=result.tool_call.id,
+                )
+
+            case _:
+                raise TypeError("Expected a ToolCallResult instance.")
+
+    # MARK: Response Handling
+
     async def _create_completion(
         self,
         agent: Agent,
@@ -275,39 +288,6 @@ class Swarm:
             raise TypeError("Expected a CustomStreamWrapper instance.")
 
         return response_stream
-
-    async def _retry_completion_with_trimmed_history(
-        self,
-        agent: Agent,
-    ) -> CustomStreamWrapper:
-        """Attempt completion with a trimmed message history.
-
-        This method:
-        1. Updates the working history to fit the active agent's token limit
-        2. Prepares new messages with reduced context
-        3. Attempts completion with reduced context
-
-        Args:
-            agent: Agent to use for completion
-
-        Returns:
-            Response stream from the completion
-
-        Raises:
-            ContextLengthError: If context is still too large after reduction
-        """
-        await self._update_working_history()
-
-        reduced_messages = await self._prepare_agent_context(agent)
-
-        try:
-            return await self._create_completion(agent, reduced_messages)
-        except ContextWindowExceededError as e:
-            raise ContextLengthError(
-                "Context window exceeded even after reduction attempt",
-                original_error=e,
-                current_length=len(reduced_messages),
-            ) from e
 
     async def _continue_generation(
         self,
@@ -584,42 +564,6 @@ class Swarm:
                 response_cost=completion_response.response_cost,
             )
 
-    async def _process_tool_call_result(
-        self,
-        result: ToolCallResult,
-    ) -> Message:
-        """Process a tool call result and return a message to update the conversation.
-
-        Updates message history and agent state based on the tool call result.
-        Handles both message results and agent switching.
-
-        Args:
-            result: Tool call result to process
-
-        Returns:
-            Message to update the conversation history
-
-        Raises:
-            TypeError: If result instance is not a subclass of ToolCallResult
-        """
-        match result:
-            case ToolCallMessageResult() as message_result:
-                return message_result.message
-
-            case ToolCallAgentResult() as agent_result:
-                self.agent_queue.append(agent_result.agent)
-                if self.active_agent:
-                    self.active_agent.state = "stale"
-
-                return Message(
-                    role="tool",
-                    content=f"Switching to agent {agent_result.agent.id}",
-                    tool_call_id=result.tool_call.id,
-                )
-
-            case _:
-                raise TypeError("Expected a ToolCallResult instance.")
-
     async def _process_assistant_response(
         self,
         content: str | None,
@@ -653,6 +597,35 @@ class Swarm:
 
         return messages
 
+    # MARK: History Management
+
+    async def _prepare_agent_context(
+        self,
+        agent: Agent,
+        prompt: str | None = None,
+    ) -> list[Message]:
+        """Prepare the agent's context using the working history.
+
+        Creates initial context for an agent by combining:
+        1. Agent's system instructions
+        2. Filtered working history (excluding system messages)
+        3. Optional user prompt
+
+        Args:
+            agent: The agent whose context is being prepared
+            prompt: Optional initial user message to add
+
+        Returns:
+            List of messages representing the agent's context
+        """
+        history = [msg for msg in self.working_history if msg.role != "system"]
+        messages = [Message(role="system", content=agent.instructions), *history]
+
+        if prompt:
+            messages.append(Message(role="user", content=prompt))
+
+        return messages
+
     async def _update_working_history(self) -> None:
         """Update the working history by either summarizing or trimming messages.
 
@@ -676,6 +649,41 @@ class Swarm:
         elif self.active_agent:
             if history_exceeds_token_limit(self.working_history, self.active_agent.model):
                 self.working_history = trim_messages(self.full_history, self.active_agent.model)
+
+    async def _retry_completion_with_trimmed_history(
+        self,
+        agent: Agent,
+    ) -> CustomStreamWrapper:
+        """Attempt completion with a trimmed message history.
+
+        This method:
+        1. Updates the working history to fit the active agent's token limit
+        2. Prepares new messages with reduced context
+        3. Attempts completion with reduced context
+
+        Args:
+            agent: Agent to use for completion
+
+        Returns:
+            Response stream from the completion
+
+        Raises:
+            ContextLengthError: If context is still too large after reduction
+        """
+        await self._update_working_history()
+
+        reduced_messages = await self._prepare_agent_context(agent)
+
+        try:
+            return await self._create_completion(agent, reduced_messages)
+        except ContextWindowExceededError as e:
+            raise ContextLengthError(
+                "Context window exceeded even after reduction attempt",
+                original_error=e,
+                current_length=len(reduced_messages),
+            ) from e
+
+    # MARK: Agent Management
 
     async def _initialize_conversation(
         self,
@@ -752,6 +760,8 @@ class Swarm:
         await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
         return True
+
+    # MARK: Public Interface
 
     async def stream(
         self,
