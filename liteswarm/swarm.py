@@ -612,7 +612,9 @@ class Swarm:
                 )
 
                 self.agent_queue.append(agent_result.agent)
-                self.active_agent = None
+
+                if self.active_agent:
+                    self.active_agent.state = "stale"
 
         return tool_message
 
