@@ -10,6 +10,7 @@ from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, StreamingChoices, Usage
 
 from liteswarm.exceptions import CompletionError, ContextLengthError
+from liteswarm.stream_handler import LiteStreamHandler, StreamHandler
 from liteswarm.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types import (
     Agent,
@@ -19,7 +20,6 @@ from liteswarm.types import (
     Delta,
     Message,
     ResponseCost,
-    StreamHandler,
     ToolCallAgentResult,
     ToolCallMessageResult,
     ToolCallResult,
@@ -90,7 +90,7 @@ class Swarm:
         self.active_agent: Agent | None = None
         self.agent_messages: list[Message] = []
         self.agent_queue: deque[Agent] = deque()
-        self.stream_handler = stream_handler
+        self.stream_handler = stream_handler or LiteStreamHandler()
         self.full_history: list[Message] = []
         self.working_history: list[Message] = []
         self.summarizer = summarizer or LiteSummarizer()
@@ -162,8 +162,7 @@ class Swarm:
         if function_name not in function_tools_map:
             return None
 
-        if self.stream_handler:
-            await self.stream_handler.on_tool_call(tool_call, agent)
+        await self.stream_handler.on_tool_call(tool_call, agent)
 
         try:
             args = orjson.loads(tool_call.function.arguments)
@@ -186,14 +185,12 @@ class Swarm:
                     ),
                 )
 
-            if self.stream_handler:
-                await self.stream_handler.on_tool_call_result(tool_call_result, agent)
+            await self.stream_handler.on_tool_call_result(tool_call_result, agent)
 
             return tool_call_result
 
         except Exception as e:
-            if self.stream_handler:
-                await self.stream_handler.on_error(e, agent)
+            await self.stream_handler.on_error(e, agent)
 
             return None
 
@@ -498,8 +495,7 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            if self.stream_handler:
-                await self.stream_handler.on_stream(delta, self.active_agent)
+            await self.stream_handler.on_stream(delta, self.active_agent)
 
             yield AgentResponse(
                 delta=delta,
@@ -592,8 +588,7 @@ class Swarm:
         self.agent_messages = await self._prepare_agent_context(next_agent)
         self.active_agent = next_agent
 
-        if self.stream_handler:
-            await self.stream_handler.on_agent_switch(previous_agent, next_agent)
+        await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
     async def _update_working_history(self) -> None:
         """Update the working history by either summarizing or trimming messages.
@@ -707,13 +702,11 @@ class Swarm:
                     break
 
         except Exception as e:
-            if self.stream_handler:
-                await self.stream_handler.on_error(e, self.active_agent)
+            await self.stream_handler.on_error(e, self.active_agent)
             raise
 
         finally:
-            if self.stream_handler:
-                await self.stream_handler.on_complete(self.full_history, self.active_agent)
+            await self.stream_handler.on_complete(self.full_history, self.active_agent)
 
             if cleanup:
                 self.active_agent = None
