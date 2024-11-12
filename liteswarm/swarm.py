@@ -731,6 +731,9 @@ class Swarm:
                     if not agent_switched:
                         break
 
+                if not self.active_agent:
+                    break
+
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
