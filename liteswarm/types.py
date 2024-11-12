@@ -27,6 +27,11 @@ class Message(BaseModel):
         extra = "allow"
 
 
+class ToolMessage(BaseModel):
+    message: Message
+    agent: "Agent | None" = None
+
+
 class Delta(BaseModel):
     content: str | None = None
     role: str | None = None
