@@ -636,7 +636,39 @@ class Swarm:
             if history_exceeds_token_limit(self.working_history, self.active_agent.model):
                 self.working_history = trim_messages(self.full_history, self.active_agent.model)
 
-    async def stream(  # noqa: PLR0912
+    async def _initialize_conversation(
+        self,
+        agent: Agent,
+        prompt: str,
+        messages: list[Message] | None = None,
+    ) -> None:
+        """Initialize the conversation state.
+
+        Sets up the initial state for the conversation, including the active agent,
+        full history, working history, and agent messages.
+
+        Args:
+            agent: Initial agent to handle the conversation
+            prompt: Initial user prompt
+            messages: Optional previous conversation history
+        """
+        if messages:
+            self.full_history = messages.copy()
+            await self._update_working_history()
+
+        if self.active_agent is None:
+            self.active_agent = agent
+            initial_context = await self._prepare_agent_context(agent, prompt)
+            self.full_history = initial_context.copy()
+            self.working_history = initial_context.copy()
+            self.agent_messages = initial_context.copy()
+        else:
+            user_message = Message(role="user", content=prompt)
+            self.full_history.append(user_message)
+            self.working_history.append(user_message)
+            self.agent_messages.append(user_message)
+
+    async def stream(
         self,
         agent: Agent,
         prompt: str,
@@ -663,43 +695,42 @@ class Swarm:
         Raises:
             Exception: Any errors during conversation processing
         """
-        if messages:
-            self.full_history = messages.copy()
-            await self._update_working_history()
-
-        if self.active_agent is None:
-            self.active_agent = agent
-            initial_context = await self._prepare_agent_context(agent, prompt)
-            self.full_history = initial_context.copy()
-            self.working_history = initial_context.copy()
-            self.agent_messages = initial_context.copy()
-        else:
-            user_message = Message(role="user", content=prompt)
-            self.full_history.append(user_message)
-            self.working_history.append(user_message)
-            self.agent_messages.append(user_message)
+        await self._initialize_conversation(agent, prompt, messages)
 
         agent_switch_count = 0
+
+        async def switch_agent() -> bool:
+            """Switch to the next agent in the queue.
+
+            Returns:
+                True if the agent switch was successful, False if the maximum number of
+                agent switches is reached
+            """
+            if agent_switch_count > self.max_agent_switches:
+                logger.warning(
+                    "Maximum agent switches (%d) reached",
+                    self.max_agent_switches,
+                )
+
+                return False
+
+            logger.info(
+                "Agent switch %d/%d",
+                agent_switch_count,
+                self.max_agent_switches,
+            )
+
+            await self._handle_agent_switch()
+
+            return True
 
         try:
             while self.active_agent or self.agent_queue:
                 if not self.active_agent and self.agent_queue:
                     agent_switch_count += 1
-                    if agent_switch_count > self.max_agent_switches:
-                        logger.warning(
-                            "Maximum agent switches (%d) reached",
-                            self.max_agent_switches,
-                        )
-
+                    agent_switched = await switch_agent()
+                    if not agent_switched:
                         break
-
-                    logger.info(
-                        "Agent switch %d/%d",
-                        agent_switch_count,
-                        self.max_agent_switches,
-                    )
-
-                    await self._handle_agent_switch()
 
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
