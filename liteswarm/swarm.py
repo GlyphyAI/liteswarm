@@ -1,4 +1,5 @@
 import asyncio
+import copy
 import logging
 from collections import deque
 from collections.abc import AsyncGenerator
@@ -693,7 +694,7 @@ class Swarm:
             messages: Optional previous conversation history
         """
         if messages:
-            self.full_history = messages.copy()
+            self.full_history = copy.deepcopy(messages)
             await self._update_working_history()
 
         if self.active_agent is None:
