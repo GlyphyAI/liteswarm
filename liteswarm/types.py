@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Literal, Optional, Self
+from typing import Any, Literal, Self
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
@@ -9,7 +9,6 @@ from litellm.types.utils import (
 )
 from litellm.types.utils import Delta as LiteDelta
 from pydantic import BaseModel, Field
-from typing_extensions import Protocol
 
 Tool = Callable[..., Any]
 
@@ -119,41 +118,3 @@ class ConversationState(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     usage: Usage | None = None
     response_cost: ResponseCost | None = None
-
-
-class StreamHandler(Protocol):
-    async def on_stream(
-        self,
-        chunk: Delta,
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_error(
-        self,
-        error: Exception,
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_agent_switch(
-        self,
-        previous_agent: Optional["Agent"],
-        next_agent: "Agent",
-    ) -> None: ...
-
-    async def on_complete(
-        self,
-        messages: list[Message],
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_tool_call(
-        self,
-        tool_call: ChatCompletionDeltaToolCall,
-        agent: Optional["Agent"],
-    ) -> None: ...
-
-    async def on_tool_call_result(
-        self,
-        tool_call_result: "ToolCallResult",
-        agent: Optional["Agent"],
-    ) -> None: ...
