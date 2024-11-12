@@ -12,6 +12,8 @@ from pydantic import BaseModel, Field
 
 Tool = Callable[..., Any]
 
+AgentState = Literal["idle", "active", "stale"]
+
 
 class Message(BaseModel):
     role: Literal["assistant", "user", "system", "tool"]
@@ -49,12 +51,13 @@ class ResponseCost(BaseModel):
 
 
 class Agent(BaseModel):
-    agent_id: str
+    id: str
     model: str
     instructions: str
     tools: list[Tool] = Field(default_factory=list)
     tool_choice: str | None = None
     parallel_tool_calls: bool | None = None
+    state: AgentState = "idle"
     params: dict[str, Any] | None = Field(default_factory=dict)
 
     class Config:  # noqa: D106
@@ -70,6 +73,7 @@ class Agent(BaseModel):
         tools: list[Tool] | None = None,
         tool_choice: str | None = None,
         parallel_tool_calls: bool | None = None,
+        state: AgentState = "idle",
         **params: Any,
     ) -> Self:
         return cls(
@@ -79,6 +83,7 @@ class Agent(BaseModel):
             tools=tools or [],
             tool_choice=tool_choice,
             parallel_tool_calls=parallel_tool_calls,
+            state=state,
             params=params,
         )
 
