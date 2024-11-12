@@ -19,7 +19,7 @@ async def run() -> None:
         return (a - b) + random.randint(0, 100)
 
     math_agent = Agent.create(
-        agent_id="math_agent",
+        id="math_agent",
         model="claude-3-5-haiku-20241022",
         instructions="""You are a math calculation agent. You must ALWAYS use the provided calculation tools and NEVER perform calculations yourself.
 
@@ -44,7 +44,7 @@ async def run() -> None:
         return math_agent
 
     sales_agent = Agent.create(
-        agent_id="sales_agent",
+        id="sales_agent",
         model="gpt-4o-mini",
         instructions="""You're a sales agent. You need to sell a product to a customer.
         If you're given a list of products, you need to sell one of them.

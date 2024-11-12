@@ -36,7 +36,7 @@ class ReplStreamHandler:
 
             # Only print agent ID prefix for the first character of a new message
             if not hasattr(self, "_last_agent") or self._last_agent != agent:
-                agent_id = agent.agent_id if agent else "unknown"
+                agent_id = agent.id if agent else "unknown"
                 print(f"\n[{agent_id}] ", end="", flush=True)
                 self._last_agent = agent
 
@@ -48,7 +48,7 @@ class ReplStreamHandler:
         agent: Agent | None,
     ) -> None:
         """Handle and display errors."""
-        agent_id = agent.agent_id if agent else "unknown"
+        agent_id = agent.id if agent else "unknown"
         print(f"\n❌ [{agent_id}] Error: {str(error)}", file=sys.stderr)
         self._last_agent = None
 
@@ -59,7 +59,7 @@ class ReplStreamHandler:
     ) -> None:
         """Display agent switching information."""
         print(
-            f"\n🔄 Switching from {previous_agent.agent_id if previous_agent else 'none'} to {next_agent.agent_id}..."
+            f"\n🔄 Switching from {previous_agent.id if previous_agent else 'none'} to {next_agent.id}..."
         )
         self._last_agent = None
 
@@ -69,7 +69,7 @@ class ReplStreamHandler:
         agent: Agent | None,
     ) -> None:
         """Handle completion of agent tasks."""
-        agent_id = agent.agent_id if agent else "unknown"
+        agent_id = agent.id if agent else "unknown"
         print(f"\n✅ [{agent_id}] Completed")
         self._last_agent = None
 
@@ -79,7 +79,7 @@ class ReplStreamHandler:
         agent: Agent | None,
     ) -> None:
         """Display tool call information."""
-        agent_id = agent.agent_id if agent else "unknown"
+        agent_id = agent.id if agent else "unknown"
         print(f"\n🔧 [{agent_id}] Using {tool_call.function.name} [{tool_call.id}]")
         self._last_agent = None
 
@@ -89,7 +89,7 @@ class ReplStreamHandler:
         agent: Agent | None,
     ) -> None:
         """Display tool call results."""
-        agent_id = agent.agent_id if agent else "unknown"
+        agent_id = agent.id if agent else "unknown"
 
         match tool_call_result:
             case ToolCallMessageResult() as tool_call_message_result:
@@ -98,7 +98,7 @@ class ReplStreamHandler:
                 )
             case ToolCallAgentResult() as tool_call_agent_result:
                 print(
-                    f"\n🔧 [{agent_id}] Switching to: {tool_call_agent_result.agent.agent_id} [{tool_call_agent_result.tool_call.id}]"
+                    f"\n🔧 [{agent_id}] Switching to: {tool_call_agent_result.agent.id} [{tool_call_agent_result.tool_call.id}]"
                 )
             case _:
                 print(
@@ -143,7 +143,7 @@ class AgentRepl:
     def _print_welcome(self) -> None:
         """Print welcome message and usage instructions."""
         print("\n🤖 Agent REPL")
-        print(f"Starting with agent: {self.agent.agent_id}")
+        print(f"Starting with agent: {self.agent.id}")
         print("\nCommands:")
         print("  /exit    - Exit the REPL")
         print("  /help    - Show this help message")
@@ -196,7 +196,7 @@ class AgentRepl:
 
         print("\nActive Agent:")
         if self.swarm.active_agent:
-            print(f"  ID: {self.swarm.active_agent.agent_id}")
+            print(f"  ID: {self.swarm.active_agent.id}")
             print(f"  Model: {self.swarm.active_agent.model}")
             print(f"  Tools: {len(self.swarm.active_agent.tools)} available")
         else:

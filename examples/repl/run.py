@@ -6,7 +6,7 @@ from liteswarm.types import Agent
 
 async def run() -> None:
     assistant = Agent.create(
-        agent_id="assistant",
+        id="assistant",
         model="claude-3-5-haiku-20241022",
         instructions="""You are a helpful AI assistant.
         Your goal is to help users with their questions and tasks.

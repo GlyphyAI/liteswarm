@@ -13,7 +13,7 @@ async def run() -> None:
                 """Switch to the specified agent."""
                 return agent
 
-            switch_to_agent.__name__ = f"switch_to_{agent.agent_id}"
+            switch_to_agent.__name__ = f"switch_to_{agent.id}"
             return switch_to_agent
 
         return {
@@ -22,7 +22,7 @@ async def run() -> None:
 
     def create_flutter_team() -> dict[str, Agent]:
         routing_agent = Agent.create(
-            agent_id="router",
+            id="router",
             model="claude-3-5-haiku-20241022",
             instructions="""You are an intelligent routing agent that coordinates the Flutter app development team.
                 Your role is to analyze user queries and either:
@@ -56,7 +56,7 @@ async def run() -> None:
         )
 
         product_manager_agent = Agent.create(
-            agent_id="product_manager",
+            id="product_manager",
             model="claude-3-5-haiku-20241022",
             instructions="""You are a Product Manager leading the app development process.
                 Analyze requirements and coordinate with other specialists.
@@ -73,7 +73,7 @@ async def run() -> None:
         )
 
         designer_agent = Agent.create(
-            agent_id="designer",
+            id="designer",
             model="claude-3-5-haiku-20241022",
             instructions="""You are a UI/UX Designer creating Flutter app designs.
                 Review the PM's requirements and create design specifications.
@@ -91,7 +91,7 @@ async def run() -> None:
         )
 
         engineer_agent = Agent.create(
-            agent_id="engineer",
+            id="engineer",
             model="claude-3-5-haiku-20241022",
             instructions="""You are a Flutter Engineer implementing the app.
                 Review the design specifications and implement the feature.
@@ -108,7 +108,7 @@ async def run() -> None:
         )
 
         qa_agent = Agent.create(
-            agent_id="qa",
+            id="qa",
             model="claude-3-5-haiku-20241022",
             instructions="""You are a QA Engineer testing the implementation.
                 Review the implementation and perform testing.

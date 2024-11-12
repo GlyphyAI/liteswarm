@@ -22,28 +22,28 @@ class ConsoleStreamHandler:
         error: Exception,
         agent: Agent | None,
     ) -> None:
-        print(f"[{agent.agent_id if agent else 'unknown'}] Error: {str(error)}")
+        print(f"[{agent.id if agent else 'unknown'}] Error: {str(error)}")
 
     async def on_agent_switch(
         self,
         previous_agent: Agent | None,
         next_agent: Agent,
     ) -> None:
-        print(f"\n[{next_agent.agent_id}] Switched to {next_agent.agent_id}")
+        print(f"\n[{next_agent.id}] Switched to {next_agent.id}")
 
     async def on_complete(
         self,
         messages: list[Message],
         agent: Agent | None,
     ) -> None:
-        print(f"\n[{agent.agent_id if agent else 'unknown'}] Completed")
+        print(f"\n[{agent.id if agent else 'unknown'}] Completed")
 
     async def on_tool_call(
         self,
         tool_call: ChatCompletionDeltaToolCall,
         agent: Agent | None,
     ) -> None:
-        print(f"\n[{agent.agent_id if agent else 'unknown'}] Tool call: {tool_call.function.name}")
+        print(f"\n[{agent.id if agent else 'unknown'}] Tool call: {tool_call.function.name}")
 
     async def on_tool_call_result(
         self,
@@ -51,7 +51,7 @@ class ConsoleStreamHandler:
         agent: Agent | None,
     ) -> None:
         print(
-            f"\n[{agent.agent_id if agent else 'unknown'}] Got result for: {tool_call_result.tool_call.function.name}"
+            f"\n[{agent.id if agent else 'unknown'}] Got result for: {tool_call_result.tool_call.function.name}"
         )
 
 
@@ -108,7 +108,7 @@ async def run() -> None:
         }
 
     research_agent = Agent.create(
-        agent_id="research_agent",
+        id="research_agent",
         model="claude-3-5-haiku-20241022",
         instructions="""You are a city research analyst. Your task is to gather and analyze data about cities using the available tools.
 
