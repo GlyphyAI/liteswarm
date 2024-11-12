@@ -597,26 +597,27 @@ class Swarm:
 
         Returns:
             Message to update the conversation history
-        """
-        tool_message: Message
 
+        Raises:
+            TypeError: If result instance is not a subclass of ToolCallResult
+        """
         match result:
             case ToolCallMessageResult() as message_result:
-                tool_message = message_result.message
+                return message_result.message
 
             case ToolCallAgentResult() as agent_result:
-                tool_message = Message(
+                self.agent_queue.append(agent_result.agent)
+                if self.active_agent:
+                    self.active_agent.state = "stale"
+
+                return Message(
                     role="tool",
                     content=f"Switching to agent {agent_result.agent.id}",
                     tool_call_id=result.tool_call.id,
                 )
 
-                self.agent_queue.append(agent_result.agent)
-
-                if self.active_agent:
-                    self.active_agent.state = "stale"
-
-        return tool_message
+            case _:
+                raise TypeError("Expected a ToolCallResult instance.")
 
     async def _process_assistant_response(
         self,
