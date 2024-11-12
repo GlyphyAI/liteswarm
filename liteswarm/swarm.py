@@ -110,7 +110,9 @@ class Swarm:
         self.max_response_continuations = max_response_continuations
         self.max_agent_switches = max_agent_switches
 
+    # ================================================
     # MARK: Tool Processing
+    # ================================================
 
     async def _process_tool_call(
         self,
@@ -243,7 +245,9 @@ class Swarm:
             case _:
                 raise TypeError("Expected a ToolCallResult instance.")
 
+    # ================================================
     # MARK: Response Handling
+    # ================================================
 
     async def _create_completion(
         self,
@@ -597,7 +601,9 @@ class Swarm:
 
         return messages
 
+    # ================================================
     # MARK: History Management
+    # ================================================
 
     async def _prepare_agent_context(
         self,
@@ -683,7 +689,9 @@ class Swarm:
                 current_length=len(reduced_messages),
             ) from e
 
+    # ================================================
     # MARK: Agent Management
+    # ================================================
 
     async def _initialize_conversation(
         self,
@@ -761,7 +769,9 @@ class Swarm:
 
         return True
 
+    # ================================================
     # MARK: Public Interface
+    # ================================================
 
     async def stream(
         self,
