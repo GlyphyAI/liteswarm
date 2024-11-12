@@ -89,13 +89,14 @@ class Swarm:
             max_response_continuations: Maximum number of response continuations allowed
             max_agent_switches: Maximum number of agent switches allowed in a conversation
         """
-        self.active_agent: Agent | None = None
-        self.agent_messages: list[Message] = []
-        self.agent_queue: deque[Agent] = deque()
-        self.full_history: list[Message] = []
-        self.working_history: list[Message] = []
+        # Internal state (private)
+        self._active_agent: Agent | None = None
+        self._agent_messages: list[Message] = []
+        self._agent_queue: deque[Agent] = deque()
+        self._full_history: list[Message] = []
+        self._working_history: list[Message] = []
 
-        # General properties
+        # Public configuration
         self.stream_handler = stream_handler or LiteStreamHandler()
         self.summarizer = summarizer or LiteSummarizer()
         self.include_usage = include_usage
@@ -624,7 +625,7 @@ class Swarm:
                 tool_message = await self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
                     agent.state = "stale"
-                    self.agent_queue.append(tool_message.agent)
+                    self._agent_queue.append(tool_message.agent)
 
                 messages.append(tool_message.message)
 
@@ -653,7 +654,7 @@ class Swarm:
         Returns:
             List of messages representing the agent's context
         """
-        history = [msg for msg in self.working_history if msg.role != "system"]
+        history = [msg for msg in self._working_history if msg.role != "system"]
         messages = [Message(role="system", content=agent.instructions), *history]
 
         if prompt:
@@ -679,11 +680,11 @@ class Swarm:
             - If neither summarization nor trimming is needed, the working history
               remains unchanged
         """
-        if self.summarizer.needs_summarization(self.working_history):
-            self.working_history = await self.summarizer.summarize_history(self.full_history)
-        elif self.active_agent:
-            if history_exceeds_token_limit(self.working_history, self.active_agent.model):
-                self.working_history = trim_messages(self.full_history, self.active_agent.model)
+        if self.summarizer.needs_summarization(self._working_history):
+            self._working_history = await self.summarizer.summarize_history(self._full_history)
+        elif self._active_agent:
+            if history_exceeds_token_limit(self._working_history, self._active_agent.model):
+                self._working_history = trim_messages(self._full_history, self._active_agent.model)
 
     async def _retry_completion_with_trimmed_history(
         self,
@@ -739,22 +740,22 @@ class Swarm:
             messages: Optional previous conversation history
         """
         if messages:
-            self.full_history = copy.deepcopy(messages)
+            self._full_history = copy.deepcopy(messages)
             await self._update_working_history()
 
-        if self.active_agent is None:
-            self.active_agent = agent
-            self.active_agent.state = "active"
+        if self._active_agent is None:
+            self._active_agent = agent
+            self._active_agent.state = "active"
 
             initial_context = await self._prepare_agent_context(agent, prompt)
-            self.full_history = initial_context.copy()
-            self.working_history = initial_context.copy()
-            self.agent_messages = initial_context.copy()
+            self._full_history = initial_context.copy()
+            self._working_history = initial_context.copy()
+            self._agent_messages = initial_context.copy()
         else:
             user_message = Message(role="user", content=prompt)
-            self.full_history.append(user_message)
-            self.working_history.append(user_message)
-            self.agent_messages.append(user_message)
+            self._full_history.append(user_message)
+            self._working_history.append(user_message)
+            self._agent_messages.append(user_message)
 
     async def _handle_agent_switch(self, switch_count: int) -> bool:
         """Switch to the next agent in the queue.
@@ -778,7 +779,7 @@ class Swarm:
             )
             return False
 
-        if not self.agent_queue:
+        if not self._agent_queue:
             return False
 
         logger.info(
@@ -787,12 +788,12 @@ class Swarm:
             self.max_agent_switches,
         )
 
-        next_agent = self.agent_queue.popleft()
+        next_agent = self._agent_queue.popleft()
         next_agent.state = "active"
 
-        previous_agent = self.active_agent
-        self.active_agent = next_agent
-        self.agent_messages = await self._prepare_agent_context(next_agent)
+        previous_agent = self._active_agent
+        self._active_agent = next_agent
+        self._agent_messages = await self._prepare_agent_context(next_agent)
 
         await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
@@ -834,11 +835,11 @@ class Swarm:
         agent_switch_count = 0
 
         try:
-            while self.active_agent or self.agent_queue:
-                if not self.active_agent:
+            while self._active_agent or self._agent_queue:
+                if not self._active_agent:
                     break
 
-                if self.active_agent.state == "stale":
+                if self._active_agent.state == "stale":
                     agent_switch_count += 1
                     if not await self._handle_agent_switch(agent_switch_count):
                         break
@@ -847,39 +848,39 @@ class Swarm:
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
                 async for agent_response in self._process_agent_response(
-                    self.active_agent,
-                    self.agent_messages,
+                    self._active_agent,
+                    self._agent_messages,
                 ):
                     yield agent_response
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
 
                 new_messages = await self._process_assistant_response(
-                    self.active_agent,
+                    self._active_agent,
                     last_content,
                     last_tool_calls,
                 )
 
-                self.full_history.extend(new_messages)
-                self.working_history.extend(new_messages)
-                self.agent_messages.extend(new_messages)
+                self._full_history.extend(new_messages)
+                self._working_history.extend(new_messages)
+                self._agent_messages.extend(new_messages)
 
                 await self._update_working_history()
 
-                if not last_tool_calls and not self.agent_queue:
+                if not last_tool_calls and not self._agent_queue:
                     break
 
         except Exception as e:
-            await self.stream_handler.on_error(e, self.active_agent)
+            await self.stream_handler.on_error(e, self._active_agent)
             raise
 
         finally:
-            await self.stream_handler.on_complete(self.full_history, self.active_agent)
+            await self.stream_handler.on_complete(self._full_history, self._active_agent)
 
             if cleanup:
-                self.active_agent = None
-                self.agent_messages = []
-                self.agent_queue.clear()
+                self._active_agent = None
+                self._agent_messages = []
+                self._agent_queue.clear()
 
     async def execute(
         self,
@@ -922,9 +923,9 @@ class Swarm:
 
         return ConversationState(
             content=full_response,
-            agent=self.active_agent,
-            agent_messages=self.agent_messages,
-            messages=self.full_history,
+            agent=self._active_agent,
+            agent_messages=self._agent_messages,
+            messages=self._full_history,
             usage=full_usage,
             response_cost=response_cost,
         )
