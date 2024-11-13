@@ -182,6 +182,8 @@ class ToolCallAgentResult(ToolCallResult):
 
     agent: Agent
     """The new agent to switch to."""
+    message: Message | None = None
+    """Optional message to add to the conversation."""
     context_variables: ContextVariables | None = None
     """Context variables to pass to the next agent."""
 
