@@ -663,22 +663,31 @@ class Swarm:
         return messages
 
     async def _update_working_history(self, agent: Agent) -> None:
-        """Update the working history by either summarizing or trimming messages.
+        """Update the working history by summarizing or trimming messages as needed.
 
-        This method maintains the working history within token limits by:
-        1. Summarizing the full history if the summarizer determines it's necessary
-           (e.g., when history length or complexity exceeds defined thresholds)
-        2. Trimming the history if it exceeds the model's token limit but doesn't
-           yet need summarization
+        This method maintains the working history within token and complexity limits
+        through two mechanisms:
 
-        The working history is updated in place, while the full history remains
-        unchanged to preserve the complete conversation record.
+        1. Summarization:
+           - Triggered when the summarizer determines history needs condensing
+           - Typically based on length, complexity, or time thresholds
+           - Creates a new condensed history while preserving key information
+           - Takes precedence over trimming
+
+        2. Token-based Trimming:
+           - Triggered when history exceeds the model's token limit
+           - Removes older messages while keeping recent context
+           - Only applied if summarization isn't needed
+           - Uses the agent's model context limits
+
+        Args:
+            agent: The agent whose model context limits will be used for trimming
 
         Note:
-            - Summarization takes precedence over trimming
-            - Trimming only occurs if there's an active agent (to determine token limits)
-            - If neither summarization nor trimming is needed, the working history
-              remains unchanged
+            - The full history remains unchanged while working history is updated
+            - This method modifies self._working_history in place
+            - The choice between summarization and trimming is automatic
+            - If neither is needed, the working history remains unchanged
         """
         if self.summarizer.needs_summarization(self._working_history):
             self._working_history = await self.summarizer.summarize_history(self._full_history)
