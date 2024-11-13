@@ -102,6 +102,7 @@ def get_verbose_level(default: LogLevel = "INFO") -> LogLevel | None:
     return None
 
 
+@lru_cache(maxsize=len(LEVEL_MAP))
 def should_print(level: LogLevel) -> bool:
     """Check if verbose printing is enabled for given level.
 
