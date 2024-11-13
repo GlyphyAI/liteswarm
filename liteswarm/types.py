@@ -105,8 +105,8 @@ class Agent(BaseModel):
     """Unique identifier for the agent."""
     model: str
     """The language model to use."""
-    instructions: str
-    """System prompt defining the agent's behavior."""
+    instructions: Instructions
+    """System prompt defining the agent's behavior. Can be string or function."""
     tools: list[Tool] = Field(default_factory=list)
     """List of functions the agent can call."""
     tool_choice: str | None = None
@@ -127,7 +127,7 @@ class Agent(BaseModel):
         cls,
         id: str,
         model: str,
-        instructions: str,
+        instructions: Instructions,
         tools: list[Tool] | None = None,
         tool_choice: str | None = None,
         parallel_tool_calls: bool | None = None,
