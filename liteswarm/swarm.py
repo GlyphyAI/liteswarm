@@ -352,16 +352,22 @@ class Swarm:
         """
         match result:
             case ToolCallMessageResult() as message_result:
-                return ToolMessage(message=message_result.message)
+                return ToolMessage(
+                    message=message_result.message,
+                    context_variables=message_result.context_variables,
+                )
 
             case ToolCallAgentResult() as agent_result:
+                message = agent_result.message or Message(
+                    role="tool",
+                    content=f"Switched to agent {agent_result.agent.id}",
+                    tool_call_id=agent_result.tool_call.id,
+                )
+
                 return ToolMessage(
-                    message=Message(
-                        role="tool",
-                        content=f"Switching to agent {agent_result.agent.id}",
-                        tool_call_id=result.tool_call.id,
-                    ),
+                    message=message,
                     agent=agent_result.agent,
+                    context_variables=agent_result.context_variables,
                 )
 
             case ToolCallFailureResult() as failure_result:
