@@ -105,6 +105,13 @@ class ToolCallAgentResult(ToolCallResult):
     agent: Agent
 
 
+class ToolCallFailureResult(ToolCallResult):
+    error: Exception
+
+    class Config:  # noqa: D106
+        arbitrary_types_allowed = True
+
+
 class CompletionResponse(BaseModel):
     delta: Delta
     finish_reason: str | None = None
