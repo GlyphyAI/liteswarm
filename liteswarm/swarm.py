@@ -408,6 +408,11 @@ class Swarm:
         tools = [function_to_json(tool) for tool in agent.tools] if agent.tools else None
         stream_options = {"include_usage": True} if self.include_usage else None
 
+        log_verbose(
+            f"Sending messages to agent [{agent.id}]: {dict_messages}",
+            level="DEBUG",
+        )
+
         completion_kwargs = {
             "model": agent.model,
             "messages": dict_messages,
