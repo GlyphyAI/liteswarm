@@ -142,6 +142,9 @@ class AgentRepl:
         self.conversation: list[Message] = []
         self.usage: Usage | None = None
         self.response_cost: ResponseCost | None = None
+        self.active_agent: Agent | None = None
+        self.agent_queue: list[Agent] = []
+        self.working_history: list[Message] = []
 
     def _print_welcome(self) -> None:
         """Print welcome message and usage instructions."""
@@ -169,7 +172,7 @@ class AgentRepl:
         """Print conversation statistics."""
         print("\n📊 Conversation Statistics:")
         print(f"Full history length: {len(self.conversation)} messages")
-        print(f"Working history length: {len(self.swarm.working_history)} messages")
+        print(f"Working history length: {len(self.working_history)} messages")
 
         if self.usage:
             print("\nToken Usage:")
@@ -198,14 +201,14 @@ class AgentRepl:
             print(f"  Total cost: ${total_cost:.4f}")
 
         print("\nActive Agent:")
-        if self.swarm.active_agent:
-            print(f"  ID: {self.swarm.active_agent.id}")
-            print(f"  Model: {self.swarm.active_agent.model}")
-            print(f"  Tools: {len(self.swarm.active_agent.tools)} available")
+        if self.active_agent:
+            print(f"  ID: {self.active_agent.id}")
+            print(f"  Model: {self.active_agent.model}")
+            print(f"  Tools: {len(self.active_agent.tools)} available")
         else:
             print("  None")
 
-        print(f"\nPending agents in queue: {len(self.swarm.agent_queue)}")
+        print(f"\nPending agents in queue: {len(self.agent_queue)}")
         print("\n" + "=" * 50 + "\n")
 
     def _handle_command(self, command: str) -> bool:
@@ -250,6 +253,9 @@ class AgentRepl:
             self.conversation = result.messages
             self.usage = combine_usage(self.usage, result.usage)
             self.response_cost = combine_response_cost(self.response_cost, result.response_cost)
+            self.active_agent = result.agent
+            self.agent_queue = result.agent_queue
+            self.working_history.extend(result.messages)
             print("\n" + "=" * 50 + "\n")
         except Exception as e:
             print(f"\n❌ Error processing query: {str(e)}", file=sys.stderr)
