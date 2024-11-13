@@ -200,6 +200,7 @@ class Swarm:
 
         Args:
             agent: Agent that initiated the tool call
+            context_variables: Context variables to pass to the tool function
             tool_call: Tool call to process, containing function name and arguments
 
         Returns:
@@ -289,6 +290,7 @@ class Swarm:
 
         Args:
             agent: Agent that initiated the tool calls
+            context_variables: Context variables for the agent
             tool_calls: List of tool calls to process, each containing function name and arguments
 
         Returns:
@@ -446,6 +448,7 @@ class Swarm:
         Args:
             agent: Agent to use for continuation
             previous_content: Content generated so far
+            context_variables: Context variables for the agent
 
         Returns:
             Response stream for the continuation
@@ -479,6 +482,7 @@ class Swarm:
         Args:
             agent: Agent to use for completion
             agent_messages: Messages to send to the agent
+            context_variables: Context variables for the agent
 
         Yields:
             CompletionResponse objects containing:
@@ -547,6 +551,7 @@ class Swarm:
         Args:
             agent: Agent to use for completion
             agent_messages: Messages to send to the agent
+            context_variables: Context variables for the agent
 
         Returns:
             Stream wrapper for the completion response
@@ -640,6 +645,7 @@ class Swarm:
             agent: Agent to use for continuation
             continuation_count: Number of continuations so far
             accumulated_content: Content generated up to this point
+            context_variables: Context variables for the agent
 
         Returns:
             New stream for continuation, or None if max continuations reached
@@ -680,6 +686,7 @@ class Swarm:
         Args:
             agent: Agent to use for completion
             agent_messages: Messages to send to the agent
+            context_variables: Context variables for the agent
 
         Yields:
             AgentResponse objects containing:
@@ -747,6 +754,7 @@ class Swarm:
         Args:
             agent: Agent that generated the response
             content: Text content of the assistant's response, may be None if only tool calls
+            context_variables: Context variables for the agent
             tool_calls: List of tool calls to process, may be empty if only text response
 
         Returns:
@@ -803,13 +811,14 @@ class Swarm:
         """Prepare the agent's context using the working history.
 
         Creates initial context for an agent by combining:
-        1. Agent's system instructions
+        1. Agent's system instructions (resolved with context variables if callable)
         2. Filtered working history (excluding system messages)
         3. Optional user prompt
 
         Args:
             agent: The agent whose context is being prepared
             prompt: Optional initial user message to add
+            context_variables: Optional variables for resolving instructions
 
         Returns:
             List of messages representing the agent's context
@@ -869,6 +878,7 @@ class Swarm:
 
         Args:
             agent: Agent to use for completion
+            context_variables: Context variables for the agent
 
         Returns:
             Response stream from the completion
@@ -912,6 +922,7 @@ class Swarm:
             agent: Initial agent to handle the conversation
             prompt: Initial user prompt
             messages: Optional previous conversation history
+            context_variables: Optional context variables for the agent
         """
         if messages:
             self._full_history = copy.deepcopy(messages)
@@ -954,6 +965,8 @@ class Swarm:
 
         Args:
             switch_count: Current number of agent switches in the conversation
+            prompt: Optional prompt to send to the new agent
+            context_variables: Optional context variables for the new agent
 
         Returns:
             True if the switch was successful, False otherwise
@@ -1012,10 +1025,37 @@ class Swarm:
             agent: Initial agent to handle the conversation
             prompt: Initial user prompt
             messages: Optional previous conversation history
+            context_variables: Optional dictionary of variables accessible to:
+                - Agent instructions (if using callable instructions)
+                - Tool functions (automatically injected as context_variables parameter)
             cleanup: Whether to clear agent state after completion
 
         Yields:
             AgentResponse objects containing response content and state
+
+        Example:
+            ```python
+            def get_instructions(context: dict[str, Any]) -> str:
+                return f"Help {context['user_name']} with math."
+
+            def add(a: float, b: float, context_variables: dict[str, Any]) -> float:
+                print(f"User {context_variables['user_name']} adding {a} + {b}")
+                return a + b
+
+            agent = Agent.create(
+                id="math",
+                model="gpt-4",
+                instructions=get_instructions,
+                tools=[add]
+            )
+
+            async for response in swarm.stream(
+                agent=agent,
+                prompt="What is 2 + 2?",
+                context_variables={"user_name": "Alice"}
+            ):
+                print(response.content)
+            ```
 
         Raises:
             Exception: Any errors during conversation processing
@@ -1101,10 +1141,35 @@ class Swarm:
             agent: Agent to execute the task
             prompt: Prompt describing the task
             messages: Optional previous messages for context
+            context_variables: Optional dictionary of variables accessible to:
+                - Agent instructions (if using callable instructions)
+                - Tool functions (automatically injected as context_variables parameter)
             cleanup: Whether to clear agent state after completion
 
         Returns:
-            ConversationState containing final response and complete history
+            ConversationState containing:
+                - Final response content
+                - Active agent and message history
+                - Token usage and cost statistics (if enabled)
+
+        Example:
+            ```python
+            def get_instructions(context: dict[str, Any]) -> str:
+                return f"Help {context['user_name']} with their task."
+
+            agent = Agent.create(
+                id="helper",
+                model="gpt-4",
+                instructions=get_instructions
+            )
+
+            result = await swarm.execute(
+                agent=agent,
+                prompt="Hello!",
+                context_variables={"user_name": "Bob"}
+            )
+            print(result.content)  # Response will be personalized for Bob
+            ```
 
         Raises:
             ValueError: If there is no active agent
