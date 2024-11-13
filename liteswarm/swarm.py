@@ -460,6 +460,7 @@ class Swarm:
         self,
         agent: Agent,
         agent_messages: list[Message],
+        context_variables: ContextVariables,
     ) -> AsyncGenerator[CompletionResponse, None]:
         """Stream completion responses from the agent, handling continuations and errors.
 
@@ -484,14 +485,13 @@ class Swarm:
             CompletionError: If completion fails after all retries
             ContextLengthError: If context window is exceeded and can't be reduced
         """
-        log_verbose(
-            f"Sending messages to agent [{agent.id}]: {agent_messages}",
-            level="DEBUG",
-        )
-
         accumulated_content = ""
         continuation_count = 0
-        current_stream = await self._get_initial_stream(agent, agent_messages)
+        current_stream = await self._get_initial_stream(
+            agent=agent,
+            agent_messages=agent_messages,
+            context_variables=context_variables,
+        )
 
         try:
             while continuation_count < self.max_response_continuations:
@@ -508,9 +508,10 @@ class Swarm:
                     if response.finish_reason == "length":
                         continuation_count += 1
                         current_stream = await self._handle_continuation(
-                            agent,
-                            continuation_count,
-                            accumulated_content,
+                            agent=agent,
+                            continuation_count=continuation_count,
+                            accumulated_content=accumulated_content,
+                            context_variables=context_variables,
                         )
 
                         # This break will exit the `for` loop, but the `while` loop
@@ -528,6 +529,7 @@ class Swarm:
         self,
         agent: Agent,
         agent_messages: list[Message],
+        context_variables: ContextVariables | None = None,
     ) -> CustomStreamWrapper:
         """Create initial completion stream with retry and context reduction.
 
@@ -550,13 +552,17 @@ class Swarm:
 
         async def get_initial_response() -> CustomStreamWrapper:
             try:
-                return await self._create_completion(agent, agent_messages)
+                return await self._create_completion(agent=agent, messages=agent_messages)
             except ContextWindowExceededError:
                 log_verbose(
                     "Context window exceeded, attempting to reduce context size",
                     level="WARNING",
                 )
-                return await self._retry_completion_with_trimmed_history(agent)
+
+                return await self._retry_completion_with_trimmed_history(
+                    agent=agent,
+                    context_variables=context_variables,
+                )
 
         return await retry_with_exponential_backoff(
             get_initial_response,
@@ -645,7 +651,11 @@ class Swarm:
             level="INFO",
         )
 
-        return await self._continue_generation(agent, accumulated_content)
+        return await self._continue_generation(
+            agent=agent,
+            previous_content=accumulated_content,
+            context_variables=context_variables,
+        )
 
     async def _process_agent_response(
         self,
@@ -680,7 +690,11 @@ class Swarm:
         full_content = ""
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
-        async for completion_response in self._get_completion_response(agent, agent_messages):
+        async for completion_response in self._get_completion_response(
+            agent=agent,
+            agent_messages=agent_messages,
+            context_variables=context_variables,
+        ):
             delta = completion_response.delta
             finish_reason = completion_response.finish_reason
 
@@ -748,7 +762,12 @@ class Swarm:
         ]
 
         if tool_calls:
-            tool_call_results = await self._process_tool_calls(agent, tool_calls)
+            tool_call_results = await self._process_tool_calls(
+                agent=agent,
+                context_variables=context_variables,
+                tool_calls=tool_calls,
+            )
+
             for tool_call_result in tool_call_results:
                 tool_message = await self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
@@ -767,6 +786,7 @@ class Swarm:
         self,
         agent: Agent,
         prompt: str | None = None,
+        context_variables: ContextVariables | None = None,
     ) -> list[Message]:
         """Prepare the agent's context using the working history.
 
@@ -822,7 +842,11 @@ class Swarm:
         elif history_exceeds_token_limit(self._working_history, agent.model):
             self._working_history = trim_messages(self._full_history, agent.model)
 
-    async def _retry_completion_with_trimmed_history(self, agent: Agent) -> CustomStreamWrapper:
+    async def _retry_completion_with_trimmed_history(
+        self,
+        agent: Agent,
+        context_variables: ContextVariables | None = None,
+    ) -> CustomStreamWrapper:
         """Attempt completion with a trimmed message history.
 
         This method:
@@ -841,7 +865,10 @@ class Swarm:
         """
         await self._update_working_history(agent)
 
-        reduced_messages = await self._prepare_agent_context(agent)
+        reduced_messages = await self._prepare_agent_context(
+            agent=agent,
+            context_variables=context_variables,
+        )
 
         try:
             return await self._create_completion(agent, reduced_messages)
@@ -881,7 +908,12 @@ class Swarm:
             self._active_agent = agent
             self._active_agent.state = "active"
 
-            initial_context = await self._prepare_agent_context(agent, prompt)
+            initial_context = await self._prepare_agent_context(
+                agent=agent,
+                prompt=prompt,
+                context_variables=context_variables,
+            )
+
             self._full_history = initial_context.copy()
             self._working_history = initial_context.copy()
             self._agent_messages = initial_context.copy()
@@ -891,7 +923,12 @@ class Swarm:
             self._working_history.append(user_message)
             self._agent_messages.append(user_message)
 
-    async def _handle_agent_switch(self, switch_count: int) -> bool:
+    async def _handle_agent_switch(
+        self,
+        switch_count: int,
+        prompt: str | None = None,
+        context_variables: dict[str, Any] | None = None,
+    ) -> bool:
         """Switch to the next agent in the queue.
 
         This method:
@@ -926,7 +963,11 @@ class Swarm:
 
         previous_agent = self._active_agent
         self._active_agent = next_agent
-        self._agent_messages = await self._prepare_agent_context(next_agent)
+        self._agent_messages = await self._prepare_agent_context(
+            agent=next_agent,
+            prompt=prompt,
+            context_variables=context_variables,
+        )
 
         await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
@@ -981,6 +1022,7 @@ class Swarm:
                     agent_switch_count += 1
                     agent_switched = await self._handle_agent_switch(
                         switch_count=agent_switch_count,
+                        context_variables=self._context_variables,
                     )
 
                     if not agent_switched:
