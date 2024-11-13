@@ -405,7 +405,7 @@ class Swarm:
             TypeError: If response is not of expected type
         """
         dict_messages = dump_messages(messages)
-        tools = [function_to_json(tool) for tool in agent.tools]
+        tools = [function_to_json(tool) for tool in agent.tools] if agent.tools else None
         stream_options = {"include_usage": True} if self.include_usage else None
 
         completion_kwargs = {
