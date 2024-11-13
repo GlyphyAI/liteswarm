@@ -129,3 +129,8 @@ class ConversationState(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     usage: Usage | None = None
     response_cost: ResponseCost | None = None
+
+
+class FunctionDocstring(BaseModel):
+    description: str | None = None
+    parameters: dict[str, Any] = Field(default_factory=dict)
