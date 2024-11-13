@@ -22,6 +22,7 @@ from liteswarm.types import (
     Message,
     ResponseCost,
     ToolCallAgentResult,
+    ToolCallFailureResult,
     ToolCallMessageResult,
     ToolCallResult,
     ToolMessage,
@@ -185,7 +186,7 @@ class Swarm:
         self,
         agent: Agent,
         tool_call: ChatCompletionDeltaToolCall,
-    ) -> ToolCallResult | None:
+    ) -> ToolCallResult:
         """Process a single tool call and return its result.
 
         Handles the execution of a function call, including error handling
@@ -197,17 +198,16 @@ class Swarm:
             tool_call: Tool call to process, containing function name and arguments
 
         Returns:
-            ToolCallResult if successful, None if failed or function not found
-
-        Raises:
-            ValueError: If function arguments are invalid
-            Exception: Any exception raised by the function tool itself
+            ToolCallResult indicating success or failure of the tool execution
         """
         function_name = tool_call.function.name
         function_tools_map = {tool.__name__: tool for tool in agent.tools}
 
         if function_name not in function_tools_map:
-            return None
+            return ToolCallFailureResult(
+                tool_call=tool_call,
+                error=ValueError(f"Unknown function: {function_name}"),
+            )
 
         await self.stream_handler.on_tool_call(tool_call, agent)
 
@@ -216,14 +216,13 @@ class Swarm:
             function_tool = function_tools_map[function_name]
             function_result = function_tool(**args)
 
-            tool_call_result: ToolCallResult | None = None
             if isinstance(function_result, Agent):
-                tool_call_result = ToolCallAgentResult(
+                return ToolCallAgentResult(
                     tool_call=tool_call,
                     agent=function_result,
                 )
             else:
-                tool_call_result = ToolCallMessageResult(
+                return ToolCallMessageResult(
                     tool_call=tool_call,
                     message=Message(
                         role="tool",
@@ -232,14 +231,9 @@ class Swarm:
                     ),
                 )
 
-            await self.stream_handler.on_tool_call_result(tool_call_result, agent)
-
-            return tool_call_result
-
         except Exception as e:
             await self.stream_handler.on_error(e, agent)
-
-            return None
+            return ToolCallFailureResult(tool_call=tool_call, error=e)
 
     async def _process_tool_calls(
         self,
@@ -269,7 +263,7 @@ class Swarm:
         """
         tasks = [self._process_tool_call(agent, tool_call) for tool_call in tool_calls]
 
-        results: list[ToolCallResult | None]
+        results: list[ToolCallResult]
         match len(tasks):
             case 0:
                 results = []
@@ -278,7 +272,7 @@ class Swarm:
             case _:
                 results = await asyncio.gather(*tasks)
 
-        return [result for result in results if result is not None]
+        return results
 
     async def _process_tool_call_result(
         self,
@@ -286,14 +280,16 @@ class Swarm:
     ) -> ToolMessage:
         """Process a tool call result and prepare the appropriate message response.
 
-        This method handles two types of tool call results:
+        This method handles the following types of tool call results:
         1. Message results: Function return values that should be added to conversation
         2. Agent results: Requests to switch to a new agent
+        3. Failure results: Errors that occurred during execution
 
         Args:
             result: The tool call result to process, either:
                 - ToolCallMessageResult containing a function's return value
                 - ToolCallAgentResult containing a new agent to switch to
+                - ToolCallFailureResult containing an error that occurred during execution
 
         Returns:
             ToolMessage containing:
@@ -319,6 +315,15 @@ class Swarm:
                         tool_call_id=result.tool_call.id,
                     ),
                     agent=agent_result.agent,
+                )
+
+            case ToolCallFailureResult() as failure_result:
+                return ToolMessage(
+                    message=Message(
+                        role="tool",
+                        content=f"Error executing tool: {str(failure_result.error)}",
+                        tool_call_id=result.tool_call.id,
+                    ),
                 )
 
             case _:
