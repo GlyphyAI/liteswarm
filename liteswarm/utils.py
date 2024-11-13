@@ -16,11 +16,10 @@ from litellm.utils import get_max_tokens, token_counter
 from litellm.utils import trim_messages as litellm_trim_messages
 
 from liteswarm.exceptions import CompletionError
+from liteswarm.logging import log_verbose
 from liteswarm.types import FunctionDocstring, Message, ResponseCost
 
 T = TypeVar("T")
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -139,7 +138,7 @@ class FunctionConverter:
             return schema
 
         except Exception as e:
-            logger.error(f"Failed to convert function {func.__name__}: {str(e)}")
+            log_verbose(f"Failed to convert function {func.__name__}: {str(e)}", level="ERROR")
             raise ValueError(f"Failed to convert function {func.__name__}: {str(e)}") from e
 
     @classmethod
@@ -292,7 +291,7 @@ class FunctionConverter:
             )
 
         except Exception as e:
-            logger.warning(f"Failed to parse docstring: {e}")
+            log_verbose(f"Failed to parse docstring: {e}", level="WARNING")
             return FunctionDocstring()
 
     @classmethod
@@ -496,12 +495,13 @@ async def retry_with_exponential_backoff(
             # Calculate next delay with exponential backoff
             delay = min(delay * backoff_factor, max_delay)
 
-            logger.warning(
+            log_verbose(
                 "Attempt %d/%d failed: %s. Retrying in %.1f seconds...",
                 attempt + 1,
                 max_retries + 1,
                 str(e),
                 delay,
+                level="WARNING",
             )
 
             await asyncio.sleep(delay)

@@ -1,6 +1,5 @@
 import asyncio
 import copy
-import logging
 from collections import deque
 from collections.abc import AsyncGenerator
 
@@ -11,6 +10,7 @@ from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 
 from liteswarm.exceptions import CompletionError, ContextLengthError
+from liteswarm.logging import log_verbose
 from liteswarm.stream_handler import LiteStreamHandler, StreamHandler
 from liteswarm.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types import (
@@ -40,8 +40,6 @@ from liteswarm.utils import (
 )
 
 litellm.modify_params = True
-
-logger = logging.getLogger(__name__)
 
 
 class Swarm:
@@ -430,10 +428,9 @@ class Swarm:
             CompletionError: If completion fails after all retries
             ContextLengthError: If context window is exceeded and can't be reduced
         """
-        logger.debug(
-            "Sending messages to agent [%s]: %s",
-            agent.id,
-            agent_messages,
+        log_verbose(
+            f"Sending messages to agent [{agent.id}]: {agent_messages}",
+            level="DEBUG",
         )
 
         accumulated_content = ""
@@ -499,7 +496,10 @@ class Swarm:
             try:
                 return await self._create_completion(agent, agent_messages)
             except ContextWindowExceededError:
-                logger.warning("Context window exceeded, attempting to reduce context size")
+                log_verbose(
+                    "Context window exceeded, attempting to reduce context size",
+                    level="WARNING",
+                )
                 return await self._retry_completion_with_trimmed_history(agent)
 
         return await retry_with_exponential_backoff(
@@ -576,17 +576,16 @@ class Swarm:
             New stream for continuation, or None if max continuations reached
         """
         if continuation_count >= self.max_response_continuations:
-            logger.warning(
-                "Maximum response continuations (%d) reached",
-                self.max_response_continuations,
+            log_verbose(
+                f"Maximum response continuations ({self.max_response_continuations}) reached",
+                level="WARNING",
             )
 
             return None
 
-        logger.info(
-            "Response continuation %d/%d",
-            continuation_count,
-            self.max_response_continuations,
+        log_verbose(
+            f"Response continuation {continuation_count}/{self.max_response_continuations}",
+            level="INFO",
         )
 
         return await self._continue_generation(agent, accumulated_content)
@@ -848,19 +847,18 @@ class Swarm:
             True if the switch was successful, False otherwise
         """
         if switch_count >= self.max_agent_switches:
-            logger.warning(
-                "Maximum agent switches (%d) reached",
-                self.max_agent_switches,
+            log_verbose(
+                f"Maximum agent switches ({self.max_agent_switches}) reached",
+                level="WARNING",
             )
             return False
 
         if not self._agent_queue:
             return False
 
-        logger.info(
-            "Agent switch %d/%d",
-            switch_count,
-            self.max_agent_switches,
+        log_verbose(
+            f"Agent switch {switch_count}/{self.max_agent_switches}",
+            level="INFO",
         )
 
         next_agent = self._agent_queue.popleft()

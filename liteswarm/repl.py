@@ -3,6 +3,7 @@ from typing import NoReturn
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
+from liteswarm.logging import configure_logging
 from liteswarm.summarizer import Summarizer
 from liteswarm.swarm import Swarm
 from liteswarm.types import (
@@ -296,7 +297,7 @@ class AgentRepl:
                 continue
 
 
-async def start_repl(
+async def start_repl(  # noqa: PLR0913
     agent: Agent,
     summarizer: Summarizer | None = None,
     include_usage: bool = False,
@@ -312,6 +313,8 @@ async def start_repl(
         include_cost: Whether to include cost statistics in the REPL stats
         cleanup: Whether to clear agent state after completion. If False,
                 maintains the last active agent for subsequent interactions
+        log_level: The log level to use for the REPL
     """
+    configure_logging()
     repl = AgentRepl(agent, summarizer, include_usage, include_cost, cleanup)
     await repl.run()

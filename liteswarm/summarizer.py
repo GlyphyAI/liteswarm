@@ -1,15 +1,13 @@
 import asyncio
-import logging
 from collections.abc import Sequence
 from typing import Protocol
 
 from litellm import acompletion
 from litellm.types.utils import Choices, ModelResponse
 
+from liteswarm.logging import log_verbose
 from liteswarm.types import Message
 from liteswarm.utils import filter_tool_call_pairs
-
-logger = logging.getLogger(__name__)
 
 GroupedMessages = tuple[list[Message], list[Message]]
 
@@ -175,7 +173,7 @@ class LiteSummarizer:
             Message(role="user", content=self.summarize_prompt),
         ]
 
-        logger.debug("Summarizing messages: %s", summary_messages)
+        log_verbose(f"Summarizing messages: {summary_messages}", level="DEBUG")
 
         response = await acompletion(
             model=self.model,
@@ -183,7 +181,7 @@ class LiteSummarizer:
             stream=False,
         )
 
-        logger.debug("Summarization response: %s", response)
+        log_verbose(f"Summarization response: {response}", level="DEBUG")
 
         if not isinstance(response, ModelResponse):
             raise TypeError("Expected a CompletionResponse instance.")
@@ -335,26 +333,32 @@ class LiteSummarizer:
 
             final_messages.extend(to_preserve)
 
-            logger.debug(
+            log_verbose(
                 "Final message count: %d (preserved=%d, summaries=%d)",
                 len(final_messages),
                 len(to_preserve),
                 len(summaries),
+                level="DEBUG",
             )
 
             return final_messages
 
         except Exception as e:
             if self.fallback_summarizer:
-                logger.warning(
+                log_verbose(
                     "LLM summarization failed, falling back to %s: %s",
                     self.fallback_summarizer.__class__.__name__,
                     str(e),
+                    level="WARNING",
                 )
 
                 return await self.fallback_summarizer.summarize_history(messages)
 
-            logger.error("Summarization failed and no fallback available: %s", str(e))
+            log_verbose(
+                f"Summarization failed and no fallback available: {str(e)}",
+                level="ERROR",
+            )
+
             raise
 
 
@@ -435,11 +439,12 @@ class TruncationSummarizer:
         # Filter tool calls to maintain pairs
         filtered_messages = filter_tool_call_pairs(recent_messages)
 
-        logger.debug(
+        log_verbose(
             "Truncated message count: %d (from=%d, preserved=%d)",
             len(filtered_messages),
             len(messages),
             self.preserve_recent,
+            level="DEBUG",
         )
 
         return filtered_messages
