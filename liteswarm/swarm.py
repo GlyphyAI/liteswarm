@@ -445,8 +445,9 @@ class Swarm:
         Returns:
             Response stream for the continuation
         """
+        instructions = unwrap_instructions(agent.instructions, context_variables)
         continuation_messages = [
-            Message(role="system", content=agent.instructions),
+            Message(role="system", content=instructions),
             Message(role="assistant", content=previous_content),
             Message(
                 role="user",
@@ -802,8 +803,9 @@ class Swarm:
         Returns:
             List of messages representing the agent's context
         """
+        instructions = unwrap_instructions(agent.instructions, context_variables)
         history = [msg for msg in self._working_history if msg.role != "system"]
-        messages = [Message(role="system", content=agent.instructions), *history]
+        messages = [Message(role="system", content=instructions), *history]
 
         if prompt:
             messages.append(Message(role="user", content=prompt))
