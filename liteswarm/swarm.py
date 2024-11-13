@@ -2,6 +2,7 @@ import asyncio
 import copy
 from collections import deque
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import litellm
 import orjson
@@ -22,6 +23,7 @@ from liteswarm.types import (
     Delta,
     Message,
     ResponseCost,
+    Result,
     ToolCallAgentResult,
     ToolCallFailureResult,
     ToolCallMessageResult,
@@ -33,11 +35,13 @@ from liteswarm.utils import (
     combine_response_cost,
     combine_usage,
     dump_messages,
+    function_has_parameter,
     function_to_json,
     history_exceeds_token_limit,
     retry_with_exponential_backoff,
     safe_get_attr,
     trim_messages,
+    unwrap_instructions,
 )
 
 litellm.modify_params = True
@@ -215,22 +219,56 @@ class Swarm:
         try:
             args = orjson.loads(tool_call.function.arguments)
             function_tool = function_tools_map[function_name]
-            function_result = function_tool(**args)
+            if function_has_parameter(function_tool, "context_variables"):
+                args = {**args, "context_variables": context_variables}
 
-            if isinstance(function_result, Agent):
-                return ToolCallAgentResult(
-                    tool_call=tool_call,
-                    agent=function_result,
-                )
-            else:
-                return ToolCallMessageResult(
-                    tool_call=tool_call,
-                    message=Message(
-                        role="tool",
-                        content=orjson.dumps(function_result).decode(),
-                        tool_call_id=tool_call.id,
-                    ),
-                )
+            match function_tool(**args):
+                case Agent() as agent:
+                    return ToolCallAgentResult(
+                        tool_call=tool_call,
+                        agent=agent,
+                        message=Message(
+                            role="tool",
+                            content=f"Switched to agent {agent.id}",
+                            tool_call_id=tool_call.id,
+                        ),
+                    )
+
+                case Result() as result:
+                    content = orjson.dumps(result.value).decode() if result.value else None
+
+                    if result.agent:
+                        content = content or f"Switched to agent {result.agent.id}"
+                        return ToolCallAgentResult(
+                            tool_call=tool_call,
+                            agent=result.agent,
+                            message=Message(
+                                role="tool",
+                                content=content,
+                                tool_call_id=tool_call.id,
+                            ),
+                            context_variables=result.context_variables,
+                        )
+
+                    return ToolCallMessageResult(
+                        tool_call=tool_call,
+                        message=Message(
+                            role="tool",
+                            content=content or "",
+                            tool_call_id=tool_call.id,
+                        ),
+                        context_variables=result.context_variables,
+                    )
+
+                case _ as content:
+                    return ToolCallMessageResult(
+                        tool_call=tool_call,
+                        message=Message(
+                            role="tool",
+                            content=orjson.dumps(content).decode(),
+                            tool_call_id=tool_call.id,
+                        ),
+                    )
 
         except Exception as e:
             await self.stream_handler.on_error(e, agent)
