@@ -995,6 +995,7 @@ class Swarm:
             content=full_response,
             agent=self._active_agent,
             agent_messages=self._agent_messages,
+            agent_queue=list(self._agent_queue),
             messages=self._full_history,
             usage=full_usage,
             response_cost=response_cost,
