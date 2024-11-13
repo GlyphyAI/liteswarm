@@ -301,7 +301,14 @@ class Swarm:
             Tool calls that fail or reference unknown functions are silently filtered out
             of the results rather than raising exceptions.
         """
-        tasks = [self._process_tool_call(agent, tool_call) for tool_call in tool_calls]
+        tasks = [
+            self._process_tool_call(
+                agent=agent,
+                context_variables=context_variables,
+                tool_call=tool_call,
+            )
+            for tool_call in tool_calls
+        ]
 
         results: list[ToolCallResult]
         match len(tasks):
