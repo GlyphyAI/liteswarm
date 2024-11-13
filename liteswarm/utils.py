@@ -348,12 +348,35 @@ def unwrap_instructions(
 ) -> str:
     """Unwrap instructions if they are a callable.
 
+    If instructions is a callable, it will be called with the provided context
+    variables. Otherwise, the instructions string will be returned as-is.
+
     Args:
-        instructions: The instructions to unwrap
-        context_variables: The context variables to pass to the instructions
+        instructions: The instructions to unwrap, either a string or a callable
+            that takes context_variables and returns a string
+        context_variables: Optional dictionary of context variables to pass to
+            the instructions callable
 
     Returns:
-        The unwrapped instructions
+        The unwrapped instructions string
+
+    Example:
+        ```python
+        def get_instructions(context_variables: dict[str, Any]) -> str:
+            user = context_variables.get("user_name", "user")
+            return f"Help {user} with their task."
+
+        # With callable instructions
+        instructions = unwrap_instructions(
+            get_instructions,
+            context_variables={"user_name": "Alice"}
+        )
+        # Returns: "Help Alice with their task."
+
+        # With string instructions
+        instructions = unwrap_instructions("Help the user.")
+        # Returns: "Help the user."
+        ```
     """
     return unwrap_callable(
         instructions,
