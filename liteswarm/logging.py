@@ -157,5 +157,5 @@ def log_verbose(
     log_fn(message, *args, **kwargs)
 
     if print_fn and should_print(level):
-        formatted_message = message.format(*args, **kwargs)
+        formatted_message = message % args
         print_fn(formatted_message)
