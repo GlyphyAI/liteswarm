@@ -5,6 +5,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "griffe>=1.5.1",
     "litellm>=1.52.2",
     "orjson>=3.10.11",
     "pydantic>=2.9.2",
