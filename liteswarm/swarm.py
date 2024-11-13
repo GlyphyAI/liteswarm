@@ -904,6 +904,8 @@ class Swarm:
             self._full_history = copy.deepcopy(messages)
             await self._update_working_history(agent)
 
+        self._context_variables = context_variables or {}
+
         if self._active_agent is None:
             self._active_agent = agent
             self._active_agent.state = "active"
