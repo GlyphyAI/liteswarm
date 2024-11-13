@@ -62,16 +62,33 @@ class Swarm:
     Example:
         ```python
         def add(a: float, b: float) -> float:
-            \"\"\"Add two numbers together.\"\"\"
+            \"\"\"Add two numbers together.
+
+            Args:
+                a: First number.
+                b: Second number.
+
+            Returns:
+                Sum of the two numbers.
+            \"\"\"
             return a + b
 
         def multiply(a: float, b: float) -> float:
-            \"\"\"Multiply two numbers together.\"\"\"
+            \"\"\"Multiply two numbers together.
+
+            Args:
+                a: First number.
+                b: Second number.
+
+            Returns:
+                Product of the two numbers.
+            \"\"\"
             return a * b
 
         agent_instructions = (
             "You are a math assistant. Use tools to perform calculations. "
-            "You must strictly follow this output format: 'The result is <tool_result>'"
+            "When making tool calls, you must provide valid JSON arguments with correct quotes. "
+            "After calculations, output must strictly follow this format: 'The result is <tool_result>'"
         )
 
         # Create an agent with math tools
@@ -99,7 +116,7 @@ class Swarm:
     Note:
         The class maintains internal state during conversations.
         For concurrent conversations, create separate Swarm instances.
-    """
+    """  # noqa: D214
 
     def __init__(  # noqa: PLR0913
         self,
