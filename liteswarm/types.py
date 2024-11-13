@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from typing import Any, Literal, Self
+from typing import Any, Generic, Literal, Self, TypeVar
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
@@ -10,11 +10,20 @@ from litellm.types.utils import (
 from litellm.types.utils import Delta as LiteDelta
 from pydantic import BaseModel, Field
 
+T = TypeVar("T")
+"""Generic type placeholder."""
+
 Tool = Callable[..., Any]
 """A tool that can be called by an agent."""
 
 AgentState = Literal["idle", "active", "stale"]
 """The state of an agent."""
+
+ContextVariables = dict[str, Any]
+"""Context variables for an agent."""
+
+Instructions = str | Callable[[ContextVariables], str]
+"""Agent instructions - either a string or a function that takes context variables."""
 
 
 class Message(BaseModel):
