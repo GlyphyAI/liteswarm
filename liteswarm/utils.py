@@ -100,6 +100,10 @@ class FunctionConverter:
                 if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
                     continue
 
+                # Skip context_variables (reserved for internal use)
+                if param_name == "context_variables":
+                    continue
+
                 param_type = type_hints.get(param_name, type(Any))
                 param_desc = func_param_docs.get(param_name, "")
 
