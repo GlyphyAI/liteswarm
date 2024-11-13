@@ -1,7 +1,8 @@
 import asyncio
 import inspect
 import logging
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from numbers import Number
@@ -585,3 +586,21 @@ def calculate_response_cost(model: str, usage: Usage) -> ResponseCost:
         prompt_tokens_cost=prompt_tokens_cost,
         completion_tokens_cost=completion_tokens_cost,
     )
+
+
+@contextmanager
+def disable_logging() -> Generator[None, None, None]:
+    """Disable logging for the duration of the context manager.
+
+    Example:
+        ```python
+        with disable_logging():
+            logging.info("This will not be printed")
+
+        logging.info("This will be printed")
+        ```
+    """
+    old_level = logging.root.getEffectiveLevel()
+    logging.root.setLevel(logging.CRITICAL + 1)
+    yield
+    logging.root.setLevel(old_level)
