@@ -161,6 +161,17 @@ class Agent(BaseModel):
         )
 
 
+class Result(BaseModel, Generic[T]):
+    """Wrapper for the result of a function call."""
+
+    value: T | None = None
+    """The value returned by the function call."""
+    agent: Agent | None = None
+    """The new agent to switch to."""
+    context_variables: ContextVariables | None = None
+    """Context variables to pass to the next agent."""
+
+
 class ToolCallResult(BaseModel):
     """Base class for results of tool calls."""
 
