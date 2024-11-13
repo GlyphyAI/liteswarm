@@ -17,7 +17,7 @@ from litellm.utils import trim_messages as litellm_trim_messages
 
 from liteswarm.exceptions import CompletionError
 from liteswarm.logging import log_verbose
-from liteswarm.types import FunctionDocstring, Message, ResponseCost
+from liteswarm.types import FunctionDocstring, Instructions, Message, ResponseCost
 
 T = TypeVar("T")
 
@@ -308,6 +308,39 @@ def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
             filtered_messages.append(message)
 
     return filtered_messages
+
+
+def unwrap_callable(value: T | Callable[..., T], *args: Any, **kwargs: Any) -> T:
+    """Unwrap a callable if it's wrapped in a callable.
+
+    Args:
+        value: The value to unwrap
+        *args: Arguments to pass to the callable
+        **kwargs: Keyword arguments to pass to the callable
+
+    Returns:
+        The unwrapped value
+    """
+    return value(*args, **kwargs) if callable(value) else value
+
+
+def unwrap_instructions(
+    instructions: Instructions,
+    context_variables: dict[str, Any] | None = None,
+) -> str:
+    """Unwrap instructions if they are a callable.
+
+    Args:
+        instructions: The instructions to unwrap
+        context_variables: The context variables to pass to the instructions
+
+    Returns:
+        The unwrapped instructions
+    """
+    return unwrap_callable(
+        instructions,
+        context_variables=context_variables or {},
+    )
 
 
 def dump_messages(messages: list[Message]) -> list[dict[str, Any]]:
