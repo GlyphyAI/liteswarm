@@ -2,9 +2,12 @@ import logging
 import os
 from collections.abc import Callable
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Literal
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+verbose_logger = logging.getLogger("liteswarm")
 
 
 ANSI_COLORS = {
@@ -61,6 +64,7 @@ class FancyFormatter(logging.Formatter):
         return f"{prefix} │ {message}"
 
 
+@lru_cache(maxsize=1)
 def get_log_level(default: LogLevel = "INFO") -> int:
     """Get the log level from environment or default.
 
@@ -77,6 +81,7 @@ def get_log_level(default: LogLevel = "INFO") -> int:
     return LEVEL_MAP[default]
 
 
+@lru_cache(maxsize=1)
 def get_verbose_level(default: LogLevel = "INFO") -> LogLevel | None:
     """Get the verbose printing level from environment.
 
@@ -119,13 +124,12 @@ def configure_logging(default_level: LogLevel = "INFO") -> None:
     Args:
         default_level: Default log level if not set in environment
     """
-    logger = logging.getLogger("liteswarm")
-    logger.setLevel(get_log_level(default_level))
-    logger.handlers.clear()
+    verbose_logger.setLevel(get_log_level(default_level))
+    verbose_logger.handlers.clear()
 
     handler = logging.StreamHandler()
     handler.setFormatter(FancyFormatter())
-    logger.addHandler(handler)
+    verbose_logger.addHandler(handler)
 
 
 def log_verbose(
@@ -149,8 +153,7 @@ def log_verbose(
         LITESWARM_VERBOSE: Enable printing for specified level and above.
                           Use level name or "1"/"true"/"yes"/"on" for INFO
     """
-    logger = logging.getLogger("liteswarm")
-    log_fn = getattr(logger, level.lower())
+    log_fn = getattr(verbose_logger, level.lower())
     log_fn(message, *args, **kwargs)
 
     if print_fn and should_print(level):
