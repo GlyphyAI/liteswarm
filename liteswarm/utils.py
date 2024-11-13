@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from numbers import Number
-from typing import Any, Literal, TypeVar, Union, get_type_hints
+from typing import Any, Literal, TypeVar, get_type_hints
 
 from griffe import Docstring, DocstringSectionKind
 from litellm import Usage
@@ -345,6 +345,19 @@ def function_to_json(
         Dict containing the function schema
     """
     return FunctionConverter.function_to_json(func, description)
+
+
+def function_has_parameter(func: Callable[..., Any], param: str) -> bool:
+    """Check if a function has a specific parameter.
+
+    Args:
+        func: The function to check
+        param: The parameter to check for
+
+    Returns:
+        True if the function has the parameter, False otherwise
+    """
+    return param in get_type_hints(func)
 
 
 def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
