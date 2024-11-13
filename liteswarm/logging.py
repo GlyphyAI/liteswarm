@@ -118,7 +118,7 @@ def should_print(level: LogLevel) -> bool:
     return LEVEL_MAP[level] >= LEVEL_MAP[verbose_level]
 
 
-def configure_logging(default_level: LogLevel = "INFO") -> None:
+def enable_logging(default_level: LogLevel = "INFO") -> None:
     """Configure logging for liteswarm.
 
     Args:
