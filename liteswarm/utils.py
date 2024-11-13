@@ -234,12 +234,30 @@ def function_to_json(
 ) -> dict[str, Any]:
     """Convert a Python function to an OpenAI-compatible function description.
 
+    The function will automatically exclude the `context_variables` parameter from
+    the generated schema, as it's handled internally by the framework.
+
     Args:
         func: The function to convert
         description: Optional function description
 
     Returns:
-        Dict containing the function schema
+        Dict containing the function schema in OpenAI's format
+
+    Example:
+        ```python
+        def greet(name: str, context_variables: dict[str, Any]) -> str:
+            \"\"\"Greet someone by name.
+
+    Args:
+                name: The name to greet
+                context_variables: Context variables (handled by framework)
+            \"\"\"
+            return f"Hello, {name}!"
+
+        schema = function_to_json(greet)
+        # Schema will only include the 'name' parameter
+        ```
     """
     return FunctionConverter.function_to_json(func, description)
 
