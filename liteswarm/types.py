@@ -52,6 +52,8 @@ class ToolMessage(BaseModel):
     """The message containing the tool's response."""
     agent: "Agent | None" = None
     """Optional new agent to switch to (for agent-switching tools)."""
+    context_variables: ContextVariables | None = None
+    """Context variables to pass to the next agent."""
 
 
 class Delta(BaseModel):
@@ -171,6 +173,8 @@ class ToolCallMessageResult(ToolCallResult):
 
     message: Message
     """The message containing the tool's response."""
+    context_variables: ContextVariables | None = None
+    """Context variables to pass to the next agent."""
 
 
 class ToolCallAgentResult(ToolCallResult):
@@ -178,6 +182,8 @@ class ToolCallAgentResult(ToolCallResult):
 
     agent: Agent
     """The new agent to switch to."""
+    context_variables: ContextVariables | None = None
+    """Context variables to pass to the next agent."""
 
 
 class ToolCallFailureResult(ToolCallResult):
