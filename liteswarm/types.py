@@ -125,6 +125,7 @@ class ConversationState(BaseModel):
     content: str | None = None
     agent: Agent | None = None
     agent_messages: list[Message] = Field(default_factory=list)
+    agent_queue: list[Agent] = Field(default_factory=list)
     messages: list[Message] = Field(default_factory=list)
     usage: Usage | None = None
     response_cost: ResponseCost | None = None
