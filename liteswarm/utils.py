@@ -6,8 +6,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from numbers import Number
-from typing import Any, TypeVar, Union, get_type_hints
+from typing import Any, Literal, TypeVar, Union, get_type_hints
 
+from griffe import Docstring, DocstringSectionKind
 from litellm import Usage
 from litellm.cost_calculator import cost_per_token
 from litellm.exceptions import RateLimitError, ServiceUnavailableError
@@ -15,7 +16,7 @@ from litellm.utils import get_max_tokens, token_counter
 from litellm.utils import trim_messages as litellm_trim_messages
 
 from liteswarm.exceptions import CompletionError
-from liteswarm.types import Message, ResponseCost
+from liteswarm.types import FunctionDocstring, Message, ResponseCost
 
 T = TypeVar("T")
 
@@ -51,41 +52,94 @@ class FunctionConverter:
     ) -> dict[str, Any]:
         """Convert a Python function to an OpenAI-compatible function description.
 
+        Follows OpenAI's function calling format:
+        {
+            "type": "function",
+            "function": {
+                "name": "get_current_weather",
+                "description": "Get the current weather",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city and state, e.g. San Francisco, CA"
+                        },
+                        "unit": {
+                            "type": "string",
+                            "enum": ["celsius", "fahrenheit"]
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+
         Args:
             func: The function to convert
             description: Optional function description
 
         Returns:
-            Dict containing the function schema wrapped in the expected structure
+            Dict containing the OpenAI-compatible function schema
         """
         try:
             signature = inspect.signature(func)
-            doc = inspect.getdoc(func) or ""
+            docstring = inspect.getdoc(func) or ""
             type_hints = get_type_hints(func)
 
-            parameters = cls._process_parameters(signature, type_hints, doc)
+            # Parse docstring
+            func_docstring = cls._parse_docstring_params(docstring)
+            func_description = description or func_docstring.description
+            func_param_docs = func_docstring.parameters
 
-            # Construct the inner function schema
-            function_schema = {
-                "name": func.__name__,
-                "description": description or doc.split("\n")[0],
-                "parameters": {
-                    "type": "object",
-                    "properties": parameters["properties"],
-                    "required": parameters["required"],
+            # Process parameters
+            properties: dict[str, Any] = {}
+            required: list[str] = []
+
+            for param_name, param in signature.parameters.items():
+                # Skip *args and **kwargs
+                if param.kind in (param.VAR_POSITIONAL, param.VAR_KEYWORD):
+                    continue
+
+                param_type = type_hints.get(param_name, type(Any))
+                param_desc = func_param_docs.get(param_name, "")
+
+                # Build parameter schema
+                param_schema: dict[str, Any] = {
+                    "type": cls.TYPE_MAP.get(param_type, "string"),
+                    "description": param_desc if param_desc else f"Parameter: {param_name}",
+                }
+
+                # Handle enums
+                if isinstance(param_type, type) and issubclass(param_type, Enum):
+                    param_schema["type"] = "string"
+                    param_schema["enum"] = [e.value for e in param_type]
+
+                properties[param_name] = param_schema
+
+                # Add to required if no default value
+                if param.default == param.empty:
+                    required.append(param_name)
+
+            schema = {
+                "type": "function",
+                "function": {
+                    "name": func.__name__,
+                    "description": func_description,
+                    "parameters": {
+                        "type": "object",
+                        "properties": properties,
+                    },
                 },
             }
 
-            # Remove empty required list
-            if not function_schema["parameters"]["required"]:
-                del function_schema["parameters"]["required"]
+            if required:
+                schema["function"]["parameters"]["required"] = required
 
-            # Wrap with the outer structure
-            wrapped_schema = {"type": "function", "function": function_schema}
+            return schema
 
-            return wrapped_schema
-
-        except ValueError as e:
+        except Exception as e:
+            logger.error(f"Failed to convert function {func.__name__}: {str(e)}")
             raise ValueError(f"Failed to convert function {func.__name__}: {str(e)}") from e
 
     @classmethod
@@ -109,7 +163,8 @@ class FunctionConverter:
         required: list[str] = []
 
         # Parse docstring for parameter descriptions
-        param_docs = cls._parse_docstring_params(docstring)
+        func_docstring = cls._parse_docstring_params(docstring)
+        func_param_docs = func_docstring.parameters
 
         for param_name, param in signature.parameters.items():
             # Skip *args and **kwargs
@@ -121,7 +176,7 @@ class FunctionConverter:
                 param_name,
                 param_type,
                 param,
-                param_docs.get(param_name, ""),
+                func_param_docs.get(param_name, ""),
             )
 
             properties[param_name] = param_schema
@@ -190,41 +245,87 @@ class FunctionConverter:
 
         return schema
 
-    @staticmethod
-    def _parse_docstring_params(docstring: str) -> dict[str, str]:
-        """Extract parameter descriptions from docstring.
+    @classmethod
+    def _parse_docstring_params(cls, docstring: str) -> FunctionDocstring:
+        """Extract parameter descriptions from docstring using Griffe.
 
         Args:
-            docstring: The docstring to parse
+            docstring: The docstring to parse.
 
         Returns:
-            Dict containing the parameter descriptions
+            FunctionDocstring: Parsed docstring information.
         """
-        param_docs: dict[str, str] = {}
         if not docstring:
-            return param_docs
+            return FunctionDocstring()
 
-        lines = docstring.split("\n")
-        current_param = None
-        current_desc = []
+        try:
+            with disable_logging():
+                style = cls._detect_docstring_style(docstring)
+                docstring_parser = Docstring(docstring)
+                parsed_docstring = docstring_parser.parse(parser=style)
 
-        for line in lines:
-            line = line.strip()  # noqa: PLW2901
-            if line.startswith(":param"):
-                if current_param:
-                    param_docs[current_param] = " ".join(current_desc).strip()
-                current_desc = []
-                parts = line.split(":", 2)
-                if len(parts) >= 3:  # noqa: PLR2004
-                    current_param = parts[1].replace("param ", "").strip()
-                    current_desc.append(parts[2].strip())
-            elif current_param and line and not line.startswith(":"):
-                current_desc.append(line)
+            description = ""
+            parameters: dict[str, str] = {}
 
-        if current_param:
-            param_docs[current_param] = " ".join(current_desc).strip()
+            for section in parsed_docstring:
+                match section.kind:
+                    case DocstringSectionKind.text:
+                        section_dict = section.as_dict()
+                        description = section_dict.get("value", "")
 
-        return param_docs
+                    case DocstringSectionKind.parameters:
+                        section_dict = section.as_dict()
+                        param_list = section_dict.get("value", [])
+
+                        for param in param_list:
+                            param_name = getattr(param, "name", None)
+                            param_desc = getattr(param, "description", "")
+                            if param_name:
+                                parameters[param_name] = param_desc
+
+                    case _:
+                        continue
+
+            return FunctionDocstring(
+                description=description,
+                parameters=parameters,
+            )
+
+        except Exception as e:
+            logger.warning(f"Failed to parse docstring: {e}")
+            return FunctionDocstring()
+
+    @classmethod
+    def _detect_docstring_style(cls, docstring: str) -> Literal["google", "sphinx", "numpy"]:
+        """Detect the style of a docstring using heuristics.
+
+        Args:
+            docstring: The docstring to analyze.
+
+        Returns:
+            str: The detected style ("google", "sphinx", or "numpy").
+        """
+        if not docstring:
+            return "google"  # default to google style
+
+        # Google style indicators
+        if "Args:" in docstring or "Returns:" in docstring or "Raises:" in docstring:
+            return "google"
+
+        # Sphinx style indicators
+        if ":param" in docstring or ":return:" in docstring or ":rtype:" in docstring:
+            return "sphinx"
+
+        # NumPy style indicators
+        if (
+            "Parameters\n" in docstring
+            or "Returns\n" in docstring
+            or "Parameters\r\n" in docstring
+            or "Returns\r\n" in docstring
+        ):
+            return "numpy"
+
+        return "google"
 
 
 def function_to_json(
