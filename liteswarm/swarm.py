@@ -46,20 +46,59 @@ logger = logging.getLogger(__name__)
 class Swarm:
     """A class that manages conversations with AI agents and their interactions.
 
-    The Swarm class handles:
-    1. Message history management (both full and working history)
-    2. Agent switching and tool execution
-    3. Conversation summarization
-    4. Streaming responses and tool calls
+    The Swarm class orchestrates complex conversations involving multiple AI agents,
+    handling message history, tool execution, and agent switching. It provides both
+    streaming and synchronous interfaces for agent interactions.
 
-    Attributes:
-        active_agent: Currently active agent handling the conversation
-        agent_messages: Messages relevant to current agent's context
-        agent_queue: Queue of agents waiting to be activated
-        stream_handler: Optional handler for streaming events
-        full_history: Complete conversation history
-        working_history: Summarized history within token limits
-        summarizer: Handles conversation summarization
+    Key Features:
+        - Message history management with automatic summarization
+        - Tool execution and agent switching
+        - Response streaming with customizable handlers
+        - Token usage and cost tracking
+        - Automatic retry with exponential backoff
+        - Automatic continuation of responses when hitting length limits
+        - Safety limits for response length and agent switches
+
+    Example:
+        ```python
+        def add(a: float, b: float) -> float:
+            \"\"\"Add two numbers together.\"\"\"
+            return a + b
+
+        def multiply(a: float, b: float) -> float:
+            \"\"\"Multiply two numbers together.\"\"\"
+            return a * b
+
+        agent_instructions = (
+            "You are a math assistant. Use tools to perform calculations. "
+            "You must strictly follow this output format: 'The result is <tool_result>'"
+        )
+
+        # Create an agent with math tools
+        agent = Agent.create(
+            id="math",
+            model="gpt-4o",
+            instructions=agent_instructions,
+            tools=[add, multiply],
+            tool_choice="auto"
+        )
+
+        # Initialize swarm and run calculation
+        swarm = Swarm(include_usage=True)
+        result = await swarm.execute(
+            agent=agent,
+            prompt="What is (2 + 3) * 4?"
+        )
+
+        # The agent will:
+        # 1. Use add(2, 3) to get 5
+        # 2. Use multiply(5, 4) to get 20
+        print(result.content)  # "The result is 20"
+        ```
+
+    Note:
+        The class maintains internal state during conversations.
+        For concurrent conversations, create separate Swarm instances.
     """
 
     def __init__(  # noqa: PLR0913
@@ -75,19 +114,28 @@ class Swarm:
         max_response_continuations: int = 5,
         max_agent_switches: int = 10,
     ) -> None:
-        """Initialize the Swarm.
+        """Initialize a new Swarm instance.
 
         Args:
-            stream_handler: Optional handler for streaming events
-            summarizer: Optional summarizer for managing conversation history
-            include_usage: Whether to include token usage statistics in responses
-            include_cost: Whether to include cost statistics in responses
-            max_retries: Maximum number of retry attempts for API calls
-            initial_retry_delay: Initial delay between retries in seconds
-            max_retry_delay: Maximum delay between retries in seconds
-            backoff_factor: Factor to multiply delay by after each retry
-            max_response_continuations: Maximum number of response continuations allowed
-            max_agent_switches: Maximum number of agent switches allowed in a conversation
+            stream_handler: Handler for streaming events during conversation.
+                Defaults to `LiteStreamHandler`.
+            summarizer: Handler for summarizing conversation history.
+                Defaults to `LiteSummarizer`.
+            include_usage: Whether to include token usage statistics in responses.
+            include_cost: Whether to include cost statistics in responses.
+            max_retries: Maximum number of retry attempts for failed API calls.
+            initial_retry_delay: Initial delay between retries in seconds.
+            max_retry_delay: Maximum delay between retries in seconds.
+            backoff_factor: Multiplicative factor for retry delay after each attempt.
+            max_response_continuations: Maximum times a response can be continued
+                when hitting length limits.
+            max_agent_switches: Maximum number of agent switches allowed in a
+                single conversation.
+
+        Note:
+            The retry configuration (max_retries, delays, backoff) applies to
+            API calls that fail due to transient errors. Context length errors
+            are handled separately through history management.
         """
         # Internal state (private)
         self._active_agent: Agent | None = None
