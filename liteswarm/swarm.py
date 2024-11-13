@@ -17,6 +17,7 @@ from liteswarm.types import (
     Agent,
     AgentResponse,
     CompletionResponse,
+    ContextVariables,
     ConversationState,
     Delta,
     Message,
@@ -159,6 +160,7 @@ class Swarm:
         self._agent_queue: deque[Agent] = deque()
         self._full_history: list[Message] = []
         self._working_history: list[Message] = []
+        self._context_variables: dict[str, Any] = {}
 
         # Public configuration
         self.stream_handler = stream_handler or LiteStreamHandler()
@@ -183,6 +185,7 @@ class Swarm:
     async def _process_tool_call(
         self,
         agent: Agent,
+        context_variables: ContextVariables,
         tool_call: ChatCompletionDeltaToolCall,
     ) -> ToolCallResult:
         """Process a single tool call and return its result.
@@ -236,6 +239,7 @@ class Swarm:
     async def _process_tool_calls(
         self,
         agent: Agent,
+        context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
         """Process multiple tool calls efficiently and concurrently.
@@ -379,6 +383,7 @@ class Swarm:
         self,
         agent: Agent,
         previous_content: str,
+        context_variables: ContextVariables,
     ) -> CustomStreamWrapper:
         """Continue generation after hitting output token limit.
 
@@ -559,6 +564,7 @@ class Swarm:
         agent: Agent,
         continuation_count: int,
         accumulated_content: str,
+        context_variables: ContextVariables,
     ) -> CustomStreamWrapper | None:
         """Create a continuation stream when response length limit is reached.
 
@@ -594,6 +600,7 @@ class Swarm:
         self,
         agent: Agent,
         agent_messages: list[Message],
+        context_variables: ContextVariables,
     ) -> AsyncGenerator[AgentResponse, None]:
         """Stream agent responses while maintaining conversation state.
 
@@ -655,6 +662,7 @@ class Swarm:
         self,
         agent: Agent,
         content: str | None,
+        context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[Message]:
         """Process the assistant's response and execute any tool calls.
@@ -802,6 +810,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
+        context_variables: dict[str, Any] | None = None,
     ) -> None:
         """Initialize the conversation state.
 
@@ -881,6 +890,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
+        context_variables: dict[str, Any] | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
         """Stream agent responses and manage the conversation flow.
@@ -903,35 +913,45 @@ class Swarm:
         Raises:
             Exception: Any errors during conversation processing
         """
-        await self._initialize_conversation(agent, prompt, messages)
-
-        agent_switch_count = 0
+        await self._initialize_conversation(
+            agent=agent,
+            prompt=prompt,
+            messages=messages,
+            context_variables=context_variables,
+        )
 
         try:
+            agent_switch_count = 0
             while self._active_agent or self._agent_queue:
                 if not self._active_agent:
                     break
 
                 if self._active_agent.state == "stale":
                     agent_switch_count += 1
-                    if not await self._handle_agent_switch(agent_switch_count):
+                    agent_switched = await self._handle_agent_switch(
+                        switch_count=agent_switch_count,
+                    )
+
+                    if not agent_switched:
                         break
 
                 last_content = ""
                 last_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
                 async for agent_response in self._process_agent_response(
-                    self._active_agent,
-                    self._agent_messages,
+                    agent=self._active_agent,
+                    agent_messages=self._agent_messages,
+                    context_variables=self._context_variables,
                 ):
                     yield agent_response
                     last_content = agent_response.content
                     last_tool_calls = agent_response.tool_calls
 
                 new_messages = await self._process_assistant_response(
-                    self._active_agent,
-                    last_content,
-                    last_tool_calls,
+                    agent=self._active_agent,
+                    content=last_content,
+                    context_variables=self._context_variables,
+                    tool_calls=last_tool_calls,
                 )
 
                 self._full_history.extend(new_messages)
@@ -960,6 +980,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
+        context_variables: dict[str, Any] | None = None,
         cleanup: bool = True,
     ) -> ConversationState:
         """Execute the agent's task and return the final conversation state.
@@ -983,8 +1004,15 @@ class Swarm:
         """
         full_response = ""
         full_usage: Usage | None = None
-        response_stream = self.stream(agent, prompt, messages, cleanup)
         response_cost: ResponseCost | None = None
+
+        response_stream = self.stream(
+            agent=agent,
+            prompt=prompt,
+            messages=messages,
+            context_variables=context_variables,
+            cleanup=cleanup,
+        )
 
         async for agent_response in response_stream:
             if agent_response.content:
