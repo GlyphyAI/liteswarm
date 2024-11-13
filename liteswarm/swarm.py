@@ -780,6 +780,12 @@ class Swarm:
                     agent.state = "stale"
                     self._agent_queue.append(tool_message.agent)
 
+                if tool_message.context_variables:
+                    self._context_variables = {
+                        **self._context_variables,
+                        **tool_message.context_variables,
+                    }
+
                 messages.append(tool_message.message)
 
         return messages
