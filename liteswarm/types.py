@@ -166,10 +166,15 @@ class Result(BaseModel, Generic[T]):
 
     value: T | None = None
     """The value returned by the function call."""
+    error: Exception | None = None
+    """The error that occurred during function execution."""
     agent: Agent | None = None
     """The new agent to switch to."""
     context_variables: ContextVariables | None = None
     """Context variables to pass to the next agent."""
+
+    class Config:  # noqa: D106
+        arbitrary_types_allowed = True
 
 
 class ToolCallResult(BaseModel):
