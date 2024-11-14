@@ -238,6 +238,12 @@ class Swarm:
                 case Result() as result:
                     content = orjson.dumps(result.value).decode() if result.value else None
 
+                    if result.error:
+                        return ToolCallFailureResult(
+                            tool_call=tool_call,
+                            error=result.error,
+                        )
+
                     if result.agent:
                         content = content or f"Switched to agent {result.agent.id}"
                         return ToolCallAgentResult(
