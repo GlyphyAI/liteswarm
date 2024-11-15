@@ -1,3 +1,9 @@
+# Copyright 2024 GlyphyAI
+
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+
 from collections.abc import Callable
 from typing import Any, Generic, Literal, Self, TypeVar
 
@@ -162,16 +168,42 @@ class Agent(BaseModel):
 
 
 class Result(BaseModel, Generic[T]):
-    """Wrapper for the result of a function call."""
+    """A generic wrapper for operation results in the agentic system.
+
+    This class provides a standardized way to return results from any operation
+    (agents, functions, tools, etc.) with support for:
+    - Success values of any type
+    - Error information
+    - Agent switching
+    - Context variable updates
+
+    Args:
+        T: The type of the value field.
+
+    Example:
+        ```python
+        # Simple value result
+        Result[float](value=42.0)
+
+        # Error result
+        Result[str](error=ValueError("Invalid input"))
+
+        # Agent switch with context
+        Result[None](
+            agent=new_agent,
+            context_variables={"user": "Alice"}
+        )
+        ```
+    """
 
     value: T | None = None
-    """The value returned by the function call."""
+    """The operation's result value, if any."""
     error: Exception | None = None
-    """The error that occurred during function execution."""
+    """Any error that occurred during the operation."""
     agent: Agent | None = None
-    """The new agent to switch to."""
+    """Optional new agent to switch to."""
     context_variables: ContextVariables | None = None
-    """Context variables to pass to the next agent."""
+    """Optional context variables to update."""
 
     class Config:  # noqa: D106
         arbitrary_types_allowed = True
