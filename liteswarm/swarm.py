@@ -212,6 +212,7 @@ class Swarm:
         Returns:
             ToolCallResult indicating success or failure of the tool execution
         """
+        tool_call_result: ToolCallResult
         function_name = tool_call.function.name
         function_tools_map = {tool.__name__: tool for tool in agent.tools}
 
@@ -231,7 +232,7 @@ class Swarm:
 
             match function_tool(**args):
                 case Agent() as agent:
-                    return ToolCallAgentResult(
+                    tool_call_result = ToolCallAgentResult(
                         tool_call=tool_call,
                         agent=agent,
                         message=Message(
@@ -245,14 +246,13 @@ class Swarm:
                     content = orjson.dumps(result.value).decode() if result.value else None
 
                     if result.error:
-                        return ToolCallFailureResult(
+                        tool_call_result = ToolCallFailureResult(
                             tool_call=tool_call,
                             error=result.error,
                         )
-
-                    if result.agent:
+                    elif result.agent:
                         content = content or f"Switched to agent {result.agent.id}"
-                        return ToolCallAgentResult(
+                        tool_call_result = ToolCallAgentResult(
                             tool_call=tool_call,
                             agent=result.agent,
                             message=Message(
@@ -262,19 +262,19 @@ class Swarm:
                             ),
                             context_variables=result.context_variables,
                         )
-
-                    return ToolCallMessageResult(
-                        tool_call=tool_call,
-                        message=Message(
-                            role="tool",
-                            content=content or "",
-                            tool_call_id=tool_call.id,
-                        ),
-                        context_variables=result.context_variables,
-                    )
+                    else:
+                        tool_call_result = ToolCallMessageResult(
+                            tool_call=tool_call,
+                            message=Message(
+                                role="tool",
+                                content=content or "",
+                                tool_call_id=tool_call.id,
+                            ),
+                            context_variables=result.context_variables,
+                        )
 
                 case _ as content:
-                    return ToolCallMessageResult(
+                    tool_call_result = ToolCallMessageResult(
                         tool_call=tool_call,
                         message=Message(
                             role="tool",
@@ -285,7 +285,9 @@ class Swarm:
 
         except Exception as e:
             await self.stream_handler.on_error(e, agent)
-            return ToolCallFailureResult(tool_call=tool_call, error=e)
+            tool_call_result = ToolCallFailureResult(tool_call=tool_call, error=e)
+
+        return tool_call_result
 
     async def _process_tool_calls(
         self,
