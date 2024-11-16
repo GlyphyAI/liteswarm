@@ -511,7 +511,7 @@ class Swarm:
         """
         accumulated_content = ""
         continuation_count = 0
-        current_stream = await self._get_initial_stream(
+        current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
             agent=agent,
             agent_messages=agent_messages,
             context_variables=context_variables,
@@ -1106,7 +1106,7 @@ class Swarm:
                     context_variables=self._context_variables,
                 ):
                     yield agent_response
-                    last_content = agent_response.content
+                    last_content = agent_response.content or ""
                     last_tool_calls = agent_response.tool_calls
 
                 new_messages = await self._process_assistant_response(
