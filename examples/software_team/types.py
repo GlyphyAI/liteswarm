@@ -8,7 +8,6 @@ class CodeBlock(BaseModel):
 
     content: str
     language: str | None = None
-    filepath: str | None = None
 
 
 class SoftwareTask(Task):
