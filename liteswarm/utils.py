@@ -130,7 +130,7 @@ class FunctionConverter:
                 if param.default == param.empty:
                     required.append(param_name)
 
-            schema = {
+            schema: dict[str, Any] = {
                 "type": "function",
                 "function": {
                     "name": func.__name__,
