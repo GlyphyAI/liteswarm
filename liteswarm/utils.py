@@ -7,6 +7,7 @@
 import asyncio
 import inspect
 import logging
+import re
 from collections.abc import Awaitable, Callable, Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -14,6 +15,7 @@ from enum import Enum
 from numbers import Number
 from typing import Any, Literal, TypeVar, get_type_hints
 
+import orjson
 from griffe import Docstring, DocstringSectionKind
 from litellm import Usage
 from litellm.cost_calculator import cost_per_token
@@ -388,6 +390,31 @@ def unwrap_instructions(
         instructions,
         context_variables=context_variables or {},
     )
+
+
+def extract_json(content: str) -> Any:
+    """Extract a JSON object from a string.
+
+    Args:
+        content: The string to extract the JSON from
+
+    Returns:
+        The JSON object, or None if no valid JSON is found
+    """
+    code_block_pattern = r"```(?:json)?\n?(.*?)```"
+    matches = re.findall(code_block_pattern, content, re.DOTALL)
+
+    if matches:
+        for match in matches:
+            try:
+                return orjson.loads(match.strip())
+            except Exception:
+                continue
+
+    try:
+        return orjson.loads(content.strip())
+    except orjson.JSONDecodeError as e:
+        raise ValueError(f"Failed to parse JSON: {e}") from e
 
 
 def dump_messages(messages: list[Message]) -> list[dict[str, Any]]:
