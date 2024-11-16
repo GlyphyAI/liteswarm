@@ -286,7 +286,8 @@ class AgentRepl:
                 # Handle commands
                 if user_input.startswith("/"):
                     if self._handle_command(user_input):
-                        break
+                        sys.exit(0)
+
                     continue
 
                 # Process regular query
@@ -294,10 +295,10 @@ class AgentRepl:
 
             except KeyboardInterrupt:
                 print("\n\n👋 Interrupted by user. Goodbye!")
-                break
+                sys.exit(0)
             except EOFError:
                 print("\n\n👋 EOF received. Goodbye!")
-                break
+                sys.exit(0)
             except Exception as e:
                 print(f"\n❌ Unexpected error: {str(e)}", file=sys.stderr)
                 continue
