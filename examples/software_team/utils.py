@@ -1,5 +1,8 @@
 import re
 
+import orjson
+from partial_json_parser.core.api import JSON, parse_json
+
 from .types import CodeBlock
 
 
@@ -29,3 +32,11 @@ def extract_code_block(content: str) -> CodeBlock:
         content=content,
         language=language,
     )
+
+
+def load_partial_json(content: str) -> JSON:
+    return parse_json(content, parser=orjson.loads)
+
+
+def dump_partial_json(data: JSON) -> str:
+    return orjson.dumps(data).decode()
