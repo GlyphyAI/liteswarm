@@ -90,16 +90,16 @@ class TeamMember(BaseModel):
 # ================================================
 
 
-class PlanTemplate(Protocol):
-    """Protocol for plan templates that define how to generate plans."""
+class PromptTemplate(Protocol):
+    """Protocol for prompt templates."""
 
     @property
     def template(self) -> str:
-        """Return the template string for generating plans."""
+        """Return the template string."""
         ...
 
     def format_context(self, prompt: str, context: dict[str, Any]) -> str:
-        """Format the template with the given context."""
+        """Format the prompt with the given context."""
         ...
 
 
@@ -109,7 +109,7 @@ class Planner:
     def __init__(
         self,
         agent: Agent,
-        template: PlanTemplate,
+        template: PromptTemplate,
         swarm: Swarm | None = None,
     ) -> None:
         self.agent = agent
