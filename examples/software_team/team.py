@@ -1,13 +1,14 @@
 from typing import Any, ClassVar
 
 from liteswarm.swarm import Swarm
+from liteswarm.swarm_team import Plan, PlannerAgent
 from liteswarm.types import Agent, Result
 
-from .types import SoftwarePlan
+from .types import ProjectContext, SoftwareTask
 from .utils import extract_code_block
 
 
-class SoftwarePlanner:
+class SoftwarePlanner(PlannerAgent[SoftwareTask]):
     """Agent responsible for creating software development plans."""
 
     PLAN_TEMPLATE: ClassVar[str] = """
@@ -17,8 +18,8 @@ class SoftwarePlanner:
     Available engineer types: {engineer_types}
     Each task must be assigned to one of these engineer types.
 
-    Context files:
-    {context_files}
+    Project Context:
+    {context_section}
 
     The plan should:
     1. Break down the work into clear, actionable tasks
@@ -26,6 +27,7 @@ class SoftwarePlanner:
     3. List dependencies between tasks
     4. Define clear deliverables (files to be created/modified)
     5. Consider the tech stack and existing codebase
+    6. Work within the existing project structure if provided
 
     Return the plan as a JSON object with:
     - tasks: list of tasks, each with:
@@ -36,6 +38,26 @@ class SoftwarePlanner:
         - dependencies: list of task IDs this depends on
         - deliverables: list of files to be created/modified
     - tech_stack: dictionary of technology choices
+
+    Example output:
+    ```json
+    {{
+        "tasks": [
+            {{
+                "id": "task1",
+                "title": "Implement Todo Model",
+                "description": "Create the Todo model class with required fields",
+                "engineer_type": "flutter",
+                "dependencies": [],
+                "deliverables": ["lib/models/todo.dart"]
+            }}
+        ],
+        "tech_stack": {{
+            "framework": "flutter",
+            "storage": "shared_preferences"
+        }}
+    }}
+    ```
     """
 
     def __init__(self, agent: Agent, swarm: Swarm | None = None) -> None:
@@ -43,17 +65,25 @@ class SoftwarePlanner:
         self.agent = agent
         self.swarm = swarm or Swarm()
 
-    async def create_plan(self, prompt: str, context: dict[str, Any]) -> Result[SoftwarePlan]:
+    async def create_plan(self, prompt: str, context: dict[str, Any]) -> Result[Plan[SoftwareTask]]:
         """Create a software development plan from the prompt."""
         engineer_types = context.get("available_engineer_types", [])
-        context_files = context.get("files", [])
+        project_context = (
+            ProjectContext.model_validate(context["project"]) if "project" in context else None
+        )
+
+        context_section = (
+            project_context.model_dump_json(indent=2)
+            if project_context
+            else "No existing project context provided."
+        )
 
         result = await self.swarm.execute(
             agent=self.agent,
             prompt=self.PLAN_TEMPLATE.format(
                 prompt=prompt,
                 engineer_types=", ".join(engineer_types),
-                context_files="\n".join(f"- {f}" for f in context_files),
+                context_section=context_section,
             ),
             context_variables=context,
         )
@@ -64,7 +94,7 @@ class SoftwarePlanner:
 
             plan_code_block = extract_code_block(result.content)
             plan_json = plan_code_block.content
-            plan = SoftwarePlan.model_validate_json(plan_json)
+            plan = Plan[SoftwareTask].model_validate_json(plan_json)
 
             return Result(value=plan)
 
@@ -100,18 +130,47 @@ def create_flutter_engineer() -> Agent:
         1. Write clean, maintainable Flutter code
         2. Follow Flutter best practices and patterns
         3. Consider performance and user experience
-        4. Provide complete file contents or git-style diffs
+        4. Always provide complete file contents
 
-        Output format for new files:
-        ```dart:path/to/file.dart
-        // Complete file contents here
-        ```
+        Your response must use two root XML tags to separate thoughts and implementation:
 
-        Output format for file changes:
-        ```diff:path/to/file.dart
-        - // Old code to remove
-        + // New code to add
-        ```""",
+        <thoughts>
+        Explain your implementation approach here. This section should include:
+        - What changes you're making and why
+        - Key implementation decisions
+        - Any important considerations
+        The content can be free-form text, formatted for readability.
+        </thoughts>
+
+        <files>
+        Provide complete file contents in JSON format:
+        [
+            {
+                "filepath": "path/to/file.dart",
+                "content": "// Complete file contents here"
+            }
+        ]
+        </files>
+
+        Example response:
+        <thoughts>
+        I'll implement the Todo model class with these fields:
+        - id: unique identifier
+        - title: task title
+        - completed: completion status
+        - createdAt: timestamp
+
+        I'll also add JSON serialization for persistence.
+        </thoughts>
+
+        <files>
+        [
+            {
+                "filepath": "lib/models/todo.dart",
+                "content": "import 'package:flutter/foundation.dart';\n\nclass Todo {\n    final String id;\n    final String title;\n    final bool completed;\n    final DateTime createdAt;\n\n    Todo({\n        required this.id,\n        required this.title,\n        this.completed = false,\n        DateTime? createdAt,\n    }) : this.createdAt = createdAt ?? DateTime.now();\n}"
+            }
+        ]
+        </files>""",
     )
 
 

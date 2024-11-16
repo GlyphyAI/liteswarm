@@ -4,54 +4,61 @@ import os
 from liteswarm.logging import enable_logging
 from liteswarm.swarm import Swarm
 from liteswarm.swarm_team import SwarmTeam, TeamMember
+from liteswarm.types import ContextVariables
 
-from .stream import SoftwareTeamStreamHandler
+from .stream import SoftwareTeamStreamHandler, SwarmStreamHandler
 from .team import (
     create_debug_engineer,
     create_flutter_engineer,
     create_planner,
 )
-from .types import SoftwarePlan, SoftwareTask
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 
-def print_plan_created(plan: SoftwarePlan) -> None:
-    """Print the created development plan."""
-    print("\nDevelopment Plan Created:")
-    print("-------------------------")
-    for task in plan.tasks:
-        print(f"\nTask: {task.title}")
-        print(f"Engineer: {task.engineer_type}")
-        print(f"Description: {task.description}")
-        if task.dependencies:
-            print(f"Dependencies: {', '.join(task.dependencies)}")
-        if task.deliverables:
-            print("Deliverables:")
-            for deliverable in task.deliverables:
-                print(f"- {deliverable}")
+def create_task_instructions(context: ContextVariables) -> str:
+    """Create dynamic task instructions."""
+    task = context["task"]
 
+    return f"""
+    Implement the following software development task:
 
-def print_task_started(task: SoftwareTask) -> None:
-    """Print when a task is started."""
-    print(f"\nStarting Task: {task.title}")
-    print(f"Assigned to: {task.assignee}")
+    Task Details:
+    - ID: {task["id"]}
+    - Title: {task["title"]}
+    - Description: {task["description"]}
 
+    Important:
+    1. Follow the existing project structure
+    2. Provide complete file contents
+    3. Use root XML tags to structure your response
+    4. Include implementation thoughts before files
 
-def print_task_completed(task: SoftwareTask) -> None:
-    """Print when a task is completed."""
-    print(f"\nCompleted Task: {task.title}")
+    Your response must follow this exact format:
 
+    <thoughts>
+    Explain your implementation approach here. This section should include:
+    - What changes you're making and why
+    - Key implementation decisions
+    - Any important considerations
+    The content can be free-form text, formatted for readability.
+    </thoughts>
 
-def print_plan_completed(plan: SoftwarePlan) -> None:
-    """Print when the plan is completed."""
-    print("\nPlan Completed!")
-    print("All tasks have been executed successfully.")
+    <files>
+    Provide complete file contents in JSON format:
+    [
+        {{
+            "filepath": "path/to/file.dart",
+            "content": "// Complete file contents here"
+        }}
+    ]
+    </files>
+    """
 
 
 async def main() -> None:
     """Run the software team example."""
-    swarm = Swarm(stream_handler=SoftwareTeamStreamHandler())
+    swarm = Swarm(stream_handler=SwarmStreamHandler())
     planner = create_planner(swarm=swarm)
     team_members = [
         TeamMember(
@@ -70,20 +77,43 @@ async def main() -> None:
         planner=planner,
         members=team_members,
         swarm=swarm,
-        on_plan_created=print_plan_created,
-        on_task_started=print_task_started,
-        on_task_completed=print_task_completed,
-        on_plan_completed=print_plan_completed,
+        stream_handler=SoftwareTeamStreamHandler(),
     )
 
     context = {
         "platform": "mobile",
         "framework": "flutter",
-        "files": [
-            "lib/main.dart",
-            "lib/models/todo.dart",
-            "lib/screens/todo_list.dart",
-        ],
+        "project": {
+            "directories": [
+                "lib/main.dart",
+                "lib/models",
+                "lib/models/todo.dart",
+                "lib/screens",
+                "lib/screens/todo_list.dart",
+            ],
+            "files": [
+                {
+                    "filepath": "lib/main.dart",
+                    "content": """
+                    import 'package:flutter/material.dart';
+
+                    void main() {
+                      runApp(MyApp());
+                    }
+
+                    class MyApp extends StatelessWidget {
+                      @override
+                      Widget build(BuildContext context) {
+                        return MaterialApp(
+                          title: 'Todo App',
+                          home: Container(),
+                        );
+                      }
+                    }
+                    """,
+                }
+            ],
+        },
     }
 
     prompt = """Create a Flutter TODO list app with the following features:
