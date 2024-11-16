@@ -30,7 +30,7 @@ class ReplStreamHandler:
 
     def __init__(self) -> None:
         """Initialize the stream handler with usage tracking."""
-        self._last_agent = None
+        self._last_agent: Agent | None = None
 
     async def on_stream(
         self,
