@@ -5,19 +5,33 @@
 # https://opensource.org/licenses/MIT.
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import Any, Generic, Literal, Protocol, TypeVar
+from enum import Enum
+from typing import Any, Protocol
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from liteswarm.swarm import Swarm
 from liteswarm.types import Agent, ContextVariables, Result
+from liteswarm.utils import extract_json
 
-TTask = TypeVar("TTask", bound="Task")
+# ================================================
+# MARK: Swarm Team Types
+# ================================================
 
-TaskStatus = Literal["pending", "in_progress", "completed"]
-PlanStatus = Literal["draft", "approved", "in_progress", "completed"]
-TaskInstructions = str | Callable[[TTask, ContextVariables], str]
+TaskInstructions = str | Callable[["Task", ContextVariables], str]
+
+
+class TaskStatus(str, Enum):
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+
+
+class PlanStatus(str, Enum):
+    DRAFT = "draft"
+    APPROVED = "approved"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
 
 
 class Task(BaseModel):
@@ -26,71 +40,161 @@ class Task(BaseModel):
     id: str
     title: str
     description: str | None = None
-    status: TaskStatus = "pending"
+    status: TaskStatus = TaskStatus.PENDING
     assignee: str | None = None
-    metadata: dict[str, Any] = {}
+    task_type: str | None = None
+    dependencies: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
-class Plan(BaseModel, Generic[TTask]):
+class Plan(BaseModel):
     """Base class for development plans."""
 
-    tasks: list[TTask]
-    status: PlanStatus = "draft"
-    metadata: dict[str, Any] = {}
+    tasks: list[Task]
+    status: PlanStatus = PlanStatus.DRAFT
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+    def validate_dependencies(self) -> list[str]:
+        """Validate that all task dependencies exist."""
+        task_ids = {task.id for task in self.tasks}
+        errors = []
+
+        for task in self.tasks:
+            invalid_deps = [dep for dep in task.dependencies if dep not in task_ids]
+            if invalid_deps:
+                errors.append(f"Task {task.id} has invalid dependencies: {invalid_deps}")
+
+        return errors
+
+    def get_next_tasks(self) -> list[Task]:
+        """Get tasks that are ready to be executed (all dependencies completed)."""
+        completed_tasks = {task.id for task in self.tasks if task.status == TaskStatus.COMPLETED}
+        return [
+            task
+            for task in self.tasks
+            if task.status == TaskStatus.PENDING
+            and all(dep in completed_tasks for dep in task.dependencies)
+        ]
 
 
-class PlannerAgent(Protocol, Generic[TTask]):
-    """Protocol for planner agents that create task plans."""
-
-    async def create_plan(self, prompt: str, context: dict[str, Any]) -> Result[Plan[TTask]]:
-        """Create a plan from the given prompt and context."""
-        ...
-
-
-class SwarmTeamStreamHandler(Protocol[TTask]):
-    """Protocol for stream handlers that handle task execution."""
-
-    async def on_task_started(self, task: TTask) -> None:
-        """Handle task started event."""
-        ...
-
-    async def on_plan_created(self, plan: Plan[TTask]) -> None:
-        """Handle plan created event."""
-        ...
-
-    async def on_plan_completed(self, plan: Plan[TTask]) -> None:
-        """Handle plan completed event."""
-        ...
-
-    async def on_task_completed(self, task: TTask) -> None:
-        """Handle task completed event."""
-        ...
-
-
-@dataclass
-class TeamMember:
+class TeamMember(BaseModel):
     """Represents a team member that can execute tasks."""
 
     agent: Agent
     task_types: list[str]
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+# ================================================
+# MARK: Task Planner
+# ================================================
+
+
+class PlanTemplate(Protocol):
+    """Protocol for plan templates that define how to generate plans."""
+
+    @property
+    def template(self) -> str:
+        """Return the template string for generating plans."""
+        ...
+
+    def format_context(self, prompt: str, context: dict[str, Any]) -> str:
+        """Format the template with the given context."""
+        ...
+
+
+class Planner:
+    """Protocol for planner agents that create task plans."""
+
+    def __init__(
+        self,
+        agent: Agent,
+        template: PlanTemplate,
+        swarm: Swarm | None = None,
+    ) -> None:
+        self.agent = agent
+        self.template = template
+        self.swarm = swarm or Swarm()
+
+    async def create_plan(self, prompt: str, context: dict[str, Any]) -> Result[Plan]:
+        """Create a plan from the given prompt and context."""
+        formatted_prompt = self.template.format_context(prompt, context)
+        result = await self.swarm.execute(
+            agent=self.agent,
+            prompt=formatted_prompt,
+            context_variables=context,
+        )
+
+        if not result.content:
+            return Result(error=ValueError("Failed to create plan"))
+
+        try:
+            plan_json = extract_json(result.content)
+            plan = Plan.model_validate(plan_json)
+
+            if errors := plan.validate_dependencies():
+                return Result(error=ValueError("\n".join(errors)))
+
+            return Result(value=plan)
+
+        except Exception as e:
+            return Result(error=e)
+
+
+# ================================================
+# MARK: Stream Handler Protocol
+# ================================================
+
+
+class SwarmTeamStreamHandler(Protocol):
+    """Protocol for stream handlers that handle task execution."""
+
+    async def on_task_started(self, task: Task) -> None:
+        """Handle task started event."""
+        ...
+
+    async def on_plan_created(self, plan: Plan) -> None:
+        """Handle plan created event."""
+        ...
+
+    async def on_plan_completed(self, plan: Plan) -> None:
+        """Handle plan completed event."""
+        ...
+
+    async def on_task_completed(self, task: Task) -> None:
+        """Handle task completed event."""
+        ...
+
+
+# ================================================
+# MARK: Swarm Team
+# ================================================
 
 
 def default_instructions(task: Task, context: ContextVariables) -> str:
     """Default task instructions builder."""
-    return f"Complete the following task: {task.title}\n\n{task.description}"
+    prompt = f"""
+    Execute the following task:
+
+    Task Details:
+    - ID: {task.id}
+    - Title: {task.title}
+    - Description: {task.description}
+    """
+
+    return prompt
 
 
-class SwarmTeam(Generic[TTask]):
+class SwarmTeam:
     """Orchestrates a team of agents working on tasks according to a plan."""
 
     def __init__(
         self,
-        planner: PlannerAgent[TTask],
+        planner: Planner,
         members: list[TeamMember],
         swarm: Swarm | None = None,
         instructions: TaskInstructions | None = None,
-        stream_handler: SwarmTeamStreamHandler[TTask] | None = None,
+        stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
         """Initialize a new SwarmTeam.
 
@@ -103,21 +207,22 @@ class SwarmTeam(Generic[TTask]):
         """
         self.planner = planner
         self.members = {member.agent.id: member for member in members}
-        self.available_types = {task_type for member in members for task_type in member.task_types}
         self.swarm = swarm or Swarm()
         self.instructions: TaskInstructions = instructions or default_instructions
         self.stream_handler = stream_handler
 
         # Internal state
-        self._current_plan: Plan[TTask] | None = None
-        self._context: dict[str, Any] = {}
+        self._current_plan: Plan | None = None
+        self._context: dict[str, Any] = {
+            "task_types": {task_type for member in members for task_type in member.task_types}
+        }
 
     async def create_plan(
         self,
         prompt: str,
         feedback: str | None = None,
         context: dict[str, Any] | None = None,
-    ) -> Plan[TTask]:
+    ) -> Plan:
         """Create a new plan from the prompt and optional feedback.
 
         Args:
@@ -133,9 +238,6 @@ class SwarmTeam(Generic[TTask]):
         """
         if context:
             self._context.update(context)
-
-        # Add available engineer types to context
-        self._context["available_engineer_types"] = list(self.available_types)
 
         if feedback:
             full_prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
@@ -162,10 +264,10 @@ class SwarmTeam(Generic[TTask]):
         if not self._current_plan:
             raise ValueError("No plan to execute")
 
-        self._current_plan.status = "in_progress"
+        self._current_plan.status = PlanStatus.IN_PROGRESS
 
         for task in self._current_plan.tasks:
-            if task.status != "pending":
+            if task.status != TaskStatus.PENDING:
                 continue
 
             instructions = self.instructions
@@ -174,32 +276,28 @@ class SwarmTeam(Generic[TTask]):
 
             await self.execute_task(task, instructions)
 
-        self._current_plan.status = "completed"
+        self._current_plan.status = PlanStatus.COMPLETED
 
         if self.stream_handler:
             await self.stream_handler.on_plan_completed(self._current_plan)
 
-    async def execute_task(self, task: TTask, prompt: str) -> Result[Any]:
+    async def execute_task(self, task: Task, prompt: str) -> Result[Any]:
         """Execute a single task using the appropriate team member."""
-        engineer_type = getattr(task, "engineer_type", None) or task.metadata.get("type")
-        if not engineer_type:
-            raise ValueError(f"No engineer type specified for task: {task.id}")
-
         assignee = None
         for member in self.members.values():
-            if engineer_type in member.task_types:
+            if task.task_type in member.task_types:
                 assignee = member
                 break
 
         if not assignee:
             raise ValueError(
-                f"No team member found for engineer type '{engineer_type}' in task: {task.id}"
+                f"No team member found for task type '{task.task_type}' in task: {task.id}"
             )
 
         if self.stream_handler:
             await self.stream_handler.on_task_started(task)
 
-        task.status = "in_progress"
+        task.status = TaskStatus.IN_PROGRESS
         task.assignee = assignee.agent.id
 
         result = await self.swarm.execute(
@@ -211,7 +309,7 @@ class SwarmTeam(Generic[TTask]):
             },
         )
 
-        task.status = "completed"
+        task.status = TaskStatus.COMPLETED
 
         if self.stream_handler:
             await self.stream_handler.on_task_completed(task)
