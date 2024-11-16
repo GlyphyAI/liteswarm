@@ -9,7 +9,7 @@ import os
 from collections.abc import Callable
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -82,7 +82,7 @@ def get_log_level(default: LogLevel = "INFO") -> int:
     """
     level_name = os.getenv("LITESWARM_LOG_LEVEL", default).upper()
     if level_name in LEVEL_MAP:
-        return LEVEL_MAP[level_name]
+        return LEVEL_MAP[cast(LogLevel, level_name)]
 
     return LEVEL_MAP[default]
 
@@ -103,7 +103,7 @@ def get_verbose_level(default: LogLevel = "INFO") -> LogLevel | None:
         return default
 
     if verbose in LEVEL_MAP:
-        return verbose
+        return cast(LogLevel, verbose)
 
     return None
 
