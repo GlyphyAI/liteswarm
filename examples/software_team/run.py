@@ -3,7 +3,7 @@ import os
 
 from liteswarm.logging import enable_logging
 from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import SwarmTeam, TeamMember
+from liteswarm.swarm_team import PlanStatus, SwarmTeam, TeamMember
 from liteswarm.types import ContextVariables
 
 from .stream import SoftwareTeamStreamHandler, SwarmStreamHandler
@@ -135,7 +135,7 @@ async def main() -> None:
 
         match choice:
             case "1":
-                plan.status = "approved"
+                plan.status = PlanStatus.APPROVED
                 await team.execute_plan()
                 break
             case "2":

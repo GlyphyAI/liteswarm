@@ -1,108 +1,74 @@
-from typing import Any, ClassVar
+from typing import Any
 
 from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import Plan, PlannerAgent
-from liteswarm.types import Agent, Result
-
-from .types import ProjectContext, SoftwareTask
-from .utils import extract_code_block
+from liteswarm.swarm_team import Planner, PlanTemplate
+from liteswarm.types import Agent
 
 
-class SoftwarePlanner(PlannerAgent[SoftwareTask]):
-    """Agent responsible for creating software development plans."""
+class SoftwarePlanTemplate(PlanTemplate):
+    """Template for software development plans."""
 
-    PLAN_TEMPLATE: ClassVar[str] = """
-    Create a detailed development plan for the following project:
-    {prompt}
+    @property
+    def template(self) -> str:
+        """Return the template string for generating plans."""
+        return """
+        Create a detailed development plan for the following project:
+        {prompt}
 
-    Available engineer types: {engineer_types}
-    Each task must be assigned to one of these engineer types.
+        Available task types: {task_types}
 
-    Project Context:
-    {context_section}
+        Project Context:
+        {context_section}
 
-    The plan should:
-    1. Break down the work into clear, actionable tasks
-    2. Specify the type of engineer needed for each task
-    3. List dependencies between tasks
-    4. Define clear deliverables (files to be created/modified)
-    5. Consider the tech stack and existing codebase
-    6. Work within the existing project structure if provided
+        The plan should:
+        1. Break down the work into clear, actionable tasks
+        2. Specify the type of engineer needed for each task
+        3. List dependencies between tasks
+        4. Define clear deliverables (files to be created/modified)
+        5. Consider the tech stack and existing codebase
+        6. Work within the existing project structure if provided
 
-    Return the plan as a JSON object with:
-    - tasks: list of tasks, each with:
-        - id: unique string identifier
-        - title: clear task title
-        - description: detailed task description
-        - engineer_type: type of engineer needed (must be one of: {engineer_types})
-        - dependencies: list of task IDs this depends on
-        - deliverables: list of files to be created/modified
-    - tech_stack: dictionary of technology choices
+        Return the plan as a JSON object with:
+        - tasks: list of tasks, each with:
+            - id: unique string identifier
+            - title: clear task title
+            - description: detailed task description
+            - task_type: type of task (must be one of: {task_types})
+            - dependencies: list of task IDs this depends on
+            - metadata: dictionary of additional information
+                - deliverables: list of files to be created/modified
 
-    Example output:
-    ```json
-    {{
-        "tasks": [
-            {{
-                "id": "task1",
-                "title": "Implement Todo Model",
-                "description": "Create the Todo model class with required fields",
-                "engineer_type": "flutter",
-                "dependencies": [],
-                "deliverables": ["lib/models/todo.dart"]
-            }}
-        ],
-        "tech_stack": {{
-            "framework": "flutter",
-            "storage": "shared_preferences"
+        Example output:
+        ```json
+        {{
+            "tasks": [
+                {{
+                    "id": "task1",
+                    "title": "Implement Todo Model",
+                    "description": "Create the Todo model class with required fields",
+                    "task_type": "flutter",
+                    "dependencies": [],
+                    "metadata": {{
+                        "deliverables": ["lib/models/todo.dart"]
+                    }}
+                }}
+            ]
         }}
-    }}
-    ```
-    """
+        ```
+        """
 
-    def __init__(self, agent: Agent, swarm: Swarm | None = None) -> None:
-        """Initialize the software planner."""
-        self.agent = agent
-        self.swarm = swarm or Swarm()
+    def format_context(self, prompt: str, context: dict[str, Any]) -> str:
+        task_types = context.get("available_types", [])
+        project_context = context.get("project", "No project context provided")
 
-    async def create_plan(self, prompt: str, context: dict[str, Any]) -> Result[Plan[SoftwareTask]]:
-        """Create a software development plan from the prompt."""
-        engineer_types = context.get("available_engineer_types", [])
-        project_context = (
-            ProjectContext.model_validate(context["project"]) if "project" in context else None
+        return self.template.format(
+            prompt=prompt,
+            task_types=", ".join(task_types),
+            context_section=project_context,
         )
 
-        context_section = (
-            project_context.model_dump_json(indent=2)
-            if project_context
-            else "No existing project context provided."
-        )
 
-        result = await self.swarm.execute(
-            agent=self.agent,
-            prompt=self.PLAN_TEMPLATE.format(
-                prompt=prompt,
-                engineer_types=", ".join(engineer_types),
-                context_section=context_section,
-            ),
-            context_variables=context,
-        )
-
-        try:
-            if not result.content:
-                return Result(error=ValueError("No plan result"))
-
-            plan_code_block = extract_code_block(result.content)
-            plan_json = plan_code_block.content
-            plan = Plan[SoftwareTask].model_validate_json(plan_json)
-
-            return Result(value=plan)
-
-        except Exception as e:
-            return Result(error=e)
-
-
-def create_planner(swarm: Swarm | None = None) -> SoftwarePlanner:
+def create_planner(swarm: Swarm | None = None) -> Planner:
     """Create a software planner agent."""
     agent = Agent.create(
         id="planner",
@@ -117,7 +83,12 @@ def create_planner(swarm: Swarm | None = None) -> SoftwarePlanner:
 
         Consider the provided context files when planning tasks.""",
     )
-    return SoftwarePlanner(agent=agent, swarm=swarm)
+
+    return Planner(
+        agent=agent,
+        template=SoftwarePlanTemplate(),
+        swarm=swarm,
+    )
 
 
 def create_flutter_engineer() -> Agent:

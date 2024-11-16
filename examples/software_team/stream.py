@@ -3,10 +3,8 @@ import sys
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
 from liteswarm.stream_handler import StreamHandler
-from liteswarm.swarm_team import Plan, SwarmTeamStreamHandler
+from liteswarm.swarm_team import Plan, SwarmTeamStreamHandler, Task
 from liteswarm.types import Agent, Delta, Message, ToolCallResult
-
-from .types import SoftwareTask
 
 
 class SwarmStreamHandler(StreamHandler):
@@ -107,33 +105,33 @@ class SwarmStreamHandler(StreamHandler):
         self._last_agent = None
 
 
-class SoftwareTeamStreamHandler(SwarmTeamStreamHandler[SoftwareTask]):
-    async def on_plan_created(self, plan: Plan[SoftwareTask]) -> None:
+class SoftwareTeamStreamHandler(SwarmTeamStreamHandler):
+    async def on_plan_created(self, plan: Plan) -> None:
         """Print the created development plan."""
         print("\nDevelopment Plan Created:")
         print("-------------------------")
         for task in plan.tasks:
             print(f"\nTask: {task.title}")
-            print(f"Engineer: {task.engineer_type}")
+            print(f"Task Type: {task.task_type}")
             print(f"Description: {task.description}")
             if task.dependencies:
                 print(f"Dependencies: {', '.join(task.dependencies)}")
-            if task.deliverables:
-                print("Deliverables:")
-                for deliverable in task.deliverables:
-                    print(f"- {deliverable}")
+            if task.metadata:
+                print("Metadata:")
+                for key, value in task.metadata.items():
+                    print(f"- {key}: {value}")
         print("-------------------------")
 
-    async def on_task_started(self, task: SoftwareTask) -> None:
+    async def on_task_started(self, task: Task) -> None:
         """Print when a task is started."""
         print(f"\nStarting Task: {task.title}")
         print(f"Assigned to: {task.assignee}")
 
-    async def on_task_completed(self, task: SoftwareTask) -> None:
+    async def on_task_completed(self, task: Task) -> None:
         """Print when a task is completed."""
         print(f"\nCompleted Task: {task.title}")
 
-    async def on_plan_completed(self, plan: Plan[SoftwareTask]) -> None:
+    async def on_plan_completed(self, plan: Plan) -> None:
         """Print when the plan is completed."""
         print("\nPlan Completed!")
         print("All tasks have been executed successfully.")
