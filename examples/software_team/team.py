@@ -1,12 +1,12 @@
 from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import Planner
+from liteswarm.swarm_team import AgentPlanner
 from liteswarm.types import Agent
 
 from .templates import SoftwarePlanTemplate
 
 
-def create_planner(swarm: Swarm | None = None) -> Planner:
-    """Create a software planner agent."""
+def create_planning_strategy(swarm: Swarm) -> AgentPlanner:
+    """Create a software planning strategy."""
     agent = Agent.create(
         id="planner",
         model="gpt-4o",
@@ -18,13 +18,22 @@ def create_planner(swarm: Swarm | None = None) -> Planner:
         4. Technical feasibility
         5. Efficient execution order
 
-        Consider the provided context files when planning tasks.""",
+        Consider:
+        - Team capabilities and specialties
+        - Previous execution history
+        - Project context and requirements
+
+        When creating plans:
+        - Break down complex tasks into smaller, manageable units
+        - Assign tasks to engineers based on their specialties
+        - Include clear success criteria for each task
+        - Consider dependencies and optimal execution order""",
     )
 
-    return Planner(
+    return AgentPlanner(
+        swarm=swarm,
         agent=agent,
         template=SoftwarePlanTemplate(),
-        swarm=swarm,
     )
 
 
