@@ -121,9 +121,9 @@ class Task(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @classmethod
-    def create(cls, **kwargs: Any) -> type[Self]:
+    def create(cls, model_name: str | None = None, **kwargs: Any) -> type[Self]:
         return create_model(
-            cls.__name__,
+            model_name or cls.__name__,
             __base__=cls,
             **kwargs,
         )
