@@ -7,19 +7,44 @@
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Protocol
+from functools import reduce
+from typing import Any, Generic, Protocol, Self, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 
 from liteswarm.swarm import Swarm
 from liteswarm.types import Agent, ContextVariables, Result
 from liteswarm.utils import extract_json
 
 # ================================================
+# MARK: Utility Functions
+# ================================================
+
+T = TypeVar("T")
+
+
+def create_union_type(types: list[T]) -> T:
+    if not types:
+        raise ValueError("No types provided for Union.")
+    elif len(types) == 1:
+        return types[0]
+    else:
+        return reduce(lambda x, y: x | y, types)  # type: ignore
+
+
+def generate_plan_json_schema(task_definitions: list["TaskDefinition"]) -> dict[str, Any]:
+    task_schemas = [td.task_schema for td in task_definitions]
+    task_schemas_union = create_union_type(task_schemas)
+    return Plan[task_schemas_union].model_json_schema()  # type: ignore [valid-type]
+
+
+# ================================================
 # MARK: Swarm Team Types
 # ================================================
 
-TaskInstructions = str | Callable[["Task", ContextVariables], str]
+TTask = TypeVar("TTask", bound="Task")
+TaskInstructions = str | Callable[[TTask, ContextVariables], str]
+TaskOutput = type[BaseModel] | Callable[[str, ContextVariables], BaseModel]
 
 
 class TaskStatus(str, Enum):
@@ -36,22 +61,93 @@ class PlanStatus(str, Enum):
 
 
 class Task(BaseModel):
-    """Base class for tasks in a plan."""
+    """Instance of a task created based on its TaskDefinition."""
 
     id: str
     title: str
+    task_type: str
     description: str | None = None
     status: TaskStatus = TaskStatus.PENDING
     assignee: str | None = None
-    task_type: str | None = None
     dependencies: list[str] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
-class Plan(BaseModel):
+    @classmethod
+    def create(cls, **kwargs: Any) -> type[Self]:
+        return create_model(
+            cls.__name__,
+            __base__=cls,
+            **kwargs,
+        )
+
+
+class TaskDefinition(BaseModel):
+    """Definition of a task type, including how to create tasks of this type."""
+
+    task_type: str
+    task_schema: type[Task]
+    task_instructions: TaskInstructions | None = None
+    task_output: TaskOutput | None = None
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    @classmethod
+    def create(
+        cls,
+        task_type: str,
+        task_schema: type[Task],
+        task_instructions: TaskInstructions | None = None,
+        task_output: TaskOutput | None = None,
+    ) -> "TaskDefinition":
+        task_schema = task_schema.create(task_type=(str, Field(default=task_type)))
+
+        return cls(
+            task_type=task_type,
+            task_schema=task_schema,
+            task_instructions=task_instructions,
+            task_output=task_output,
+        )
+
+    @model_validator(mode="after")
+    def inject_task_type_into_schema(self) -> Self:
+        """Ensures that the task_schema includes the task_type field with the correct default value."""
+        task_type = self.task_schema.model_fields.get("task_type")
+        if not task_type or task_type.default != self.task_type:
+            self.task_schema = self.task_schema.create(
+                task_type=(str, Field(default=self.task_type)),
+            )
+
+        return self
+
+
+class TaskRegistry:
+    """Registry for managing task types and their definitions."""
+
+    def __init__(self, task_definitions: list[TaskDefinition] | None = None) -> None:
+        self._registry: dict[str, TaskDefinition] = {}
+        if task_definitions:
+            self.register_tasks(task_definitions)
+
+    def register_task(self, task_definition: TaskDefinition) -> None:
+        self._registry[task_definition.task_type] = task_definition
+
+    def register_tasks(self, task_definitions: list[TaskDefinition]) -> None:
+        for task_definition in task_definitions:
+            self.register_task(task_definition)
+
+    def get_task_definition(self, task_type: str) -> TaskDefinition:
+        return self._registry[task_type]
+
+    def list_task_types(self) -> list[str]:
+        return list(self._registry.keys())
+
+
+class Plan(BaseModel, Generic[TTask]):
     """Base class for development plans."""
 
-    tasks: list[Task]
+    tasks: list[TTask]
     status: PlanStatus = PlanStatus.DRAFT
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -67,7 +163,7 @@ class Plan(BaseModel):
 
         return errors
 
-    def get_next_tasks(self) -> list[Task]:
+    def get_next_tasks(self) -> list[TTask]:
         """Get tasks that are ready to be executed (all dependencies completed)."""
         completed_tasks = {task.id for task in self.tasks if task.status == TaskStatus.COMPLETED}
         return [
@@ -91,6 +187,7 @@ class ExecutionResult(BaseModel):
 
     task: Task
     content: str | None = None
+    output: BaseModel | None = None
     assignee: TeamMember | None = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
@@ -113,20 +210,20 @@ class PromptTemplate(Protocol):
         ...
 
 
-class PlanningStrategy(Protocol):
-    """Protocol for planning strategies that create task plans."""
+class PlanningAgent(Protocol):
+    """Protocol for planning agents that create task plans."""
 
     async def create_plan(
         self,
         prompt: str,
         context: dict[str, Any],
         feedback: str | None = None,
-    ) -> Result[Plan]:
+    ) -> Result[Plan[Task]]:
         """Create a plan from the given prompt and context."""
         ...
 
 
-class AgentPlanner(PlanningStrategy):
+class AgentPlanner(PlanningAgent):
     """Default implementation of the planning strategy."""
 
     def __init__(
@@ -134,24 +231,31 @@ class AgentPlanner(PlanningStrategy):
         swarm: Swarm,
         agent: Agent,
         template: PromptTemplate,
+        task_definitions: list[TaskDefinition],
     ) -> None:
         self.swarm = swarm
         self.agent = agent
         self.template = template
+        self.task_definitions = {td.task_type: td for td in task_definitions}
 
     async def create_plan(
         self,
         prompt: str,
         context: dict[str, Any],
         feedback: str | None = None,
-    ) -> Result[Plan]:
+    ) -> Result[Plan[Task]]:
         """Create a plan using the configured agent."""
         if feedback:
             full_prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
         else:
             full_prompt = prompt
 
+        task_definitions = list(self.task_definitions.values())
+        plan_json_schema = generate_plan_json_schema(task_definitions)
+        context.update(plan_json_schema=plan_json_schema)
+
         formatted_prompt = self.template.format_context(full_prompt, context)
+
         result = await self.swarm.execute(
             agent=self.agent,
             prompt=formatted_prompt,
@@ -162,8 +266,24 @@ class AgentPlanner(PlanningStrategy):
             return Result(error=ValueError("Failed to create plan"))
 
         try:
-            plan_json = extract_json(result.content)
-            plan = Plan.model_validate(plan_json)
+            json_tasks: dict[str, Any] = extract_json(result.content)
+            raw_tasks: list[dict[str, Any]] = json_tasks.get("tasks", [])
+            tasks: list[Task] = []
+
+            for task_data in raw_tasks:
+                task_type: str = task_data.get("task_type", "")
+                if not task_type:
+                    return Result(error=ValueError("Task type is missing in task data"))
+
+                task_definition = self.task_definitions[task_type]
+                if not task_definition:
+                    return Result(error=ValueError(f"Unknown task type: {task_type}"))
+
+                # Validate and create Task instance based on TaskDefinition's schema
+                task_instance = task_definition.task_schema.model_validate(task_data)
+                tasks.append(task_instance)
+
+            plan = Plan(tasks=tasks)
 
             if errors := plan.validate_dependencies():
                 return Result(error=ValueError("\n".join(errors)))
@@ -204,62 +324,52 @@ class SwarmTeamStreamHandler(Protocol):
 # ================================================
 
 
-def default_instructions(task: Task, context: ContextVariables) -> str:
-    """Default task instructions builder."""
-    # Get relevant execution history for this task type
-    relevant_history = [
-        result
-        for result in context.get("execution_history", [])
-        if result.task.task_type == task.task_type
-    ]
+def default_instructions(
+    task: Task,
+    context: ContextVariables,
+    task_definition: TaskDefinition,
+) -> str:
+    """Default task instructions builder based on TaskDefinition."""
+    execution_history: list[ExecutionResult] = context.get("execution_history", [])
 
-    # Get team capabilities
-    team_capabilities = context.get("team_capabilities", {})
-    task_specialists = team_capabilities.get(task.task_type, [])
-
-    # Build task context section
     task_context = f"""
     Task Details:
     - ID: {task.id}
     - Title: {task.title}
     - Description: {task.description or 'No description provided'}
     - Type: {task.task_type}
-
-    Team Context:
-    - Specialists for this task type: {', '.join(task_specialists)}
-    - Previous similar tasks: {len(relevant_history)}
     """
 
     # Add dependency context if any
     if task.dependencies:
         dependency_results = [
-            result
-            for result in context.get("execution_history", [])
-            if result.task.id in task.dependencies
+            result for result in execution_history if result.task.id in task.dependencies
         ]
+
         task_context += "\nDependency Context:"
         for result in dependency_results:
-            task_context += f"\n- Task {result.task.id} ({result.task.title}) completed by {result.assignee.agent.id}"
+            if result.assignee:
+                task_context += f"\n- Task {result.task.id} ({result.task.title}) completed by {result.assignee.agent.id}"
 
     # Add project context if available
-    if project := context.get("project"):
+    if project := context.get("project", {}):
         task_context += "\nProject Context:"
-        if dirs := project.get("directories"):
+        if dirs := project.get("directories", []):
             task_context += f"\n- Project structure: {', '.join(dirs)}"
-        if files := project.get("files"):
+        if files := project.get("files", []):
             task_context += f"\n- Available files: {', '.join(f['filepath'] for f in files)}"
+
+    # Obtain instructions from TaskDefinition or use default guidelines
+    instructions = task_definition.task_instructions or "<No instructions provided>"
+    if callable(instructions):
+        instructions = instructions(task, context)
 
     return f"""
     Execute the following task with the provided context:
 
     {task_context}
 
-    Important Guidelines:
-    1. Consider the project structure and existing files
-    2. Build upon previous work from the execution history
-    3. Follow team coding standards and patterns
-    4. Provide clear documentation of your changes
-    5. Consider impact on dependent tasks
+    {instructions}
 
     Your response must follow this exact format:
 
@@ -290,23 +400,48 @@ class SwarmTeam:
         self,
         swarm: Swarm,
         members: list[TeamMember],
-        planning_strategy: PlanningStrategy,
-        instructions: TaskInstructions | None = None,
+        task_definitions: list[TaskDefinition],
+        planning_agent: PlanningAgent | None = None,
         stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
-        self.planning_strategy = planning_strategy
-        self.instructions: TaskInstructions = instructions or default_instructions
+        self.task_definitions = task_definitions
         self.stream_handler = stream_handler
+        self.planning_agent = planning_agent or AgentPlanner(
+            swarm=self.swarm,
+            agent=self._default_agent(),
+            template=self._default_prompt_template(),
+            task_definitions=task_definitions,
+        )
 
-        # Internal state
-        self._current_plan: Plan | None = None
+        # Private state
+        self._task_registry = TaskRegistry(task_definitions)
+        self._execution_history: list[ExecutionResult] = []
         self._context: dict[str, Any] = {
-            "task_types": {task_type for member in members for task_type in member.task_types},
             "team_capabilities": self._get_team_capabilities(),
         }
-        self._execution_history: list[ExecutionResult] = []
+
+    def _default_agent(self) -> Agent:
+        """Create a default agent if none is provided."""
+        return Agent.create(
+            id="agent-planner",
+            model="gpt-4o",
+            instructions="""<TODO: Add instructions for the agent planner>""",
+        )
+
+    def _default_prompt_template(self) -> PromptTemplate:
+        """Create a default prompt template."""
+
+        class DefaultPromptTemplate:
+            @property
+            def template(self) -> str:
+                return "Default template"
+
+            def format_context(self, prompt: str, context: dict[str, Any]) -> str:
+                return prompt
+
+        return DefaultPromptTemplate()
 
     def _get_team_capabilities(self) -> dict[str, list[str]]:
         """Get a mapping of task types to team member capabilities."""
@@ -316,14 +451,66 @@ class SwarmTeam:
                 if task_type not in capabilities:
                     capabilities[task_type] = []
                 capabilities[task_type].append(member.agent.id)
+
         return capabilities
 
-    async def execute_task(self, task: Task, prompt: str) -> Result[Any]:
+    async def create_plan(
+        self,
+        prompt: str,
+        context: dict[str, Any] | None = None,
+    ) -> Result[Plan]:
+        """Create a new plan from the prompt and context by delegating to AgentPlanner."""
+        if context:
+            self._context.update(context)
+
+        result = await self.planning_agent.create_plan(
+            prompt=prompt,
+            context=self._context,
+        )
+
+        if not result.value:
+            return result
+
+        plan = result.value
+
+        if self.stream_handler:
+            await self.stream_handler.on_plan_created(plan)
+
+        return Result(value=plan)
+
+    async def execute_plan(self, plan: Plan) -> Result[list[ExecutionResult]]:
+        """Execute all tasks in the given plan."""
+        plan.status = PlanStatus.IN_PROGRESS
+        results: list[ExecutionResult] = []
+
+        try:
+            while next_tasks := plan.get_next_tasks():
+                for task in next_tasks:
+                    result = await self.execute_task(task)
+                    if result.error:
+                        return Result(error=result.error)
+
+                    if result.value:
+                        results.append(result.value)
+                    else:
+                        return Result(error=ValueError(f"Failed to execute task {task.id}"))
+
+            plan.status = PlanStatus.COMPLETED
+
+            if self.stream_handler:
+                await self.stream_handler.on_plan_completed(plan)
+
+            return Result(value=results)
+
+        except Exception as e:
+            return Result(error=e)
+
+    async def execute_task(self, task: Task) -> Result[ExecutionResult]:
         """Execute a single task using the appropriate team member."""
         assignee = await self._select_matching_member(task)
         if not assignee:
-            raise ValueError(
-                f"No team member found for task type '{task.task_type}' in task: {task.id}"
+            return Result(
+                error=ValueError(f"No team member found for task type '{task.task_type}'")
             )
 
         if self.stream_handler:
@@ -331,36 +518,83 @@ class SwarmTeam:
 
         task.status = TaskStatus.IN_PROGRESS
         task.assignee = assignee.agent.id
-        task_context = {
-            "task": task.model_dump(),
-            "execution_history": self._execution_history,
-            **self._context,
-        }
+
+        task_definition = self._task_registry.get_task_definition(task.task_type)
+        if not task_definition:
+            return Result(
+                error=ValueError(f"No TaskDefinition found for task type '{task.task_type}'")
+            )
+
+        instructions = task_definition.task_instructions or default_instructions(
+            task,
+            self._context,
+            task_definition,
+        )
+
+        if callable(instructions):
+            instructions = instructions(task, self._context)
 
         result = await self.swarm.execute(
             agent=assignee.agent,
-            prompt=prompt,
-            context_variables=task_context,
+            prompt=instructions,
+            context_variables={
+                "task": task.model_dump(),
+                "execution_history": self._execution_history,
+                **self._context,
+            },
         )
 
-        self._execution_history.append(
-            ExecutionResult(
-                task=task,
-                content=result.content,
-                assignee=assignee,
-                timestamp=datetime.now(),
-            )
+        if not result.content:
+            return Result(error=ValueError("The agent did not return any content"))
+
+        if task_definition.task_output and result.content:
+            try:
+                task_output = task_definition.task_output
+                if isinstance(task_output, type) and issubclass(task_output, BaseModel):
+                    output: BaseModel = task_output.model_validate_json(result.content)
+                elif callable(task_output):
+                    output: BaseModel = task_output(result.content, self._context)  # type: ignore
+                else:
+                    raise TypeError("Invalid task output schema")
+
+                execution_result = ExecutionResult(
+                    task=task,
+                    content=result.content,
+                    output=output,
+                    assignee=assignee,
+                )
+
+                self._execution_history.append(execution_result)
+                task.status = TaskStatus.COMPLETED
+
+                if self.stream_handler:
+                    await self.stream_handler.on_task_completed(task)
+
+                return Result(value=execution_result)
+
+            except Exception as e:
+                return Result(error=ValueError(f"Invalid task output: {e}"))
+
+        execution_result = ExecutionResult(
+            task=task,
+            content=result.content,
+            assignee=assignee,
+            timestamp=datetime.now(),
         )
 
+        self._execution_history.append(execution_result)
         task.status = TaskStatus.COMPLETED
 
         if self.stream_handler:
             await self.stream_handler.on_task_completed(task)
 
-        return Result(value=result.content)
+        return Result(value=execution_result)
 
     async def _select_matching_member(self, task: Task) -> TeamMember | None:
-        """Select the best matching team member for a task based on capabilities and workload."""
+        """Select the best matching team member for a task."""
+        if task.assignee and task.assignee in self.members:
+            return self.members[task.assignee]
+
         eligible_members = [
             member for member in self.members.values() if task.task_type in member.task_types
         ]
@@ -368,54 +602,10 @@ class SwarmTeam:
         if not eligible_members:
             return None
 
-        # For now, just return the first eligible member
-        # This could be enhanced with workload balancing, specialization matching, etc.
+        # TODO: Implement more sophisticated selection logic
+        # Could consider:
+        # - Member workload
+        # - Task type specialization scores
+        # - Previous task performance
+        # - Agent polling/voting
         return eligible_members[0]
-
-    async def create_plan(
-        self,
-        prompt: str,
-        feedback: str | None = None,
-        context: dict[str, Any] | None = None,
-    ) -> Plan:
-        """Create a new plan from the prompt and optional feedback."""
-        if context:
-            self._context.update(context)
-
-        result = await self.planning_strategy.create_plan(
-            prompt=prompt,
-            context=self._context,
-            feedback=feedback,
-        )
-
-        if not result.value:
-            raise ValueError("Failed to create plan")
-
-        self._current_plan = result.value
-
-        if self.stream_handler:
-            await self.stream_handler.on_plan_created(self._current_plan)
-
-        return self._current_plan
-
-    async def execute_plan(self) -> None:
-        """Execute all tasks in the current plan in order."""
-        if not self._current_plan:
-            raise ValueError("No plan to execute")
-
-        self._current_plan.status = PlanStatus.IN_PROGRESS
-
-        for task in self._current_plan.tasks:
-            if task.status != TaskStatus.PENDING:
-                continue
-
-            instructions = self.instructions
-            if callable(instructions):
-                instructions = instructions(task, self._context)
-
-            await self.execute_task(task, instructions)
-
-        self._current_plan.status = PlanStatus.COMPLETED
-
-        if self.stream_handler:
-            await self.stream_handler.on_plan_completed(self._current_plan)
