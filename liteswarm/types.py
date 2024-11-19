@@ -118,6 +118,22 @@ class ContextVariables(BaseModel):
         """
         return len(self._data)
 
+    def __str__(self) -> str:
+        """Return a string representation of the context variables.
+
+        Returns:
+            A string representation of the context variables.
+        """
+        return str(self._data)
+
+    def __repr__(self) -> str:
+        """Return a string representation of the context variables.
+
+        Returns:
+            A string representation of the context variables.
+        """
+        return str(self._data)
+
     def keys(self) -> KeysView[str]:
         """Return a view of non-reserved keys.
 
