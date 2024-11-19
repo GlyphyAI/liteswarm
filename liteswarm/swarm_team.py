@@ -393,8 +393,8 @@ class SwarmTeam:
         self.stream_handler = stream_handler
         self.planning_agent = planning_agent or AgentPlanner(
             swarm=self.swarm,
-            agent=self._default_agent(),
-            template=self._default_prompt_template(),
+            agent=self._default_planning_agent(),
+            template=self._default_planning_prompt_template(),
             task_definitions=task_definitions,
         )
 
@@ -405,7 +405,11 @@ class SwarmTeam:
             "team_capabilities": self._get_team_capabilities(),
         }
 
-    def _default_agent(self) -> Agent:
+    # ================================================
+    # MARK: Private Helpers
+    # ================================================
+
+    def _default_planning_agent(self) -> Agent:
         """Create a default agent if none is provided."""
         return Agent.create(
             id="agent-planner",
@@ -413,7 +417,7 @@ class SwarmTeam:
             instructions="""<TODO: Add instructions for the agent planner>""",
         )
 
-    def _default_prompt_template(self) -> PromptTemplate:
+    def _default_planning_prompt_template(self) -> PromptTemplate:
         """Create a default prompt template."""
 
         class DefaultPromptTemplate:
