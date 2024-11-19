@@ -414,7 +414,22 @@ class SwarmTeam:
         return Agent.create(
             id="agent-planner",
             model="gpt-4o",
-            instructions="""<TODO: Add instructions for the agent planner>""",
+            instructions=dedent_prompt("""
+            You are a task planning specialist.
+
+            Your role is to:
+            1. Break down complex requests into clear, actionable tasks
+            2. Ensure tasks have appropriate dependencies
+            3. Create tasks that match the provided task types
+            4. Consider team capabilities when planning
+
+            Each task must include:
+            - A clear title and description
+            - The appropriate task type
+            - Any dependencies on other tasks
+
+            Follow the output format specified in the prompt to create your plan.
+            """),
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
@@ -423,10 +438,10 @@ class SwarmTeam:
         class DefaultPromptTemplate:
             @property
             def template(self) -> str:
-                return "Default template"
+                return "{prompt}"
 
             def format_context(self, prompt: str, context: dict[str, Any]) -> str:
-                return prompt
+                return self.template.format(prompt=prompt)
 
         return DefaultPromptTemplate()
 
