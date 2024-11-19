@@ -48,7 +48,7 @@ def get_output_schema_type(output_schema: "TaskOutput") -> type[BaseModel]:
         return output_schema
 
     try:
-        dummy_output = output_schema("", {})  # type: ignore [call-arg]
+        dummy_output = output_schema("", ContextVariables())  # type: ignore [call-arg]
         if isinstance(dummy_output, BaseModel):
             return dummy_output.__class__
         else:
@@ -267,7 +267,7 @@ class PromptTemplate(Protocol):
         """Return the template string."""
         ...
 
-    def format_context(self, prompt: str, context: dict[str, Any]) -> str:
+    def format_context(self, prompt: str, context: ContextVariables) -> str:
         """Format the prompt with the given context."""
         ...
 
@@ -278,7 +278,7 @@ class PlanningAgent(Protocol):
     async def create_plan(
         self,
         prompt: str,
-        context: dict[str, Any],
+        context: ContextVariables,
         feedback: str | None = None,
     ) -> Result[Plan[Task]]:
         """Create a plan from the given prompt and context."""
@@ -303,7 +303,7 @@ class AgentPlanner(PlanningAgent):
     async def create_plan(
         self,
         prompt: str,
-        context: dict[str, Any],
+        context: ContextVariables,
         feedback: str | None = None,
     ) -> Result[Plan[Task]]:
         """Create a plan using the configured agent."""
@@ -314,8 +314,9 @@ class AgentPlanner(PlanningAgent):
 
         task_definitions = list(self.task_definitions.values())
         output_format = generate_plan_json_schema(task_definitions)
-        context.update(output_format=output_format)
 
+        context = ContextVariables(**context)
+        context.set_reserved("output_format", output_format)
         formatted_prompt = self.template.format_context(full_prompt, context)
 
         result = await self.swarm.execute(
@@ -411,9 +412,9 @@ class SwarmTeam:
         # Private state
         self._task_registry = TaskRegistry(task_definitions)
         self._execution_history: list[ExecutionResult] = []
-        self._context: dict[str, Any] = {
-            "team_capabilities": self._get_team_capabilities(),
-        }
+        self._context: ContextVariables = ContextVariables(
+            team_capabilities=self._get_team_capabilities(),
+        )
 
     # ================================================
     # MARK: Private Helpers
@@ -450,7 +451,7 @@ class SwarmTeam:
             def template(self) -> str:
                 return "{prompt}"
 
-            def format_context(self, prompt: str, context: dict[str, Any]) -> str:
+            def format_context(self, prompt: str, context: ContextVariables) -> str:
                 return self.template.format(prompt=prompt)
 
         return DefaultPromptTemplate()
@@ -474,18 +475,18 @@ class SwarmTeam:
         self,
         task: Task,
         task_definition: TaskDefinition,
-    ) -> dict[str, Any]:
+    ) -> ContextVariables:
         """Construct the context for task execution."""
-        context = {
-            "task": task.model_dump(),
-            "execution_history": self._execution_history,
+        context = ContextVariables(
+            task=task.model_dump(),
+            execution_history=self._execution_history,
             **self._context,
-        }
+        )
 
         output_schema = task_definition.task_output
         if output_schema:
             output_schema_type = get_output_schema_type(output_schema)
-            context["output_format"] = output_schema_type.model_json_schema()
+            context.set_reserved("output_format", output_schema_type.model_json_schema())
 
         return context
 
@@ -493,7 +494,7 @@ class SwarmTeam:
         self,
         task: Task,
         task_definition: TaskDefinition,
-        task_context: dict[str, Any],
+        task_context: ContextVariables,
     ) -> str:
         """Prepare task instructions, handling callable instructions if necessary."""
         instructions = task_definition.task_instructions
@@ -505,7 +506,7 @@ class SwarmTeam:
         assignee: TeamMember,
         task_definition: TaskDefinition,
         content: str,
-        task_context: dict[str, Any],
+        task_context: ContextVariables,
     ) -> Result[ExecutionResult]:
         """Process the agent's response and create an ExecutionResult."""
         output_schema = task_definition.task_output
@@ -541,7 +542,7 @@ class SwarmTeam:
         self,
         output_schema: TaskOutput,
         content: str,
-        task_context: dict[str, Any],
+        task_context: ContextVariables,
     ) -> BaseModel:
         """Parse the agent's output based on the provided schema."""
         output: BaseModel
@@ -579,7 +580,7 @@ class SwarmTeam:
     async def create_plan(
         self,
         prompt: str,
-        context: dict[str, Any] | None = None,
+        context: ContextVariables | None = None,
     ) -> Result[Plan]:
         """Create a new plan from the prompt and context by delegating to AgentPlanner."""
         if context:
