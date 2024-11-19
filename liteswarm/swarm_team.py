@@ -437,6 +437,116 @@ class SwarmTeam:
 
         return capabilities
 
+    # ================================================
+    # MARK: Task Execution Helpers
+    # ================================================
+
+    def _build_task_context(
+        self,
+        task: Task,
+        task_definition: TaskDefinition,
+    ) -> dict[str, Any]:
+        """Construct the context for task execution."""
+        context = {
+            "task": task.model_dump(),
+            "execution_history": self._execution_history,
+            **self._context,
+        }
+
+        output_schema = task_definition.task_output
+        if output_schema:
+            output_schema_type = get_output_schema_type(output_schema)
+            context["output_format"] = output_schema_type.model_json_schema()
+
+        return context
+
+    def _prepare_instructions(
+        self,
+        task: Task,
+        task_definition: TaskDefinition,
+        task_context: dict[str, Any],
+    ) -> str:
+        """Prepare task instructions, handling callable instructions if necessary."""
+        instructions = task_definition.task_instructions
+        return instructions(task, task_context) if callable(instructions) else instructions
+
+    def _process_execution_result(
+        self,
+        task: Task,
+        assignee: TeamMember,
+        task_definition: TaskDefinition,
+        content: str,
+        task_context: dict[str, Any],
+    ) -> Result[ExecutionResult]:
+        """Process the agent's response and create an ExecutionResult."""
+        output_schema = task_definition.task_output
+        if not output_schema:
+            execution_result = ExecutionResult(
+                task=task,
+                content=content,
+                assignee=assignee,
+                timestamp=datetime.now(),
+            )
+
+            return Result(value=execution_result)
+
+        try:
+            output = self._parse_output(
+                output_schema=output_schema,
+                content=content,
+                task_context=task_context,
+            )
+
+            execution_result = ExecutionResult(
+                task=task,
+                content=content,
+                output=output,
+                assignee=assignee,
+            )
+
+            return Result(value=execution_result)
+        except Exception as e:
+            return Result(error=ValueError(f"Invalid task output: {e}"))
+
+    def _parse_output(
+        self,
+        output_schema: TaskOutput,
+        content: str,
+        task_context: dict[str, Any],
+    ) -> BaseModel:
+        """Parse the agent's output based on the provided schema."""
+        output: BaseModel
+        if isinstance(output_schema, type) and issubclass(output_schema, BaseModel):
+            output = output_schema.model_validate_json(content)
+        else:
+            output = output_schema(content, task_context)  # type: ignore
+
+        return output
+
+    def _select_matching_member(self, task: Task) -> TeamMember | None:
+        """Select the best matching team member for a task."""
+        if task.assignee and task.assignee in self.members:
+            return self.members[task.assignee]
+
+        eligible_members = [
+            member for member in self.members.values() if task.task_type in member.task_types
+        ]
+
+        if not eligible_members:
+            return None
+
+        # TODO: Implement more sophisticated selection logic
+        # Could consider:
+        # - Member workload
+        # - Task type specialization scores
+        # - Previous task performance
+        # - Agent polling/voting
+        return eligible_members[0]
+
+    # ================================================
+    # MARK: Public API
+    # ================================================
+
     async def create_plan(
         self,
         prompt: str,
@@ -490,7 +600,7 @@ class SwarmTeam:
 
     async def execute_task(self, task: Task) -> Result[ExecutionResult]:
         """Execute a single task using the appropriate team member."""
-        assignee = await self._select_matching_member(task)
+        assignee = self._select_matching_member(task)
         if not assignee:
             return Result(
                 error=ValueError(f"No team member found for task type '{task.task_type}'")
@@ -508,87 +618,33 @@ class SwarmTeam:
                 error=ValueError(f"No TaskDefinition found for task type '{task.task_type}'")
             )
 
-        instructions = task_definition.task_instructions or default_instructions(
-            task,
-            self._context,
-            task_definition,
-        )
-
-        if callable(instructions):
-            instructions = instructions(task, self._context)
+        task_context = self._build_task_context(task, task_definition)
+        instructions = self._prepare_instructions(task, task_definition, task_context)
 
         result = await self.swarm.execute(
             agent=assignee.agent,
             prompt=instructions,
-            context_variables={
-                "task": task.model_dump(),
-                "execution_history": self._execution_history,
-                **self._context,
-            },
+            context_variables=task_context,
         )
 
         if not result.content:
             return Result(error=ValueError("The agent did not return any content"))
 
-        if task_definition.task_output and result.content:
-            try:
-                task_output = task_definition.task_output
-                if isinstance(task_output, type) and issubclass(task_output, BaseModel):
-                    output: BaseModel = task_output.model_validate_json(result.content)
-                elif callable(task_output):
-                    output: BaseModel = task_output(result.content, self._context)  # type: ignore
-                else:
-                    raise TypeError("Invalid task output schema")
-
-                execution_result = ExecutionResult(
-                    task=task,
-                    content=result.content,
-                    output=output,
-                    assignee=assignee,
-                )
-
-                self._execution_history.append(execution_result)
-                task.status = TaskStatus.COMPLETED
-
-                if self.stream_handler:
-                    await self.stream_handler.on_task_completed(task)
-
-                return Result(value=execution_result)
-
-            except Exception as e:
-                return Result(error=ValueError(f"Invalid task output: {e}"))
-
-        execution_result = ExecutionResult(
+        execution_result = self._process_execution_result(
             task=task,
-            content=result.content,
             assignee=assignee,
-            timestamp=datetime.now(),
+            task_definition=task_definition,
+            content=result.content,
+            task_context=task_context,
         )
 
-        self._execution_history.append(execution_result)
-        task.status = TaskStatus.COMPLETED
+        if execution_result.value:
+            self._execution_history.append(execution_result.value)
+            task.status = TaskStatus.COMPLETED
+        elif execution_result.error:
+            task.status = TaskStatus.FAILED
 
         if self.stream_handler:
             await self.stream_handler.on_task_completed(task)
 
-        return Result(value=execution_result)
-
-    async def _select_matching_member(self, task: Task) -> TeamMember | None:
-        """Select the best matching team member for a task."""
-        if task.assignee and task.assignee in self.members:
-            return self.members[task.assignee]
-
-        eligible_members = [
-            member for member in self.members.values() if task.task_type in member.task_types
-        ]
-
-        if not eligible_members:
-            return None
-
-        # TODO: Implement more sophisticated selection logic
-        # Could consider:
-        # - Member workload
-        # - Task type specialization scores
-        # - Previous task performance
-        # - Agent polling/voting
-        return eligible_members[0]
+        return execution_result
