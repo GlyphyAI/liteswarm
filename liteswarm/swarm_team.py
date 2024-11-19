@@ -132,7 +132,7 @@ class TaskDefinition(BaseModel):
 
     task_type: str
     task_schema: type[Task]
-    task_instructions: TaskInstructions | None = None
+    task_instructions: TaskInstructions
     task_output: TaskOutput | None = None
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -142,10 +142,17 @@ class TaskDefinition(BaseModel):
         cls,
         task_type: str,
         task_schema: type[Task],
-        task_instructions: TaskInstructions | None = None,
+        task_instructions: TaskInstructions,
         task_output: TaskOutput | None = None,
     ) -> "TaskDefinition":
-        task_schema = task_schema.create(task_type=(str, Field(default=task_type)))
+        task_type_field = Field(
+            default=task_type,
+            description="Type of the task. USE_DEFAULT: Do not modify, use default value.",
+        )
+
+        task_schema = task_schema.create(
+            task_type=(str, task_type_field),
+        )
 
         return cls(
             task_type=task_type,
