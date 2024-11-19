@@ -220,7 +220,7 @@ class ContextVariables(BaseModel):
             ValueError: If any keys in `other` or `kwargs` are reserved.
         """
         if other:
-            for key in other:
+            for key, _ in other:
                 if key in RESERVED_CONTEXT_KEYS:
                     raise ValueError(f"Cannot set reserved key through update: {key}")
 
@@ -249,7 +249,7 @@ class ContextVariables(BaseModel):
             ValueError: If any keys in `other` or `kwargs` are not reserved.
         """
         if other:
-            for key in other:
+            for key, _ in other:
                 if key not in RESERVED_CONTEXT_KEYS:
                     raise ValueError(
                         f"Only reserved keys can be set through update_reserved: {key}"
