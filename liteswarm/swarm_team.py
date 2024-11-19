@@ -86,14 +86,35 @@ class PlanStatus(str, Enum):
 class Task(BaseModel):
     """Instance of a task created based on its TaskDefinition."""
 
-    id: str
-    title: str
-    task_type: str
-    description: str | None = None
-    status: TaskStatus = TaskStatus.PENDING
-    assignee: str | None = None
-    dependencies: list[str] = Field(default_factory=list)
-    metadata: dict[str, Any] = Field(default_factory=dict)
+    id: str = Field(
+        description="Unique identifier for the task. REQUIRED: Must be provided.",
+    )
+    title: str = Field(
+        description="Short descriptive title of the task. REQUIRED: Must be provided.",
+    )
+    task_type: str = Field(
+        description="Type of the task. USE_DEFAULT: Do not modify, use default value.",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Detailed description of the task. OPTIONAL: Provide if needed, otherwise use default value.",
+    )
+    status: TaskStatus = Field(
+        default=TaskStatus.PENDING,
+        description="Current status of the task. USE_DEFAULT: Do not modify, use default value.",
+    )
+    assignee: str | None = Field(
+        default=None,
+        description="ID of the assigned team member. USE_DEFAULT: Do not modify, use default value.",
+    )
+    dependencies: list[str] = Field(
+        default_factory=list,
+        description="List of task IDs that must be completed before this task. OPTIONAL: Provide if needed, otherwise use default value.",
+    )
+    metadata: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Additional task metadata. USE_DEFAULT: Do not modify, use default value.",
+    )
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
