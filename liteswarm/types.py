@@ -14,7 +14,7 @@ from litellm.types.utils import (
     Usage,
 )
 from litellm.types.utils import Delta as LiteDelta
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 T = TypeVar("T")
 """Generic type placeholder."""
@@ -46,9 +46,10 @@ class Message(BaseModel):
     audio: ChatCompletionAudioResponse | None = None
     """Audio response data, if any."""
 
-    class Config:  # noqa: D106
-        arbitrary_types_allowed = True
-        extra = "allow"
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="allow",
+    )
 
 
 class ToolMessage(BaseModel):
@@ -60,6 +61,8 @@ class ToolMessage(BaseModel):
     """Optional new agent to switch to (for agent-switching tools)."""
     context_variables: ContextVariables | None = None
     """Context variables to pass to the next agent."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class Delta(BaseModel):
@@ -124,9 +127,10 @@ class Agent(BaseModel):
     params: dict[str, Any] | None = Field(default_factory=dict)
     """Additional parameters for the language model."""
 
-    class Config:  # noqa: D106
-        arbitrary_types_allowed = True
-        extra = "allow"
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        extra="allow",
+    )
 
     @classmethod
     def create(  # noqa: PLR0913
@@ -205,8 +209,7 @@ class Result(BaseModel, Generic[T]):
     context_variables: ContextVariables | None = None
     """Optional context variables to update."""
 
-    class Config:  # noqa: D106
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class ToolCallResult(BaseModel):
@@ -224,6 +227,8 @@ class ToolCallMessageResult(ToolCallResult):
     context_variables: ContextVariables | None = None
     """Context variables to pass to the next agent."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
 
 class ToolCallAgentResult(ToolCallResult):
     """Result of a tool call that produced a new agent."""
@@ -235,6 +240,8 @@ class ToolCallAgentResult(ToolCallResult):
     context_variables: ContextVariables | None = None
     """Context variables to pass to the next agent."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
 
 class ToolCallFailureResult(ToolCallResult):
     """Result of a failed tool call."""
@@ -242,8 +249,7 @@ class ToolCallFailureResult(ToolCallResult):
     error: Exception
     """The exception that occurred during tool execution."""
 
-    class Config:  # noqa: D106
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class CompletionResponse(BaseModel):
