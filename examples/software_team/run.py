@@ -3,111 +3,30 @@ import os
 
 from liteswarm.logging import enable_logging
 from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import PlanStatus, SwarmTeam, TeamMember
-from liteswarm.types import ContextVariables
+from liteswarm.swarm_team import SwarmTeam
 
-from .stream import SoftwareTeamStreamHandler, SwarmStreamHandler
-from .team import (
-    create_debug_engineer,
-    create_flutter_engineer,
-    create_planning_strategy,
+from .agents import (
+    create_agent_planner,
+    create_team_members,
 )
+from .stream import SoftwareTeamStreamHandler, SwarmStreamHandler
+from .tasks import create_task_definitions
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
-
-
-def create_task_instructions(context: ContextVariables) -> str:
-    """Create dynamic task instructions."""
-    task = context["task"]
-    execution_history = context.get("execution_history", [])
-    project = context.get("project", {})
-
-    # Get relevant files for this task
-    relevant_files = []
-    if files := project.get("files"):
-        for file in files:
-            if any(keyword in file["filepath"] for keyword in ["todo", "task", "list"]):
-                relevant_files.append(file)
-
-    # Build context-aware instructions
-    instructions = f"""
-    Implement the following software development task:
-
-    Task Details:
-    - ID: {task["id"]}
-    - Title: {task["title"]}
-    - Description: {task["description"]}
-
-    Project Context:
-    - Framework: Flutter
-    - Platform: Mobile
-    - Project Structure: {', '.join(project.get('directories', []))}
-    """
-
-    if relevant_files:
-        instructions += "\nRelevant Files:"
-        for file in relevant_files:
-            instructions += f"\n- {file['filepath']}"
-
-    if execution_history:
-        instructions += "\nExecution History:"
-        for result in execution_history[-3:]:  # Show last 3 tasks
-            instructions += f"\n- {result.task.title} (by {result.assignee.agent.id})"
-
-    instructions += """
-    Important:
-    1. Follow the existing project structure
-    2. Maintain consistency with previous implementations
-    3. Use root XML tags to structure your response
-    4. Include implementation thoughts before files
-    5. Consider the impact on dependent tasks
-
-    Your response must follow this exact format:
-
-    <thoughts>
-    Explain your implementation approach here. This section should include:
-    - What changes you're making and why
-    - Key implementation decisions
-    - Any important considerations
-    - How this fits with existing code
-    The content can be free-form text, formatted for readability.
-    </thoughts>
-
-    <files>
-    Provide complete file contents in JSON format:
-    [
-        {
-            "filepath": "path/to/file.dart",
-            "content": "// Complete file contents here"
-        }
-    ]
-    </files>
-    """
-
-    return instructions
 
 
 async def main() -> None:
     """Run the software team example."""
     swarm = Swarm(stream_handler=SwarmStreamHandler())
-    planning_strategy = create_planning_strategy(swarm)
-    team_members = [
-        TeamMember(
-            agent=create_flutter_engineer(),
-            task_types=["flutter"],
-            metadata={"specialty": "mobile"},
-        ),
-        TeamMember(
-            agent=create_debug_engineer(),
-            task_types=["debug"],
-            metadata={"specialty": "troubleshooting"},
-        ),
-    ]
+    task_definitions = create_task_definitions()
+    team_members = create_team_members()
+    agent_planner = create_agent_planner(swarm, task_definitions)
 
     team = SwarmTeam(
         swarm=swarm,
         members=team_members,
-        planning_strategy=planning_strategy,
+        task_definitions=task_definitions,
+        planning_agent=agent_planner,
         stream_handler=SoftwareTeamStreamHandler(),
     )
 
@@ -155,7 +74,12 @@ async def main() -> None:
     """
 
     while True:
-        plan = await team.create_plan(prompt, context=context)
+        plan_result = await team.create_plan(prompt, context=context)
+        if plan_result.error or not plan_result.value:
+            print(f"Failed to create plan: {plan_result.error}")
+            return
+
+        plan = plan_result.value
 
         print("\nReview the plan and choose an option:")
         print("1. Approve and execute")
@@ -166,8 +90,16 @@ async def main() -> None:
 
         match choice:
             case "1":
-                plan.status = PlanStatus.APPROVED
-                await team.execute_plan()
+                plan_output = await team.execute_plan(plan)
+                if plan_output.error:
+                    print(f"Failed to execute plan: {plan_output.error}")
+                    return
+
+                results = plan_output.value or []
+                for result in results:
+                    agent_id = result.assignee.agent.id if result.assignee else "unknown"
+                    print(f"Task {result.task.id} completed by {agent_id}")
+
                 break
             case "2":
                 feedback = input("\nEnter your feedback: ")

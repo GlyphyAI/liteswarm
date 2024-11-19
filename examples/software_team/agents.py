@@ -1,12 +1,12 @@
 from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import AgentPlanner
+from liteswarm.swarm_team import AgentPlanner, TaskDefinition, TeamMember
 from liteswarm.types import Agent
 
 from .templates import SoftwarePlanTemplate
 
 
-def create_planning_strategy(swarm: Swarm) -> AgentPlanner:
-    """Create a software planning strategy."""
+def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -> AgentPlanner:
+    """Create a software planning agent."""
     agent = Agent.create(
         id="planner",
         model="gpt-4o",
@@ -34,6 +34,7 @@ def create_planning_strategy(swarm: Swarm) -> AgentPlanner:
         swarm=swarm,
         agent=agent,
         template=SoftwarePlanTemplate(),
+        task_definitions=task_definitions,
     )
 
 
@@ -104,5 +105,56 @@ def create_debug_engineer() -> Agent:
         4. Performance bottlenecks
 
         Always analyze the error context and relevant files before suggesting fixes.
-        Provide solutions in the same format as the Flutter engineer.""",
+
+        Your response must use three root XML tags to separate thoughts, root cause, and implementation:
+
+        <thoughts>
+        Explain your implementation approach here. This section should include:
+        - What changes you're making and why
+        - Key implementation decisions
+        - Any important considerations
+        The content can be free-form text, formatted for readability.
+        </thoughts>
+
+        <root_cause>
+        Explain the root cause of the error. This section should include:
+        - What is the root cause of the error
+        - Key implementation decisions
+        - Any important considerations
+        The content can be free-form text, formatted for readability.
+        </root_cause>
+
+        <files>
+        Provide complete file contents in JSON format:
+        [
+            {
+                "filepath": "path/to/file.dart",
+                "content": "// Complete file contents here"
+            }
+        ]
+        </files>
+
+        Example response:
+        <thoughts>
+        I'll analyze the error and suggest a solution.
+        </thoughts>
+        <files>
+        []
+        </files>""",
     )
+
+
+def create_team_members() -> list[TeamMember]:
+    """Create a list of team members."""
+    return [
+        TeamMember(
+            agent=create_flutter_engineer(),
+            task_types=["flutter"],
+            metadata={"specialty": "mobile"},
+        ),
+        TeamMember(
+            agent=create_debug_engineer(),
+            task_types=["debug"],
+            metadata={"specialty": "troubleshooting"},
+        ),
+    ]

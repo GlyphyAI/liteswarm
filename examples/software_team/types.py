@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from liteswarm.swarm_team import Task
 
@@ -10,13 +10,6 @@ class FileContent(BaseModel):
     content: str
 
 
-class ProjectContext(BaseModel):
-    """Project context containing directory structure and file contents."""
-
-    directories: list[str] = Field(default_factory=list)
-    files: list[FileContent] = Field(default_factory=list)
-
-
 class CodeBlock(BaseModel):
     """Represents a code block."""
 
@@ -24,17 +17,29 @@ class CodeBlock(BaseModel):
     language: str | None = None
 
 
-class SoftwareTask(Task):
-    """Represents a development task in the plan."""
+class FlutterTask(Task):
+    """Task for implementing Flutter features."""
 
-    engineer_type: str = Field(
-        description="Type of engineer needed",
-    )
-    dependencies: list[str] = Field(
-        default_factory=list,
-        description="IDs of tasks this depends on",
-    )
-    deliverables: list[str] = Field(
-        default_factory=list,
-        description="Expected outputs from this task",
-    )
+    feature_type: str
+
+
+class FlutterOutput(BaseModel):
+    """Output schema for Flutter implementation tasks."""
+
+    thoughts: str
+    files: list[FileContent]
+
+
+class DebugTask(Task):
+    """Task for debugging issues."""
+
+    error_type: str
+    stack_trace: str | None = None
+
+
+class DebugOutput(BaseModel):
+    """Output schema for debug tasks."""
+
+    thoughts: str
+    root_cause: str
+    files: list[FileContent]

@@ -1,66 +1,49 @@
 from typing import Any
 
-from liteswarm.swarm_team import PromptTemplate
+from pydantic import BaseModel
+
+from liteswarm.swarm_team import Plan, Task
+
+from .utils import dump_json
 
 
-class SoftwarePlanTemplate(PromptTemplate):
+class SoftwarePlanTemplate(BaseModel):
     """Template for software development plans."""
 
-    @property
-    def template(self) -> str:
-        """Return the template string for generating plans."""
-        return """
-        Create a detailed development plan for the following project:
-        {prompt}
+    template: str = """
+    Create a detailed development plan for the following project:
+    {prompt}
 
-        Available task types: {task_types}
+    Project Context:
+    {context_section}
 
-        Project Context:
-        {context_section}
+    The plan should:
+    1. Break down the work into clear, actionable tasks
+    2. Each task must be one of the types specified in the plan JSON schema
+    3. List dependencies between tasks
+    4. Work within the existing project structure if provided
 
-        The plan should:
-        1. Break down the work into clear, actionable tasks
-        2. Specify the type of engineer needed for each task
-        3. List dependencies between tasks
-        4. Define clear deliverables (files to be created/modified)
-        5. Consider the tech stack and existing codebase
-        6. Work within the existing project structure if provided
+    You MUST return the plan as a JSON object with the following schema:
+    {plan_json_schema}
 
-        Return the plan as a JSON object with:
-        - tasks: list of tasks, each with:
-            - id: unique string identifier
-            - title: clear task title
-            - description: detailed task description
-            - task_type: type of task (must be one of: {task_types})
-            - dependencies: list of task IDs this depends on
-            - metadata: dictionary of additional information
-                - deliverables: list of files to be created/modified
-
-        Example output:
-        ```json
-        {{
-            "tasks": [
-                {{
-                    "id": "task1",
-                    "title": "Implement Todo Model",
-                    "description": "Create the Todo model class with required fields",
-                    "task_type": "flutter",
-                    "dependencies": [],
-                    "metadata": {{
-                        "deliverables": ["lib/models/todo.dart"]
-                    }}
-                }}
-            ]
-        }}
-        ```
-        """
+    Example output:
+    ```json
+    {plan_json_example}
+    ```
+    """
 
     def format_context(self, prompt: str, context: dict[str, Any]) -> str:
-        task_types = context.get("available_types", [])
         project_context = context.get("project", "No project context provided")
+        plan_json_schema = dump_json(context.get("plan_json_schema", {}))
+        plan_json_example = Plan(
+            tasks=[
+                Task(id="<id_0>", title="<title_0>", task_type="<task_type_0>"),
+            ]
+        )
 
         return self.template.format(
             prompt=prompt,
-            task_types=", ".join(task_types),
             context_section=project_context,
+            plan_json_schema=plan_json_schema,
+            plan_json_example=plan_json_example.model_dump_json(),
         )

@@ -40,3 +40,11 @@ def load_partial_json(content: str) -> JSON:
 
 def dump_partial_json(data: JSON) -> str:
     return orjson.dumps(data).decode()
+
+
+def dump_json(data: JSON) -> str:
+    return orjson.dumps(data).decode()
+
+
+def load_json(data: str) -> JSON:
+    return orjson.loads(data)
