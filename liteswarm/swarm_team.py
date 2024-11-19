@@ -9,6 +9,7 @@ from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
 from functools import reduce
+from textwrap import dedent
 from typing import Any, Generic, Protocol, Self, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
@@ -37,6 +38,10 @@ def generate_plan_json_schema(task_definitions: list["TaskDefinition"]) -> dict[
     task_schemas = [td.task_schema for td in task_definitions]
     task_schemas_union = create_union_type(task_schemas)
     return Plan[task_schemas_union].model_json_schema()  # type: ignore [valid-type]
+
+
+def dedent_prompt(prompt: str) -> str:
+    return dedent(prompt).strip()
 
 
 # ================================================
