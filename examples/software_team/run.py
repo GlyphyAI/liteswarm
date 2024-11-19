@@ -62,7 +62,7 @@ async def main() -> None:
     """)
 
     while True:
-        plan_result = await team.create_plan(prompt, context=context)
+        plan_result = await team.create_plan(prompt, context)
         if plan_result.error or not plan_result.value:
             print(f"Failed to create plan: {plan_result.error}")
             return
