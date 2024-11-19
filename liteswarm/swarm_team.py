@@ -303,8 +303,8 @@ class AgentPlanner(PlanningAgent):
             full_prompt = prompt
 
         task_definitions = list(self.task_definitions.values())
-        plan_json_schema = generate_plan_json_schema(task_definitions)
-        context.update(plan_json_schema=plan_json_schema)
+        output_format = generate_plan_json_schema(task_definitions)
+        context.update(output_format=output_format)
 
         formatted_prompt = self.template.format_context(full_prompt, context)
 
