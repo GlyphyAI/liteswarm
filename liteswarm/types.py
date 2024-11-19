@@ -4,7 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from collections.abc import Callable, Generator, ItemsView, KeysView, Mapping
+from collections.abc import Callable, Generator, ItemsView, Iterable, KeysView
 from typing import Any, Generic, Literal, Self, TypeVar, get_args
 
 from litellm.types.utils import (
@@ -191,7 +191,7 @@ class ContextVariables(BaseModel):
 
     def update(
         self,
-        other: Mapping[str, Any] | None = None,
+        other: Iterable[tuple[str, Any]] | None = None,
         **kwargs: Any,
     ) -> None:
         """Update multiple non-reserved context variables at once.
@@ -220,7 +220,7 @@ class ContextVariables(BaseModel):
 
     def update_reserved(
         self,
-        other: Mapping[ReservedContextKey, Any] | None = None,
+        other: Iterable[tuple[ReservedContextKey, Any]] | None = None,
         **kwargs: Any,
     ) -> None:
         """Update multiple reserved context variables at once.
@@ -239,7 +239,7 @@ class ContextVariables(BaseModel):
                         f"Only reserved keys can be set through update_reserved: {key}"
                     )
 
-            self._reserved.update(other)  # type: ignore [arg-type]
+            self._reserved.update(other)
 
         if kwargs:
             input_keys = set(kwargs.keys())
