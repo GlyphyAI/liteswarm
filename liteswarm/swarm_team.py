@@ -72,6 +72,7 @@ class TaskStatus(str, Enum):
     PENDING = "pending"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class PlanStatus(str, Enum):
@@ -79,6 +80,7 @@ class PlanStatus(str, Enum):
     APPROVED = "approved"
     IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
+    FAILED = "failed"
 
 
 class Task(BaseModel):
