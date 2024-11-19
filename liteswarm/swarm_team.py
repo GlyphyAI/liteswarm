@@ -4,6 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+import operator
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
@@ -29,7 +30,7 @@ def create_union_type(types: list[T]) -> T:
     elif len(types) == 1:
         return types[0]
     else:
-        return reduce(lambda x, y: x | y, types)  # type: ignore
+        return reduce(operator.or_, types)
 
 
 def generate_plan_json_schema(task_definitions: list["TaskDefinition"]) -> dict[str, Any]:
