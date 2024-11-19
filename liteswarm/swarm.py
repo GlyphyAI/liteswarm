@@ -8,7 +8,6 @@ import asyncio
 import copy
 from collections import deque
 from collections.abc import AsyncGenerator
-from typing import Any
 
 import litellm
 import orjson
@@ -170,7 +169,7 @@ class Swarm:
         self._agent_queue: deque[Agent] = deque()
         self._full_history: list[Message] = []
         self._working_history: list[Message] = []
-        self._context_variables: dict[str, Any] = {}
+        self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
         self.stream_handler = stream_handler or LiteStreamHandler()
@@ -803,10 +802,10 @@ class Swarm:
                     self._agent_queue.append(tool_message.agent)
 
                 if tool_message.context_variables:
-                    self._context_variables = {
+                    self._context_variables = ContextVariables(
                         **self._context_variables,
                         **tool_message.context_variables,
-                    }
+                    )
 
                 messages.append(tool_message.message)
 
@@ -925,7 +924,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
     ) -> None:
         """Initialize the conversation state.
 
@@ -942,7 +941,7 @@ class Swarm:
             self._full_history = copy.deepcopy(messages)
             await self._update_working_history(agent)
 
-        self._context_variables = context_variables or {}
+        self._context_variables = context_variables or ContextVariables()
 
         if self._active_agent is None:
             self._active_agent = agent
@@ -967,7 +966,7 @@ class Swarm:
         self,
         switch_count: int,
         prompt: str | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
     ) -> bool:
         """Switch to the next agent in the queue.
 
@@ -1024,7 +1023,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
         """Stream agent responses and manage the conversation flow.
@@ -1049,10 +1048,10 @@ class Swarm:
 
         Example:
             ```python
-            def get_instructions(context: dict[str, Any]) -> str:
+            def get_instructions(context: ContextVariables) -> str:
                 return f"Help {context['user_name']} with math."
 
-            def add(a: float, b: float, context_variables: dict[str, Any]) -> float:
+            def add(a: float, b: float, context_variables: ContextVariables) -> float:
                 print(f"User {context_variables['user_name']} adding {a} + {b}")
                 return a + b
 
@@ -1142,7 +1141,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> ConversationState:
         """Execute the agent's task and return the final conversation state.
@@ -1168,7 +1167,7 @@ class Swarm:
 
         Example:
             ```python
-            def get_instructions(context: dict[str, Any]) -> str:
+            def get_instructions(context: ContextVariables) -> str:
                 return f"Help {context['user_name']} with their task."
 
             agent = Agent.create(
