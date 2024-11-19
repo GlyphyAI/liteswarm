@@ -257,7 +257,7 @@ def function_to_json(
         def greet(name: str, context_variables: dict[str, Any]) -> str:
             \"\"\"Greet someone by name.
 
-    Args:
+            Args:
                 name: The name to greet
                 context_variables: Context variables (handled by framework)
             \"\"\"
@@ -266,7 +266,7 @@ def function_to_json(
         schema = function_to_json(greet)
         # Schema will only include the 'name' parameter
         ```
-    """
+    """  # noqa: D214
     return FunctionConverter.function_to_json(func, description)
 
 
