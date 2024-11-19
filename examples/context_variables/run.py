@@ -1,16 +1,15 @@
 import asyncio
 import os
-from typing import Any
 
 from liteswarm.logging import enable_logging
 from liteswarm.swarm import Swarm
-from liteswarm.types import Agent, Result
+from liteswarm.types import Agent, ContextVariables, Result
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 
 async def instructions_example() -> None:
-    def instructions(context_variables: dict[str, Any]) -> str:
+    def instructions(context_variables: ContextVariables) -> str:
         user_name: str = context_variables.get("user_name", "John")
         return f"Help the user, {user_name}, do whatever they want."
 
@@ -24,24 +23,24 @@ async def instructions_example() -> None:
     result = await swarm.execute(
         agent=agent,
         prompt="Hello!",
-        context_variables={"user_name": "John"},
+        context_variables=ContextVariables(user_name="John"),
     )
 
     print(result.messages[-1].content)
 
 
 async def tool_call_example() -> None:
-    def greet(language: str, context_variables: dict[str, Any]) -> Result[str]:
+    def greet(language: str, context_variables: ContextVariables) -> Result[str]:
         user_name: str = context_variables.get("user_name", "John")
         greeting = "Hola" if language.lower() == "spanish" else "Hello"
         print(f"{greeting}, {user_name}!")
 
         return Result(
             value="Done",
-            context_variables={"language": language},
+            context_variables=ContextVariables(language=language),
         )
 
-    def speak_instructions(context_variables: dict[str, Any]) -> str:
+    def speak_instructions(context_variables: ContextVariables) -> str:
         print(f"Speak instructions: {context_variables}")
         language: str = context_variables.get("language", "English")
         return f"Speak with the user in {language} and ask them how they are doing."
@@ -69,7 +68,7 @@ async def tool_call_example() -> None:
     result = await swarm.execute(
         agent=welcome_agent,
         prompt="Hola!",
-        context_variables={"user_name": "John"},
+        context_variables=ContextVariables(user_name="John"),
     )
 
     print(result.messages)
