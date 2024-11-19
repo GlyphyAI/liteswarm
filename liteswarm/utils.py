@@ -25,7 +25,7 @@ from litellm.utils import trim_messages as litellm_trim_messages
 
 from liteswarm.exceptions import CompletionError
 from liteswarm.logging import log_verbose
-from liteswarm.types import FunctionDocstring, Instructions, Message, ResponseCost
+from liteswarm.types import ContextVariables, FunctionDocstring, Instructions, Message, ResponseCost
 
 T = TypeVar("T")
 
@@ -254,7 +254,7 @@ def function_to_json(
 
     Example:
         ```python
-        def greet(name: str, context_variables: dict[str, Any]) -> str:
+        def greet(name: str, context_variables: ContextVariables) -> str:
             \"\"\"Greet someone by name.
 
             Args:
@@ -352,7 +352,7 @@ def unwrap_callable(value: T | Callable[..., T], *args: Any, **kwargs: Any) -> T
 
 def unwrap_instructions(
     instructions: Instructions,
-    context_variables: dict[str, Any] | None = None,
+    context_variables: ContextVariables | None = None,
 ) -> str:
     """Unwrap instructions if they are a callable.
 
@@ -370,7 +370,7 @@ def unwrap_instructions(
 
     Example:
         ```python
-        def get_instructions(context_variables: dict[str, Any]) -> str:
+        def get_instructions(context_variables: ContextVariables) -> str:
             user = context_variables.get("user_name", "user")
             return f"Help {user} with their task."
 
@@ -388,7 +388,7 @@ def unwrap_instructions(
     """
     return unwrap_callable(
         instructions,
-        context_variables=context_variables or {},
+        context_variables=context_variables or ContextVariables(),
     )
 
 
