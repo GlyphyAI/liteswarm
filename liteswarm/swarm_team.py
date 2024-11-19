@@ -228,6 +228,7 @@ class Plan(BaseModel, Generic[TTask]):
 class TeamMember(BaseModel):
     """Represents a team member that can execute tasks."""
 
+    id: str
     agent: Agent
     task_types: list[str]
     metadata: dict[str, Any] = Field(default_factory=dict)
