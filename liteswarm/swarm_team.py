@@ -37,7 +37,9 @@ def create_union_type(types: list[T]) -> T:
 def generate_plan_json_schema(task_definitions: list["TaskDefinition"]) -> dict[str, Any]:
     task_schemas = [td.task_schema for td in task_definitions]
     task_schemas_union = create_union_type(task_schemas)
-    return Plan[task_schemas_union].model_json_schema()  # type: ignore [valid-type]
+    plan_schema = Plan[task_schemas_union].create(model_name=Plan.__name__)  # type: ignore [valid-type]
+
+    return plan_schema.model_json_schema()
 
 
 def get_output_schema_type(output_schema: "TaskOutput") -> type[BaseModel]:
@@ -201,6 +203,14 @@ class Plan(BaseModel, Generic[TTask]):
     tasks: list[TTask]
     status: PlanStatus = PlanStatus.DRAFT
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def create(cls, model_name: str | None = None, **kwargs: Any) -> type[Self]:
+        return create_model(
+            model_name or cls.__name__,
+            __base__=cls,
+            **kwargs,
+        )
 
     def validate_dependencies(self) -> list[str]:
         """Validate that all task dependencies exist."""
