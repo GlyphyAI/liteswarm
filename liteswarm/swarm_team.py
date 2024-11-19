@@ -40,6 +40,21 @@ def generate_plan_json_schema(task_definitions: list["TaskDefinition"]) -> dict[
     return Plan[task_schemas_union].model_json_schema()  # type: ignore [valid-type]
 
 
+def get_output_schema_type(output_schema: "TaskOutput") -> type[BaseModel]:
+    """Generalizes the unpacking of TaskOutput objects to return their JSON schema."""
+    if isinstance(output_schema, type) and issubclass(output_schema, BaseModel):
+        return output_schema
+
+    try:
+        dummy_output = output_schema("", {})  # type: ignore [call-arg]
+        if isinstance(dummy_output, BaseModel):
+            return dummy_output.__class__
+        else:
+            raise TypeError("Callable did not return a BaseModel instance.")
+    except Exception as e:
+        raise TypeError(f"Error invoking callable TaskOutput: {e}") from e
+
+
 def dedent_prompt(prompt: str) -> str:
     return dedent(prompt).strip()
 
