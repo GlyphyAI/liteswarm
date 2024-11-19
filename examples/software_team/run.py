@@ -4,6 +4,7 @@ import os
 from liteswarm.logging import enable_logging
 from liteswarm.swarm import Swarm
 from liteswarm.swarm_team import SwarmTeam, dedent_prompt
+from liteswarm.types import ContextVariables
 
 from .agents import (
     create_agent_planner,
@@ -35,10 +36,10 @@ async def main() -> None:
         stream_handler=SoftwareTeamStreamHandler(),
     )
 
-    context = {
-        "platform": "mobile",
-        "framework": "flutter",
-        "project": {
+    context = ContextVariables(
+        platform="mobile",
+        framework="flutter",
+        project={
             "directories": [
                 "lib/main.dart",
             ],
@@ -49,7 +50,7 @@ async def main() -> None:
                 }
             ],
         },
-    }
+    )
 
     prompt = dedent_prompt("""
     Create a Flutter TODO list app with the following features:

@@ -10,7 +10,7 @@ from .utils import dump_json
 def build_flutter_instructions(task: FlutterTask, context: ContextVariables) -> str:
     """Build the instructions for a Flutter task."""
     project: dict[str, Any] = context.get("project", {})
-    output_format: dict[str, Any] = context.get("output_format", {})
+    output_format: dict[str, Any] = context.get_reserved("output_format", {})
 
     return dedent_prompt(f"""
     Implement the following Flutter feature:
@@ -24,13 +24,16 @@ def build_flutter_instructions(task: FlutterTask, context: ContextVariables) -> 
 
     Your response MUST follow this output format:
     {dump_json(output_format)}
+
+    Do not format the output in any other way than the output format.
+    Do not use backticks to format the output.
     """)
 
 
 def build_debug_instructions(task: DebugTask, context: ContextVariables) -> str:
     """Build the instructions for a Debug task."""
     project: dict[str, Any] = context.get("project", {})
-    output_format: dict[str, Any] = context.get("output_format", {})
+    output_format: dict[str, Any] = context.get_reserved("output_format", {})
 
     return dedent_prompt(f"""
     Debug the following issue:
@@ -51,6 +54,9 @@ def build_debug_instructions(task: DebugTask, context: ContextVariables) -> str:
 
     Your response MUST follow this output format:
     {dump_json(output_format)}
+
+    Do not format the output in any other way than the output format.
+    Do not use backticks to format the output.
     """)
 
 

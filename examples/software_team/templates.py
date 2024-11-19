@@ -3,6 +3,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from liteswarm.swarm_team import Plan, Task, dedent_prompt
+from liteswarm.types import ContextVariables
 
 from .utils import dump_json
 
@@ -30,11 +31,12 @@ class SoftwarePlanTemplate(BaseModel):
     {output_example}
 
     Do not format the output in any other way than the output format.
+    Do not use backticks to format the output.
     """)
 
-    def format_context(self, prompt: str, context: dict[str, Any]) -> str:
+    def format_context(self, prompt: str, context: ContextVariables) -> str:
         project_context: dict[str, Any] = context.get("project", {})
-        output_format: dict[str, Any] = context.get("output_format", {})
+        output_format: dict[str, Any] = context.get_reserved("output_format", {})
         output_example: Plan = Plan(
             tasks=[
                 Task(id="<id_0>", title="<title_0>", task_type="<task_type_0>"),
