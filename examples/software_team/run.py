@@ -3,7 +3,7 @@ import os
 
 from liteswarm.logging import enable_logging
 from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import SwarmTeam
+from liteswarm.swarm_team import SwarmTeam, dedent_prompt
 
 from .agents import (
     create_agent_planner,
@@ -17,7 +17,12 @@ os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 async def main() -> None:
     """Run the software team example."""
-    swarm = Swarm(stream_handler=SwarmStreamHandler())
+    swarm = Swarm(
+        stream_handler=SwarmStreamHandler(),
+        include_usage=True,
+        include_cost=True,
+    )
+
     task_definitions = create_task_definitions()
     team_members = create_team_members()
     agent_planner = create_agent_planner(swarm, task_definitions)
@@ -36,42 +41,24 @@ async def main() -> None:
         "project": {
             "directories": [
                 "lib/main.dart",
-                "lib/models",
-                "lib/models/todo.dart",
-                "lib/screens",
-                "lib/screens/todo_list.dart",
             ],
             "files": [
                 {
                     "filepath": "lib/main.dart",
-                    "content": """
-                    import 'package:flutter/material.dart';
-
-                    void main() {
-                      runApp(MyApp());
-                    }
-
-                    class MyApp extends StatelessWidget {
-                      @override
-                      Widget build(BuildContext context) {
-                        return MaterialApp(
-                          title: 'Todo App',
-                          home: Container(),
-                        );
-                      }
-                    }
-                    """,
+                    "content": "import 'package:flutter/material.dart';\n\nvoid main() {\n  runApp(const MyApp());\n}\n\nclass MyApp extends StatelessWidget {\n  const MyApp({super.key});\n\n  @override\n  Widget build(BuildContext context) {\n    return MaterialApp(\n      title: 'Flutter Demo',\n      theme: ThemeData(\n        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),\n        useMaterial3: true,\n      ),\n      home: const MyHomePage(title: 'Flutter Demo Home Page'),\n    );\n  }\n}\n\nclass MyHomePage extends StatefulWidget {\n  const MyHomePage({super.key, required this.title});\n\n  final String title;\n\n  @override\n  State<MyHomePage> createState() => _MyHomePageState();\n}\n\nclass _MyHomePageState extends State<MyHomePage> {\n  int _counter = 0;\n\n  void _incrementCounter() {\n    setState(() {\n      _counter++;\n    });\n  }\n\n  @override\n  Widget build(BuildContext context) {\n    return Scaffold(\n      appBar: AppBar(\n        backgroundColor: Theme.of(context).colorScheme.inversePrimary,\n        title: Text(widget.title),\n      ),\n      body: Center(\n        child: Column(\n          mainAxisAlignment: MainAxisAlignment.center,\n          children: <Widget>[\n            const Text(\n              'You have pushed the button this many times:',\n            ),\n            Text(\n              '$_counter',\n              style: Theme.of(context).textTheme.headlineMedium,\n            ),\n          ],\n        ),\n      ),\n      floatingActionButton: FloatingActionButton(\n        onPressed: _incrementCounter,\n        tooltip: 'Increment',\n        child: const Icon(Icons.add),\n    );\n  }\n}",
                 }
             ],
         },
     }
 
-    prompt = """Create a Flutter TODO list app with the following features:
+    prompt = dedent_prompt("""
+    Create a Flutter TODO list app with the following features:
+
     1. Add/edit/delete tasks
     2. Mark tasks as complete
     3. Local storage for persistence
     4. Clean, modern UI design
-    """
+    """)
 
     while True:
         plan_result = await team.create_plan(prompt, context=context)
@@ -103,7 +90,7 @@ async def main() -> None:
                 break
             case "2":
                 feedback = input("\nEnter your feedback: ")
-                prompt = f"{prompt}\n\nFeedback: {feedback}"
+                prompt = dedent_prompt(f"{prompt}\n\nFeedback: {feedback}")
             case "3":
                 print("Plan rejected. Exiting.")
                 return

@@ -2,7 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from liteswarm.swarm_team import Plan, Task
+from liteswarm.swarm_team import Plan, Task, dedent_prompt
 
 from .utils import dump_json
 
@@ -10,12 +10,12 @@ from .utils import dump_json
 class SoftwarePlanTemplate(BaseModel):
     """Template for software development plans."""
 
-    template: str = """
+    template: str = dedent_prompt("""
     Create a detailed development plan for the following project:
     {prompt}
 
     Project Context:
-    {context_section}
+    {project_context}
 
     The plan should:
     1. Break down the work into clear, actionable tasks
@@ -23,19 +23,19 @@ class SoftwarePlanTemplate(BaseModel):
     3. List dependencies between tasks
     4. Work within the existing project structure if provided
 
-    You MUST return the plan as a JSON object with the following schema:
-    {plan_json_schema}
+    Your response MUST follow this output format:
+    {output_format}
 
     Example output:
-    ```json
-    {plan_json_example}
-    ```
-    """
+    {output_example}
+
+    Do not format the output in any other way than the output format.
+    """)
 
     def format_context(self, prompt: str, context: dict[str, Any]) -> str:
-        project_context = context.get("project", "No project context provided")
-        plan_json_schema = dump_json(context.get("plan_json_schema", {}))
-        plan_json_example = Plan(
+        project_context: dict[str, Any] = context.get("project", {})
+        output_format: dict[str, Any] = context.get("output_format", {})
+        output_example: Plan = Plan(
             tasks=[
                 Task(id="<id_0>", title="<title_0>", task_type="<task_type_0>"),
             ]
@@ -43,7 +43,7 @@ class SoftwarePlanTemplate(BaseModel):
 
         return self.template.format(
             prompt=prompt,
-            context_section=project_context,
-            plan_json_schema=plan_json_schema,
-            plan_json_example=plan_json_example.model_dump_json(),
+            project_context=dump_json(project_context),
+            output_format=dump_json(output_format),
+            output_example=output_example.model_dump_json(),
         )

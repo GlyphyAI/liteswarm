@@ -42,8 +42,9 @@ def dump_partial_json(data: JSON) -> str:
     return orjson.dumps(data).decode()
 
 
-def dump_json(data: JSON) -> str:
-    return orjson.dumps(data).decode()
+def dump_json(data: JSON, indent: bool = False) -> str:
+    option = orjson.OPT_INDENT_2 if indent else None
+    return orjson.dumps(data, option=option).decode()
 
 
 def load_json(data: str) -> JSON:
