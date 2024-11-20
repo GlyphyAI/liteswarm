@@ -6,8 +6,8 @@
 
 from typing import Any
 
-from liteswarm.swarm_team import TaskDefinition, dedent_prompt
-from liteswarm.types import ContextVariables
+from liteswarm.types import ContextVariables, TaskDefinition
+from liteswarm.utils import dedent_prompt
 
 from .types import DebugOutput, DebugTask, FlutterOutput, FlutterTask
 from .utils import dump_json

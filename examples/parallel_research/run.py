@@ -8,10 +8,8 @@ import asyncio
 import random
 from time import sleep
 
-from litellm.types.utils import ChatCompletionDeltaToolCall
-
-from liteswarm.swarm import Swarm
-from liteswarm.types import Agent, Delta, Message, ToolCallResult
+from liteswarm.core import Swarm
+from liteswarm.types import Agent, ChatCompletionDeltaToolCall, Delta, Message, ToolCallResult
 
 
 class ConsoleStreamHandler:

@@ -8,8 +8,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from liteswarm.swarm_team import Plan, Task, dedent_prompt
-from liteswarm.types import ContextVariables
+from liteswarm.types import ContextVariables, Plan, Task
+from liteswarm.utils import dedent_prompt
 
 from .utils import dump_json
 

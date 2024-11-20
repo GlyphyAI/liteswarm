@@ -1,6 +1,13 @@
-from liteswarm.swarm import Swarm
-from liteswarm.swarm_team import AgentPlanner, TaskDefinition, TeamMember, dedent_prompt
-from liteswarm.types import Agent
+# Copyright 2024 GlyphyAI
+
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+
+from liteswarm.core import Swarm
+from liteswarm.experimental import AgentPlanner
+from liteswarm.types import Agent, TaskDefinition, TeamMember
+from liteswarm.utils import dedent_prompt
 
 from .templates import SoftwarePlanTemplate
 

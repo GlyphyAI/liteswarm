@@ -7,9 +7,9 @@
 import asyncio
 import os
 
-from liteswarm.logging import enable_logging
-from liteswarm.swarm import Swarm
+from liteswarm.core import Swarm
 from liteswarm.types import Agent, ContextVariables, Result
+from liteswarm.utils import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
