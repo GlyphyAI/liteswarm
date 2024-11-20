@@ -18,17 +18,17 @@ from liteswarm.types import JSON, ContextVariables
 from liteswarm.types.swarm import Instructions
 from liteswarm.types.swarm_team import Plan, Task, TaskDefinition, TaskOutput
 
-T = TypeVar("T")
-ExpectedType = TypeVar("ExpectedType")
-DefaultType = TypeVar("DefaultType")
+_GenericType = TypeVar("_GenericType")
+_AttributeType = TypeVar("_AttributeType")
+_AttributeDefaultType = TypeVar("_AttributeDefaultType")
 
 
 def safe_get_attr(
     obj: Any,
     attr: str,
-    expected_type: type[ExpectedType],
-    default: DefaultType = None,  # type: ignore
-) -> ExpectedType | DefaultType:
+    expected_type: type[_AttributeType],
+    default: _AttributeDefaultType = None,  # type: ignore
+) -> _AttributeType | _AttributeDefaultType:
     """Safely retrieves and validates an attribute of an object.
 
     This function attempts to access the specified attribute from the given object.
@@ -109,7 +109,11 @@ def dedent_prompt(prompt: str) -> str:
     return dedent(prompt).strip()
 
 
-def unwrap_callable(value: T | Callable[..., T], *args: Any, **kwargs: Any) -> T:
+def unwrap_callable(
+    value: _GenericType | Callable[..., _GenericType],
+    *args: Any,
+    **kwargs: Any,
+) -> _GenericType:
     """Unwrap a callable if it's wrapped in a callable.
 
     Args:
@@ -183,7 +187,7 @@ def unwrap_task_output_type(output_schema: TaskOutput) -> type[BaseModel]:
         raise TypeError(f"TaskOutput is not a callable or a BaseModel: {e}") from e
 
 
-def create_union_type(types: list[T]) -> T:
+def create_union_type(types: list[_GenericType]) -> _GenericType:
     if not types:
         raise ValueError("No types provided for Union.")
     elif len(types) == 1:

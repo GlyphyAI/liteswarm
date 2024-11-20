@@ -13,16 +13,16 @@ from litellm.exceptions import RateLimitError, ServiceUnavailableError
 from liteswarm.types.exceptions import CompletionError
 from liteswarm.utils.logging import log_verbose
 
-T = TypeVar("T")
+_RetryReturnType = TypeVar("_RetryReturnType")
 
 
 async def retry_with_exponential_backoff(
-    operation: Callable[..., Awaitable[T]],
+    operation: Callable[..., Awaitable[_RetryReturnType]],
     max_retries: int = 3,
     initial_delay: float = 1.0,
     max_delay: float = 10.0,
     backoff_factor: float = 2.0,
-) -> T:
+) -> _RetryReturnType:
     """Execute an operation with exponential backoff retry logic.
 
     Args:
