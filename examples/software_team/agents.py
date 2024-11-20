@@ -37,6 +37,9 @@ def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -
         - Assign tasks to engineers based on their specialties
         - Include clear success criteria for each task
         - Consider dependencies and optimal execution order
+
+        You MUST follow the output format specified in each task.
+        If output format is a JSON schema, you MUST return a valid JSON object.
         """),
     )
 
@@ -62,6 +65,9 @@ def create_flutter_engineer() -> Agent:
         3. Consider performance and user experience
         4. Always provide complete file contents
         5. Follow the output format specified in each task
+
+        You MUST follow the output format specified in each task.
+        If output format is a JSON schema, you MUST return a valid JSON object.
         """),
     )
 
