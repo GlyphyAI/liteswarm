@@ -22,6 +22,7 @@ from liteswarm.types.result import Result
 from liteswarm.types.swarm import (
     Agent,
     AgentResponse,
+    AgentState,
     CompletionResponse,
     ContextVariables,
     ConversationState,
@@ -790,7 +791,7 @@ class Swarm:
             for tool_call_result in tool_call_results:
                 tool_message = await self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
-                    agent.state = "stale"
+                    agent.state = AgentState.STALE
                     self._agent_queue.append(tool_message.agent)
 
                 if tool_message.context_variables:
@@ -937,7 +938,7 @@ class Swarm:
 
         if self._active_agent is None:
             self._active_agent = agent
-            self._active_agent.state = "active"
+            self._active_agent.state = AgentState.ACTIVE
 
             initial_context = await self._prepare_agent_context(
                 agent=agent,
@@ -992,7 +993,7 @@ class Swarm:
         )
 
         next_agent = self._agent_queue.popleft()
-        next_agent.state = "active"
+        next_agent.state = AgentState.ACTIVE
 
         previous_agent = self._active_agent
         self._active_agent = next_agent
