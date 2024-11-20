@@ -5,7 +5,7 @@
 # https://opensource.org/licenses/MIT.
 
 from collections.abc import Callable
-from typing import Any, Literal, Self, TypeAlias, TypeVar
+from enum import Enum
 from typing import Any, Literal, Self, TypeAlias
 
 from litellm.types.utils import (
@@ -22,11 +22,19 @@ from liteswarm.types.context import ContextVariables
 Tool: TypeAlias = Callable[..., Any]
 """A tool that can be called by an agent."""
 
-AgentState: TypeAlias = Literal["idle", "active", "stale"]
-"""The state of an agent."""
-
 Instructions: TypeAlias = str | Callable[[ContextVariables], str]
 """Agent instructions - either a string or a function that takes context variables."""
+
+
+class AgentState(str, Enum):
+    """The state of an agent."""
+
+    IDLE = "idle"
+    """The agent is idle and waiting for a task."""
+    ACTIVE = "active"
+    """The agent is actively working on a task."""
+    STALE = "stale"
+    """The agent is stale and needs to be replaced."""
 
 
 class Message(BaseModel):
@@ -119,8 +127,8 @@ class Agent(BaseModel):
     """How the agent should choose tools ("auto", "none", etc.)."""
     parallel_tool_calls: bool | None = None
     """Whether multiple tools can be called simultaneously."""
-    state: AgentState = "idle"
-    """Current state of the agent."""
+    state: AgentState = AgentState.IDLE
+    """Current state of the agent (idle, active, or stale)."""
     params: dict[str, Any] | None = Field(default_factory=dict)
     """Additional parameters for the language model."""
 
@@ -138,7 +146,7 @@ class Agent(BaseModel):
         tools: list[Tool] | None = None,
         tool_choice: str | None = None,
         parallel_tool_calls: bool | None = None,
-        state: AgentState = "idle",
+        state: AgentState = AgentState.IDLE,
         **params: Any,
     ) -> Self:
         """Create a new Agent instance with the given configuration.
