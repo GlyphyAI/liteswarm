@@ -16,6 +16,7 @@ from pydantic import BaseModel
 
 from liteswarm.types import JSON, ContextVariables
 from liteswarm.types.swarm import Instructions
+from liteswarm.types.swarm_team import Plan, Task, TaskDefinition, TaskOutput
 
 T = TypeVar("T")
 ExpectedType = TypeVar("ExpectedType")
@@ -163,3 +164,35 @@ def unwrap_instructions(
         context_variables=context_variables or ContextVariables(),
     )
 
+
+def unwrap_task_output_type(output_schema: TaskOutput) -> type[BaseModel]:
+    """Generalizes the unpacking of TaskOutput objects to return their JSON schema."""
+    if isinstance(output_schema, type):
+        if issubclass(output_schema, BaseModel):
+            return output_schema
+        else:
+            raise TypeError("TaskOutput is not a BaseModel.")
+
+    try:
+        dummy_output = output_schema("", ContextVariables())
+        if isinstance(dummy_output, BaseModel):
+            return dummy_output.__class__
+        else:
+            raise TypeError("Callable did not return a BaseModel instance.")
+    except Exception as e:
+        raise TypeError(f"TaskOutput is not a callable or a BaseModel: {e}") from e
+
+
+def create_union_type(types: list[T]) -> T:
+    if not types:
+        raise ValueError("No types provided for Union.")
+    elif len(types) == 1:
+        return types[0]
+    else:
+        return reduce(operator.or_, types)
+
+
+def create_plan_schema(task_definitions: list[TaskDefinition]) -> type[Plan[Task]]:
+    task_schemas = [td.task_schema for td in task_definitions]
+    task_schemas_union = create_union_type(task_schemas)
+    return Plan[task_schemas_union].create(model_name=Plan.__name__)  # type: ignore
