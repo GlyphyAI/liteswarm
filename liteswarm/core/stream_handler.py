@@ -7,7 +7,7 @@
 from litellm.types.utils import ChatCompletionDeltaToolCall
 from typing_extensions import Protocol
 
-from liteswarm.types import Agent, Delta, Message, ToolCallResult
+from liteswarm.types.swarm import Agent, Delta, Message, ToolCallResult
 
 
 class StreamHandler(Protocol):
