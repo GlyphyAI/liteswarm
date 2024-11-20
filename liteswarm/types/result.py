@@ -11,10 +11,11 @@ from pydantic import BaseModel, ConfigDict
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
 
-T = TypeVar("T")
+ResultValue = TypeVar("ResultValue")
+"""Type variable representing the value type in a Result."""
 
 
-class Result(BaseModel, Generic[T]):
+class Result(BaseModel, Generic[ResultValue]):
     """A generic wrapper for operation results in the agentic system.
 
     This class provides a standardized way to return results from any operation
@@ -25,7 +26,7 @@ class Result(BaseModel, Generic[T]):
     - Context variable updates
 
     Args:
-        T: The type of the value field.
+        ResultValue: The type of the value field.
 
     Example:
         ```python
@@ -43,7 +44,7 @@ class Result(BaseModel, Generic[T]):
         ```
     """
 
-    value: T | None = None
+    value: ResultValue | None = None
     """The operation's result value, if any."""
     error: Exception | None = None
     """Any error that occurred during the operation."""

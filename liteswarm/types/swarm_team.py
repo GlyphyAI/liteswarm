@@ -14,8 +14,8 @@ from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
 
-TTask = TypeVar("TTask", bound="Task")
-TaskInstructions: TypeAlias = str | Callable[[TTask, ContextVariables], str]
+TaskType = TypeVar("TaskType", bound="Task")
+TaskInstructions: TypeAlias = str | Callable[[TaskType, ContextVariables], str]
 TaskOutput: TypeAlias = type[BaseModel] | Callable[[str, ContextVariables], BaseModel]
 
 
@@ -124,10 +124,10 @@ class TaskDefinition(BaseModel):
         return self
 
 
-class Plan(BaseModel, Generic[TTask]):
+class Plan(BaseModel, Generic[TaskType]):
     """Base class for development plans."""
 
-    tasks: list[TTask]
+    tasks: list[TaskType]
     status: PlanStatus = PlanStatus.DRAFT
     metadata: dict[str, Any] = Field(default_factory=dict)
 
@@ -151,7 +151,7 @@ class Plan(BaseModel, Generic[TTask]):
 
         return errors
 
-    def get_next_tasks(self) -> list[TTask]:
+    def get_next_tasks(self) -> list[TaskType]:
         """Get tasks that are ready to be executed (all dependencies completed)."""
         completed_tasks = {task.id for task in self.tasks if task.status == TaskStatus.COMPLETED}
         return [
