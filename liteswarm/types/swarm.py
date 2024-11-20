@@ -6,6 +6,7 @@
 
 from collections.abc import Callable
 from typing import Any, Literal, Self, TypeAlias, TypeVar
+from typing import Any, Literal, Self, TypeAlias
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
@@ -17,9 +18,6 @@ from litellm.types.utils import Delta as LiteDelta
 from pydantic import BaseModel, ConfigDict, Field
 
 from liteswarm.types.context import ContextVariables
-
-T = TypeVar("T")
-"""Generic type placeholder."""
 
 Tool: TypeAlias = Callable[..., Any]
 """A tool that can be called by an agent."""
