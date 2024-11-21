@@ -202,10 +202,10 @@ class AgentPlanner(PlanningAgent):
         - Has specialized planning instructions
         - Focuses on task breakdown and dependencies
         """
-        return Agent.create(
+        return Agent(
             id="agent-planner",
-            model="gpt-4o",
             instructions=AGENT_PLANNER_INSTRUCTIONS,
+            llm=LLMConfig(model="gpt-4o"),
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
