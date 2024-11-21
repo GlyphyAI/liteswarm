@@ -14,6 +14,7 @@ from liteswarm.types.exceptions import CompletionError
 from liteswarm.utils.logging import log_verbose
 
 _RetryReturnType = TypeVar("_RetryReturnType")
+"""Type variable representing the return type of the operation being retried."""
 
 
 async def retry_with_exponential_backoff(
