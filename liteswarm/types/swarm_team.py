@@ -7,7 +7,7 @@
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Generic, Self, TypeAlias, TypeVar
+from typing import Any, Self, TypeAlias, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -16,10 +16,7 @@ from liteswarm.types.swarm import Agent
 from liteswarm.utils.misc import change_field_type
 
 TaskType = TypeVar("TaskType", bound="Task")
-"""Type variable representing a Task or its subclass.
-
-Used for generic type hints that work with both base Task and custom task types.
-"""
+"""Type variable representing a Task or its subclass."""
 
 TaskInstructions: TypeAlias = str | Callable[[TaskType, ContextVariables], str]
 """Instructions for executing a task.
@@ -257,7 +254,7 @@ class TaskDefinition(BaseModel):
         return self
 
 
-class Plan(BaseModel, Generic[TaskType]):
+class Plan(BaseModel):
     """A plan consisting of ordered tasks with dependencies.
 
     Plans organize tasks into a workflow, tracking:
@@ -292,7 +289,7 @@ class Plan(BaseModel, Generic[TaskType]):
     ```
     """
 
-    tasks: list[TaskType]
+    tasks: list[Task]
     """List of tasks that make up this plan"""
 
     status: PlanStatus = PlanStatus.DRAFT
@@ -305,14 +302,6 @@ class Plan(BaseModel, Generic[TaskType]):
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
     )
-
-    @classmethod
-    def create(cls, model_name: str | None = None, **kwargs: Any) -> type[Self]:
-        return create_model(
-            model_name or cls.__name__,
-            __base__=cls,
-            **kwargs,
-        )
 
     def validate_dependencies(self) -> list[str]:
         """Validate that all task dependencies exist.
@@ -330,7 +319,7 @@ class Plan(BaseModel, Generic[TaskType]):
 
         return errors
 
-    def get_next_tasks(self) -> list[TaskType]:
+    def get_next_tasks(self) -> list[Task]:
         """Get tasks that are ready to be executed (all dependencies completed).
 
         Returns:
