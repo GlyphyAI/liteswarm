@@ -95,12 +95,14 @@ class Swarm:
         )
 
         # Create an agent with math tools
-        agent = Agent.create(
+        agent = Agent(
             id="math",
-            model="gpt-4o",
             instructions=agent_instructions,
-            tools=[add, multiply],
-            tool_choice="auto"
+            llm=LLMConfig(
+                model="gpt-4o",
+                tools=[add, multiply],
+                tool_choice="auto",
+            ),
         )
 
         # Initialize swarm and run calculation
@@ -1047,11 +1049,10 @@ class Swarm:
                 print(f"User {context_variables['user_name']} adding {a} + {b}")
                 return a + b
 
-            agent = Agent.create(
+            agent = Agent(
                 id="math",
-                model="gpt-4",
                 instructions=get_instructions,
-                tools=[add]
+                llm=LLMConfig(model="gpt-4o", tools=[add])
             )
 
             async for response in swarm.stream(
@@ -1162,10 +1163,10 @@ class Swarm:
             def get_instructions(context: ContextVariables) -> str:
                 return f"Help {context['user_name']} with their task."
 
-            agent = Agent.create(
+            agent = Agent(
                 id="helper",
-                model="gpt-4",
-                instructions=get_instructions
+                instructions=get_instructions,
+                llm=LLMConfig(model="gpt-4o")
             )
 
             result = await swarm.execute(
