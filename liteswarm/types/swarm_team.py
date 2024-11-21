@@ -9,10 +9,11 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Generic, Self, TypeAlias, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, create_model, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
+from liteswarm.utils.misc import change_field_type
 
 TaskType = TypeVar("TaskType", bound="Task")
 """Type variable representing a Task or its subclass.
@@ -154,15 +155,6 @@ class Task(BaseModel):
         use_attribute_docstrings=True,
     )
 
-    @classmethod
-    def create(cls, model_name: str | None = None, **kwargs: Any) -> type[Self]:
-        """Create a new Task model with additional fields."""
-        return create_model(
-            model_name or cls.__name__,
-            __base__=cls,
-            **kwargs,
-        )
-
 
 class TaskDefinition(BaseModel):
     """Definition of a task type, including how to create tasks of this type.
@@ -230,13 +222,12 @@ class TaskDefinition(BaseModel):
         Returns:
             The created `TaskDefinition` instance.
         """
-        task_type_field = Field(
+        task_schema = change_field_type(
+            model_type=task_schema,
+            field_name="task_type",
+            new_type=str,
+            new_model_name=task_schema.__name__,
             default=task_type,
-            description="Type of the task. USE_DEFAULT: Do not modify, use default value.",
-        )
-
-        task_schema = task_schema.create(
-            task_type=(str, task_type_field),
         )
 
         return cls(
@@ -255,8 +246,12 @@ class TaskDefinition(BaseModel):
         """
         task_type = self.task_schema.model_fields.get("task_type")
         if not task_type or task_type.default != self.task_type:
-            self.task_schema = self.task_schema.create(
-                task_type=(str, Field(default=self.task_type)),
+            self.task_schema = change_field_type(
+                model_type=self.task_schema,
+                field_name="task_type",
+                new_type=str,
+                new_model_name=self.task_schema.__name__,
+                default=self.task_type,
             )
 
         return self
