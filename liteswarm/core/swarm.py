@@ -1,8 +1,13 @@
+# Copyright 2024 GlyphyAI
+
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+
 import asyncio
 import copy
 from collections import deque
 from collections.abc import AsyncGenerator
-from typing import Any
 
 import litellm
 import orjson
@@ -10,39 +15,33 @@ from litellm import CustomStreamWrapper, acompletion
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 
-from liteswarm.exceptions import CompletionError, ContextLengthError
-from liteswarm.logging import log_verbose
-from liteswarm.stream_handler import LiteStreamHandler, StreamHandler
-from liteswarm.summarizer import LiteSummarizer, Summarizer
-from liteswarm.types import (
+from liteswarm.core.stream_handler import LiteStreamHandler, StreamHandler
+from liteswarm.core.summarizer import LiteSummarizer, Summarizer
+from liteswarm.types.exceptions import CompletionError, ContextLengthError
+from liteswarm.types.result import Result
+from liteswarm.types.swarm import (
     Agent,
     AgentResponse,
+    AgentState,
     CompletionResponse,
     ContextVariables,
     ConversationState,
     Delta,
     Message,
     ResponseCost,
-    Result,
     ToolCallAgentResult,
     ToolCallFailureResult,
     ToolCallMessageResult,
     ToolCallResult,
     ToolMessage,
 )
-from liteswarm.utils import (
-    calculate_response_cost,
-    combine_response_cost,
-    combine_usage,
-    dump_messages,
-    function_has_parameter,
-    function_to_json,
-    history_exceeds_token_limit,
-    retry_with_exponential_backoff,
-    safe_get_attr,
-    trim_messages,
-    unwrap_instructions,
-)
+from liteswarm.utils.function import function_has_parameter, function_to_json
+from liteswarm.utils.logging import log_verbose
+from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
+from liteswarm.utils.misc import safe_get_attr
+from liteswarm.utils.retry import retry_with_exponential_backoff
+from liteswarm.utils.unwrap import unwrap_instructions
+from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
 
 litellm.modify_params = True
 
@@ -96,12 +95,14 @@ class Swarm:
         )
 
         # Create an agent with math tools
-        agent = Agent.create(
+        agent = Agent(
             id="math",
-            model="gpt-4o",
             instructions=agent_instructions,
-            tools=[add, multiply],
-            tool_choice="auto"
+            llm=LLMConfig(
+                model="gpt-4o",
+                tools=[add, multiply],
+                tool_choice="auto",
+            ),
         )
 
         # Initialize swarm and run calculation
@@ -164,7 +165,7 @@ class Swarm:
         self._agent_queue: deque[Agent] = deque()
         self._full_history: list[Message] = []
         self._working_history: list[Message] = []
-        self._context_variables: dict[str, Any] = {}
+        self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
         self.stream_handler = stream_handler or LiteStreamHandler()
@@ -206,8 +207,9 @@ class Swarm:
         Returns:
             ToolCallResult indicating success or failure of the tool execution
         """
+        tool_call_result: ToolCallResult
         function_name = tool_call.function.name
-        function_tools_map = {tool.__name__: tool for tool in agent.tools}
+        function_tools_map = {tool.__name__: tool for tool in agent.llm.tools or []}
 
         if function_name not in function_tools_map:
             return ToolCallFailureResult(
@@ -225,7 +227,7 @@ class Swarm:
 
             match function_tool(**args):
                 case Agent() as agent:
-                    return ToolCallAgentResult(
+                    tool_call_result = ToolCallAgentResult(
                         tool_call=tool_call,
                         agent=agent,
                         message=Message(
@@ -238,9 +240,14 @@ class Swarm:
                 case Result() as result:
                     content = orjson.dumps(result.value).decode() if result.value else None
 
-                    if result.agent:
+                    if result.error:
+                        tool_call_result = ToolCallFailureResult(
+                            tool_call=tool_call,
+                            error=result.error,
+                        )
+                    elif result.agent:
                         content = content or f"Switched to agent {result.agent.id}"
-                        return ToolCallAgentResult(
+                        tool_call_result = ToolCallAgentResult(
                             tool_call=tool_call,
                             agent=result.agent,
                             message=Message(
@@ -250,19 +257,19 @@ class Swarm:
                             ),
                             context_variables=result.context_variables,
                         )
-
-                    return ToolCallMessageResult(
-                        tool_call=tool_call,
-                        message=Message(
-                            role="tool",
-                            content=content or "",
-                            tool_call_id=tool_call.id,
-                        ),
-                        context_variables=result.context_variables,
-                    )
+                    else:
+                        tool_call_result = ToolCallMessageResult(
+                            tool_call=tool_call,
+                            message=Message(
+                                role="tool",
+                                content=content or "",
+                                tool_call_id=tool_call.id,
+                            ),
+                            context_variables=result.context_variables,
+                        )
 
                 case _ as content:
-                    return ToolCallMessageResult(
+                    tool_call_result = ToolCallMessageResult(
                         tool_call=tool_call,
                         message=Message(
                             role="tool",
@@ -273,7 +280,9 @@ class Swarm:
 
         except Exception as e:
             await self.stream_handler.on_error(e, agent)
-            return ToolCallFailureResult(tool_call=tool_call, error=e)
+            tool_call_result = ToolCallFailureResult(tool_call=tool_call, error=e)
+
+        return tool_call_result
 
     async def _process_tool_calls(
         self,
@@ -406,9 +415,9 @@ class Swarm:
             ValueError: If agent parameters are invalid
             TypeError: If response is not of expected type
         """
-        dict_messages = dump_messages(messages)
-        tools = [function_to_json(tool) for tool in agent.tools] if agent.tools else None
+        tools = [function_to_json(tool) for tool in agent.llm.tools] if agent.llm.tools else None
         stream_options = {"include_usage": True} if self.include_usage else None
+        dict_messages = dump_messages(messages)
 
         log_verbose(
             f"Sending messages to agent [{agent.id}]: {dict_messages}",
@@ -416,16 +425,14 @@ class Swarm:
         )
 
         completion_kwargs = {
-            "model": agent.model,
             "messages": dict_messages,
             "tools": tools,
-            "tool_choice": agent.tool_choice,
-            "parallel_tool_calls": agent.parallel_tool_calls,
             "stream": True,
             "stream_options": stream_options,
         }
 
-        agent_kwargs = agent.params or {}
+        agent_kwargs = agent.llm.model_dump() or {}
+        agent_kwargs.update(agent_kwargs.pop("litellm_kwargs") or {})
         for key, value in agent_kwargs.items():
             if key not in completion_kwargs:
                 completion_kwargs[key] = value
@@ -497,7 +504,7 @@ class Swarm:
         """
         accumulated_content = ""
         continuation_count = 0
-        current_stream = await self._get_initial_stream(
+        current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
             agent=agent,
             agent_messages=agent_messages,
             context_variables=context_variables,
@@ -616,7 +623,7 @@ class Swarm:
 
         if usage and self.include_cost:
             response_cost = calculate_response_cost(
-                model=agent.model,
+                model=agent.llm.model,
                 usage=usage,
             )
 
@@ -785,14 +792,14 @@ class Swarm:
             for tool_call_result in tool_call_results:
                 tool_message = await self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
-                    agent.state = "stale"
+                    agent.state = AgentState.STALE
                     self._agent_queue.append(tool_message.agent)
 
                 if tool_message.context_variables:
-                    self._context_variables = {
+                    self._context_variables = ContextVariables(
                         **self._context_variables,
                         **tool_message.context_variables,
-                    }
+                    )
 
                 messages.append(tool_message.message)
 
@@ -861,8 +868,8 @@ class Swarm:
         """
         if self.summarizer.needs_summarization(self._working_history):
             self._working_history = await self.summarizer.summarize_history(self._full_history)
-        elif history_exceeds_token_limit(self._working_history, agent.model):
-            self._working_history = trim_messages(self._full_history, agent.model)
+        elif history_exceeds_token_limit(self._working_history, agent.llm.model):
+            self._working_history = trim_messages(self._full_history, agent.llm.model)
 
     async def _retry_completion_with_trimmed_history(
         self,
@@ -911,7 +918,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
     ) -> None:
         """Initialize the conversation state.
 
@@ -928,11 +935,11 @@ class Swarm:
             self._full_history = copy.deepcopy(messages)
             await self._update_working_history(agent)
 
-        self._context_variables = context_variables or {}
+        self._context_variables = context_variables or ContextVariables()
 
         if self._active_agent is None:
             self._active_agent = agent
-            self._active_agent.state = "active"
+            self._active_agent.state = AgentState.ACTIVE
 
             initial_context = await self._prepare_agent_context(
                 agent=agent,
@@ -953,7 +960,7 @@ class Swarm:
         self,
         switch_count: int,
         prompt: str | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
     ) -> bool:
         """Switch to the next agent in the queue.
 
@@ -987,7 +994,7 @@ class Swarm:
         )
 
         next_agent = self._agent_queue.popleft()
-        next_agent.state = "active"
+        next_agent.state = AgentState.ACTIVE
 
         previous_agent = self._active_agent
         self._active_agent = next_agent
@@ -1010,7 +1017,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
         """Stream agent responses and manage the conversation flow.
@@ -1035,18 +1042,17 @@ class Swarm:
 
         Example:
             ```python
-            def get_instructions(context: dict[str, Any]) -> str:
+            def get_instructions(context: ContextVariables) -> str:
                 return f"Help {context['user_name']} with math."
 
-            def add(a: float, b: float, context_variables: dict[str, Any]) -> float:
+            def add(a: float, b: float, context_variables: ContextVariables) -> float:
                 print(f"User {context_variables['user_name']} adding {a} + {b}")
                 return a + b
 
-            agent = Agent.create(
+            agent = Agent(
                 id="math",
-                model="gpt-4",
                 instructions=get_instructions,
-                tools=[add]
+                llm=LLMConfig(model="gpt-4o", tools=[add])
             )
 
             async for response in swarm.stream(
@@ -1092,7 +1098,7 @@ class Swarm:
                     context_variables=self._context_variables,
                 ):
                     yield agent_response
-                    last_content = agent_response.content
+                    last_content = agent_response.content or ""
                     last_tool_calls = agent_response.tool_calls
 
                 new_messages = await self._process_assistant_response(
@@ -1128,7 +1134,7 @@ class Swarm:
         agent: Agent,
         prompt: str,
         messages: list[Message] | None = None,
-        context_variables: dict[str, Any] | None = None,
+        context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> ConversationState:
         """Execute the agent's task and return the final conversation state.
@@ -1154,13 +1160,13 @@ class Swarm:
 
         Example:
             ```python
-            def get_instructions(context: dict[str, Any]) -> str:
+            def get_instructions(context: ContextVariables) -> str:
                 return f"Help {context['user_name']} with their task."
 
-            agent = Agent.create(
+            agent = Agent(
                 id="helper",
-                model="gpt-4",
-                instructions=get_instructions
+                instructions=get_instructions,
+                llm=LLMConfig(model="gpt-4o")
             )
 
             result = await swarm.execute(

@@ -1,9 +1,16 @@
+# Copyright 2024 GlyphyAI
+
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+
 import logging
 import os
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from datetime import datetime
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -76,7 +83,7 @@ def get_log_level(default: LogLevel = "INFO") -> int:
     """
     level_name = os.getenv("LITESWARM_LOG_LEVEL", default).upper()
     if level_name in LEVEL_MAP:
-        return LEVEL_MAP[level_name]
+        return LEVEL_MAP[cast(LogLevel, level_name)]
 
     return LEVEL_MAP[default]
 
@@ -97,7 +104,7 @@ def get_verbose_level(default: LogLevel = "INFO") -> LogLevel | None:
         return default
 
     if verbose in LEVEL_MAP:
-        return verbose
+        return cast(LogLevel, verbose)
 
     return None
 
@@ -131,6 +138,24 @@ def enable_logging(default_level: LogLevel = "INFO") -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(FancyFormatter())
     verbose_logger.addHandler(handler)
+
+
+@contextmanager
+def disable_logging() -> Generator[None, None, None]:
+    """Disable logging for the duration of the context manager.
+
+    Example:
+        ```python
+        with disable_logging():
+            logging.info("This will not be printed")
+
+        logging.info("This will be printed")
+        ```
+    """
+    old_level = logging.root.getEffectiveLevel()
+    logging.root.setLevel(logging.CRITICAL + 1)
+    yield
+    logging.root.setLevel(old_level)
 
 
 def log_verbose(

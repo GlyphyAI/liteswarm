@@ -1,3 +1,9 @@
+# Copyright 2024 GlyphyAI
+
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+
 import asyncio
 from collections.abc import Sequence
 from typing import Protocol
@@ -5,9 +11,9 @@ from typing import Protocol
 from litellm import acompletion
 from litellm.types.utils import Choices, ModelResponse
 
-from liteswarm.logging import log_verbose
-from liteswarm.types import Message
-from liteswarm.utils import filter_tool_call_pairs
+from liteswarm.types.swarm import Message
+from liteswarm.utils.logging import log_verbose
+from liteswarm.utils.messages import filter_tool_call_pairs
 
 GroupedMessages = tuple[list[Message], list[Message]]
 
