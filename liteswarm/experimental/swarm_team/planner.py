@@ -4,13 +4,15 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+import operator
+from functools import reduce
 from typing import Protocol
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
 from liteswarm.types.swarm import Agent, ContextVariables
-from liteswarm.types.swarm_team import Plan, Task, TaskDefinition
-from liteswarm.utils.misc import create_plan_schema, extract_json
+from liteswarm.types.swarm_team import Plan, TaskDefinition
+from liteswarm.utils.misc import change_field_type, extract_json
 
 
 class PromptTemplate(Protocol):
@@ -34,7 +36,7 @@ class PlanningAgent(Protocol):
         prompt: str,
         context: ContextVariables,
         feedback: str | None = None,
-    ) -> Result[Plan[Task]]:
+    ) -> Result[Plan]:
         """Create a plan from the given prompt and context."""
         ...
 
@@ -59,7 +61,7 @@ class AgentPlanner(PlanningAgent):
         prompt: str,
         context: ContextVariables,
         feedback: str | None = None,
-    ) -> Result[Plan[Task]]:
+    ) -> Result[Plan]:
         """Create a plan using the configured agent."""
         if feedback:
             full_prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
@@ -67,9 +69,16 @@ class AgentPlanner(PlanningAgent):
             full_prompt = prompt
 
         task_definitions = list(self.task_definitions.values())
-        plan_schema = create_plan_schema(task_definitions)
-        output_format = plan_schema.model_json_schema()
+        task_schemas = reduce(operator.or_, [td.task_schema for td in task_definitions])
+        plan_schema_name = Plan.__name__
+        plan_schema = change_field_type(
+            model_type=Plan,
+            field_name="tasks",
+            new_type=list[task_schemas],  # type: ignore [valid-type]
+            new_model_name=plan_schema_name,
+        )
 
+        output_format = plan_schema.model_json_schema()
         context = ContextVariables(**context)
         context.set_reserved("output_format", output_format)
         formatted_prompt = self.template.format_context(full_prompt, context)
