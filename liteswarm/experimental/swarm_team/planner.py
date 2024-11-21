@@ -11,6 +11,7 @@ from typing import Protocol, TypeAlias
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
+from liteswarm.types.llm import LLMConfig
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
 from liteswarm.utils.misc import change_field_type, extract_json
@@ -152,10 +153,10 @@ class AgentPlanner(PlanningAgent):
     # Create planner with custom template
     planner = AgentPlanner(
         swarm=swarm,
-        agent=Agent.create(
+        agent=Agent(
             id="planner",
-            model="gpt-4",
-            instructions="You are a technical project planner..."
+            instructions="You are a technical project planner...",
+            llm=LLMConfig(model="gpt-4o")
         ),
         template=CustomTemplate(),
         task_definitions=[review_def, test_def]

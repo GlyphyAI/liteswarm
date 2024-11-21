@@ -66,20 +66,20 @@ class SwarmTeam:
     # Create team members
     reviewer = TeamMember(
         id="reviewer-1",
-        agent=Agent.create(
+        agent=Agent(
             id="review-gpt",
-            model="gpt-4o",
-            instructions="You are a code reviewer..."
+            instructions="You are a code reviewer...",
+            llm=LLMConfig(model="gpt-4o")
         ),
         task_types=["code_review"]
     )
 
     tester = TeamMember(
         id="tester-1",
-        agent=Agent.create(
+        agent=Agent(
             id="test-gpt",
-            model="gpt-4o",
-            instructions="You are a testing expert..."
+            instructions="You are a testing expert...",
+            llm=LLMConfig(model="gpt-4o")
         ),
         task_types=["testing"]
     )
