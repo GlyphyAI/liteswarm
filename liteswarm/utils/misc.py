@@ -169,55 +169,68 @@ def change_field_type(  # noqa: PLR0913
     default: Any = PydanticUndefined,
     **kwargs: Unpack[_FromFieldInfoInputs],
 ) -> type[_PydanticModel]:
-    """Create a new Pydantic model with a modified field type.
+    """Create a new Pydantic model with a modified or added field.
 
-    Creates a copy of the original model with one field's type changed,
-    preserving all other fields and model configuration. Useful for:
-    - Dynamically modifying model schemas
-    - Creating variants of existing models
-    - Adjusting field validation rules
+    Creates a copy of the original model with one field modified or added,
+    preserving all other fields and model configuration. The new model can:
+    - Modify existing field types
+    - Add new fields
+    - Change base model type
+    - Customize field validation
+
+    Args:
+        model_type: The original Pydantic model to modify
+        field_name: Name of the field to modify or add
+        new_type: New type for the field
+        new_model_type: Optional new base model type (defaults to original model)
+        new_model_name: Optional name for the new model (defaults to "Updated" + original name)
+        default: Optional default value for the field
+        **kwargs: Additional field configuration (validation rules, descriptions, etc.)
+
+    Returns:
+        A new Pydantic model class with the modified or added field
+
+    Raises:
+        TypeError: If the default value doesn't match the new field type
+        ValidationError: If default value validation fails when validate_default=True
 
     Example:
     ```python
     class User(BaseModel):
         id: int
         name: str
-        age: int
 
-    # Change age to float and add validation
-    UserFloat = change_field_type(
+    # Modify existing field
+    UserStr = change_field_type(
+        model_type=User,
+        field_name="id",
+        new_type=str,
+        new_model_name="UserStr"
+    )
+
+    # Add new field
+    UserWithAge = change_field_type(
         model_type=User,
         field_name="age",
-        new_type=float,
-        new_model_name="UserFloat",
-        default=0.0,
-        ge=0.0,  # Field validation: greater or equal to 0
+        new_type=int,
+        default=0,
+        ge=0,
         description="User's age in years"
     )
 
-    # Original model still uses int
-    user1 = User(id=1, name="Alice", age=30)
+    # Change base model and add validation
+    class ValidatedModel(BaseModel):
+        model_config = ConfigDict(validate_default=True)
 
-    # New model uses float with validation
-    user2 = UserFloat(id=2, name="Bob", age=30.5)
-
-    # Validation error if age < 0
-    user3 = UserFloat(id=3, name="Charlie", age=-1.0)  # Raises ValidationError
+    UserValidated = change_field_type(
+        model_type=User,
+        field_name="name",
+        new_type=str,
+        new_model_type=ValidatedModel,
+        min_length=1,
+        max_length=100
+    )
     ```
-
-    Args:
-        model_type: The original Pydantic model to modify
-        field_name: Name of the field to change
-        new_type: New type for the field
-        new_model_name: Optional name for the new model (defaults to "Updated" + original name)
-        default: Optional default value for the field
-        **kwargs: Additional field configuration (validation rules, descriptions, etc.)
-
-    Returns:
-        A new Pydantic model class with the modified field
-
-    Raises:
-        TypeError: If the default value doesn't match the new field type
     """
     fields: dict[str, Any] = {}
     if field := model_type.model_fields.get(field_name):
