@@ -5,8 +5,9 @@
 # https://opensource.org/licenses/MIT.
 
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Protocol
+from typing import Protocol, TypeAlias
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
@@ -14,22 +15,77 @@ from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
 from liteswarm.utils.misc import change_field_type, dedent_prompt, extract_json
 
+PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
+"""Template for formatting prompts with context.
 
-class PromptTemplate(Protocol):
-    """Protocol for prompt templates."""
+Can be either:
+- A static template string with placeholders
+- A function that dynamically generates prompts
 
-    @property
-    def template(self) -> str:
-        """Return the template string."""
-        ...
+Example:
+```python
+# Static template
+template: PromptTemplate = \"\"\"
+Process this request: {prompt}
+Using these tools: {context}
+\"\"\"
 
-    def format_context(self, prompt: str, context: ContextVariables) -> str:
-        """Format the prompt with the given context."""
-        ...
+# Dynamic template
+def generate_prompt(prompt: str, context: ContextVariables) -> str:
+    return dedent_prompt(f\"\"\"
+    Process this request: {prompt}
+
+    Available tools:
+    {format_tools(context.get("tools", []))}
+
+    Team context:
+    - Project: {context.get("project_name")}
+    - Priority: {context.get("priority")}
+    \"\"\")
+
+# Usage with static template
+formatted = template.format(
+    prompt="Analyze data",
+    context=ContextVariables(available_tools=["tool1", "tool2"])
+)
+
+# Or with dynamic template
+formatted = generate_prompt(
+    prompt="Analyze data",
+    context=ContextVariables(
+        tools=["tool1", "tool2"],
+        project_name="Analytics",
+        priority="high"
+    )
+)
+```
+"""
 
 
 class PlanningAgent(Protocol):
-    """Protocol for planning agents that create task plans."""
+    """Protocol for planning agents that create task plans.
+
+    Planning agents analyze prompts and create structured plans by:
+    1. Breaking down work into tasks
+    2. Setting appropriate dependencies
+    3. Validating against task definitions
+    4. Considering team capabilities
+
+    Example:
+    ```python
+    class CustomPlanner(PlanningAgent):
+        async def create_plan(
+            self,
+            prompt: str,
+            context: ContextVariables,
+            feedback: str | None = None
+        ) -> Result[Plan]:
+            # Build LLM instructions based on prompt and context
+            # Retrieve & parse plan response
+            # Validate plan & dependencies
+            return Result(value=plan)
+    ```
+    """
 
     async def create_plan(
         self,
@@ -37,12 +93,66 @@ class PlanningAgent(Protocol):
         context: ContextVariables,
         feedback: str | None = None,
     ) -> Result[Plan]:
-        """Create a plan from the given prompt and context."""
+        """Create a plan from the given prompt and context.
+
+        Args:
+            prompt: Description of what needs to be done
+            context: Variables providing additional context
+            feedback: Optional feedback on previous plan attempts
+
+        Returns:
+            Result containing either:
+            - Successful Plan instance
+            - Error if plan creation fails
+        """
         ...
 
 
 class AgentPlanner(PlanningAgent):
-    """Default implementation of the planning strategy."""
+    """Default implementation of the planning strategy using an LLM agent.
+
+    Creates plans by:
+    1. Using an LLM agent to analyze requirements
+    2. Generating JSON-structured plans
+    3. Validating against task definitions
+    4. Ensuring valid task dependencies
+
+    Example:
+    ```python
+    # Create task definitions
+    review_def = TaskDefinition.create(
+        task_type="code_review",
+        task_schema=CodeReviewTask,
+        task_instructions="Review {task.pr_url}..."
+    )
+
+    test_def = TaskDefinition.create(
+        task_type="testing",
+        task_schema=TestingTask,
+        task_instructions="Test {task.test_path}..."
+    )
+
+    # Create planner with custom template
+    planner = AgentPlanner(
+        swarm=swarm,
+        agent=Agent.create(
+            id="planner",
+            model="gpt-4",
+            instructions="You are a technical project planner..."
+        ),
+        template=CustomTemplate(),
+        task_definitions=[review_def, test_def]
+    )
+
+    # Create plan
+    result = await planner.create_plan(
+        prompt="Review and test PR #123",
+        context=ContextVariables(
+            pr_url="https://github.com/org/repo/pull/123"
+        )
+    )
+    ```
+    """
 
     def __init__(
         self,
@@ -51,13 +161,30 @@ class AgentPlanner(PlanningAgent):
         template: PromptTemplate | None = None,
         task_definitions: list[TaskDefinition] | None = None,
     ) -> None:
+        """Initialize a new AgentPlanner instance.
+
+        Args:
+            swarm: Swarm instance for agent interactions
+            agent: Optional custom planning agent
+            template: Optional custom prompt template
+            task_definitions: List of available task types
+        """
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
         self.template = template or self._default_planning_prompt_template()
         self.task_definitions = {td.task_type: td for td in task_definitions or []}
 
     def _default_planning_agent(self) -> Agent:
-        """Create a default agent if none is provided."""
+        """Create a default agent if none is provided.
+
+        Returns:
+            Agent configured for planning tasks
+
+        The default agent:
+        - Uses gpt-4o for complex planning
+        - Has specialized planning instructions
+        - Focuses on task breakdown and dependencies
+        """
         return Agent.create(
             id="agent-planner",
             model="gpt-4o",
@@ -80,17 +207,12 @@ class AgentPlanner(PlanningAgent):
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
-        """Create a default prompt template."""
+        """Create a default prompt template.
 
-        class DefaultPromptTemplate:
-            @property
-            def template(self) -> str:
-                return "{prompt}"
-
-            def format_context(self, prompt: str, context: ContextVariables) -> str:
-                return self.template.format(prompt=prompt)
-
-        return DefaultPromptTemplate()
+        Returns:
+            Simple template that uses raw prompt
+        """
+        return "{prompt}"
 
     async def create_plan(
         self,
@@ -98,7 +220,37 @@ class AgentPlanner(PlanningAgent):
         context: ContextVariables,
         feedback: str | None = None,
     ) -> Result[Plan]:
-        """Create a plan using the configured agent."""
+        """Create a plan using the configured agent.
+
+        Args:
+            prompt: Description of what needs to be done
+            context: Context variables for planning
+            feedback: Optional feedback on previous attempts
+
+        Returns:
+            Result containing either:
+            - Successful Plan instance
+            - Error if validation fails
+
+        Example:
+        ```python
+        result = await planner.create_plan(
+            prompt='''
+            Review PR #123 which updates authentication:
+            1. Security review of auth changes
+            2. Test the new auth flow
+            ''',
+            context=ContextVariables(
+                pr_url="https://github.com/org/repo/pull/123",
+                team_capabilities={
+                    "security_review": ["security-bot"],
+                    "testing": ["test-bot"]
+                }
+            ),
+            feedback="Please add input validation tests"
+        )
+        ```
+        """
         if feedback:
             full_prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
         else:
@@ -117,7 +269,11 @@ class AgentPlanner(PlanningAgent):
         output_format = plan_schema.model_json_schema()
         context = ContextVariables(**context)
         context.set_reserved("output_format", output_format)
-        formatted_prompt = self.template.format_context(full_prompt, context)
+
+        if callable(self.template):
+            formatted_prompt = self.template(full_prompt, context)
+        else:
+            formatted_prompt = self.template.format(prompt=full_prompt, context=context)
 
         result = await self.swarm.execute(
             agent=self.agent,
