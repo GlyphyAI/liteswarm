@@ -9,16 +9,16 @@ from litellm.types.utils import ChatCompletionDeltaToolCall
 from .context import ContextVariables, ReservedContextKey
 from .misc import JSON, Number
 from .result import Result
-from .swarm import Agent, Delta, Instructions, Message, Tool, ToolCallResult, ToolMessage
+from .swarm import Agent, AgentInstructions, Delta, Message, Tool, ToolCallResult, ToolMessage
 from .swarm_team import Plan, Task, TaskDefinition, TeamMember
 
 __all__ = [
     "JSON",
     "Agent",
+    "AgentInstructions",
     "ChatCompletionDeltaToolCall",
     "ContextVariables",
     "Delta",
-    "Instructions",
     "Message",
     "Number",
     "Plan",

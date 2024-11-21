@@ -51,7 +51,7 @@ def process_data(data: dict, context_variables: ContextVariables) -> Result:
 """
 
 
-Instructions: TypeAlias = str | Callable[[ContextVariables], str]
+AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
 """Agent instructions - either a string or a function that takes context variables.
 
 Can be either:
@@ -64,12 +64,14 @@ Example:
 instructions: Instructions = "You are a helpful assistant."
 
 # Dynamic instructions
+AGENT_INSTRUCTIONS = \"\"\"
+You are helping {user_name}.
+Focus on their {interests}.
+Use {preferred_language}.
+\"\"\".strip()
+
 def generate_instructions(context: ContextVariables) -> str:
-    return f'''
-    You are helping {context['user_name']}.
-    Focus on their {context['interests']}.
-    Use {context['preferred_language']}.
-    '''
+    return AGENT_INSTRUCTIONS.format(**context)
 ```
 """
 
@@ -352,7 +354,7 @@ class Agent(BaseModel):
     model: str
     """The language model to use"""
 
-    instructions: Instructions
+    instructions: AgentInstructions
     """System prompt defining the agent's behavior. Can be string or function."""
 
     tools: list[Tool] = Field(default_factory=list)
@@ -381,7 +383,7 @@ class Agent(BaseModel):
         cls,
         id: str,
         model: str,
-        instructions: Instructions,
+        instructions: AgentInstructions,
         **kwargs: Any,
     ) -> Self:
         """Create a new Agent instance with the given configuration.
