@@ -46,10 +46,13 @@ class Result(BaseModel, Generic[ResultValue]):
 
     value: ResultValue | None = None
     """The operation's result value, if any."""
+
     error: Exception | None = None
     """Any error that occurred during the operation."""
+
     agent: Agent | None = None
     """Optional new agent to switch to."""
+
     context_variables: ContextVariables | None = None
     """Optional context variables to update."""
 
