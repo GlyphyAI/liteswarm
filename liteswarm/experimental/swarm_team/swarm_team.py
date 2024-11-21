@@ -9,11 +9,11 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from liteswarm.core.swarm import Swarm
-from liteswarm.experimental.swarm_team.planner import AgentPlanner, PlanningAgent, PromptTemplate
+from liteswarm.experimental.swarm_team.planner import AgentPlanner, PlanningAgent
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHandler
 from liteswarm.types.result import Result
-from liteswarm.types.swarm import Agent, ContextVariables
+from liteswarm.types.swarm import ContextVariables
 from liteswarm.types.swarm_team import (
     ExecutionResult,
     Plan,
@@ -24,7 +24,6 @@ from liteswarm.types.swarm_team import (
     TaskStatus,
     TeamMember,
 )
-from liteswarm.utils.misc import dedent_prompt
 from liteswarm.utils.unwrap import unwrap_task_output_type
 
 
@@ -45,8 +44,6 @@ class SwarmTeam:
         self.stream_handler = stream_handler
         self.planning_agent = planning_agent or AgentPlanner(
             swarm=self.swarm,
-            agent=self._default_planning_agent(),
-            template=self._default_planning_prompt_template(),
             task_definitions=task_definitions,
         )
 
@@ -58,44 +55,8 @@ class SwarmTeam:
         )
 
     # ================================================
-    # MARK: Private Helpers
+    # MARK: Task Execution Helpers
     # ================================================
-
-    def _default_planning_agent(self) -> Agent:
-        """Create a default agent if none is provided."""
-        return Agent.create(
-            id="agent-planner",
-            model="gpt-4o",
-            instructions=dedent_prompt("""
-            You are a task planning specialist.
-
-            Your role is to:
-            1. Break down complex requests into clear, actionable tasks
-            2. Ensure tasks have appropriate dependencies
-            3. Create tasks that match the provided task types
-            4. Consider team capabilities when planning
-
-            Each task must include:
-            - A clear title and description
-            - The appropriate task type
-            - Any dependencies on other tasks
-
-            Follow the output format specified in the prompt to create your plan.
-            """),
-        )
-
-    def _default_planning_prompt_template(self) -> PromptTemplate:
-        """Create a default prompt template."""
-
-        class DefaultPromptTemplate:
-            @property
-            def template(self) -> str:
-                return "{prompt}"
-
-            def format_context(self, prompt: str, context: ContextVariables) -> str:
-                return self.template.format(prompt=prompt)
-
-        return DefaultPromptTemplate()
 
     def _get_team_capabilities(self) -> dict[str, list[str]]:
         """Get a mapping of task types to team member capabilities."""
@@ -107,10 +68,6 @@ class SwarmTeam:
                 capabilities[task_type].append(member.agent.id)
 
         return capabilities
-
-    # ================================================
-    # MARK: Task Execution Helpers
-    # ================================================
 
     def _build_task_context(
         self,

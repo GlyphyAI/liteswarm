@@ -12,7 +12,7 @@ from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
-from liteswarm.utils.misc import change_field_type, extract_json
+from liteswarm.utils.misc import change_field_type, dedent_prompt, extract_json
 
 
 class PromptTemplate(Protocol):
@@ -47,14 +47,50 @@ class AgentPlanner(PlanningAgent):
     def __init__(
         self,
         swarm: Swarm,
-        agent: Agent,
-        template: PromptTemplate,
-        task_definitions: list[TaskDefinition],
+        agent: Agent | None = None,
+        template: PromptTemplate | None = None,
+        task_definitions: list[TaskDefinition] | None = None,
     ) -> None:
         self.swarm = swarm
-        self.agent = agent
-        self.template = template
-        self.task_definitions = {td.task_type: td for td in task_definitions}
+        self.agent = agent or self._default_planning_agent()
+        self.template = template or self._default_planning_prompt_template()
+        self.task_definitions = {td.task_type: td for td in task_definitions or []}
+
+    def _default_planning_agent(self) -> Agent:
+        """Create a default agent if none is provided."""
+        return Agent.create(
+            id="agent-planner",
+            model="gpt-4o",
+            instructions=dedent_prompt("""
+            You are a task planning specialist.
+
+            Your role is to:
+            1. Break down complex requests into clear, actionable tasks
+            2. Ensure tasks have appropriate dependencies
+            3. Create tasks that match the provided task types
+            4. Consider team capabilities when planning
+
+            Each task must include:
+            - A clear title and description
+            - The appropriate task type
+            - Any dependencies on other tasks
+
+            Follow the output format specified in the prompt to create your plan.
+            """),
+        )
+
+    def _default_planning_prompt_template(self) -> PromptTemplate:
+        """Create a default prompt template."""
+
+        class DefaultPromptTemplate:
+            @property
+            def template(self) -> str:
+                return "{prompt}"
+
+            def format_context(self, prompt: str, context: ContextVariables) -> str:
+                return self.template.format(prompt=prompt)
+
+        return DefaultPromptTemplate()
 
     async def create_plan(
         self,
