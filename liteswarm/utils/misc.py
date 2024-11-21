@@ -10,7 +10,7 @@ from typing import Any, TypeVar, Unpack
 
 import orjson
 from pydantic import BaseModel, ValidationError, create_model
-from pydantic.fields import _FromFieldInfoInputs
+from pydantic.fields import FieldInfo, _FromFieldInfoInputs
 from pydantic_core import PydanticUndefined
 
 from liteswarm.types.misc import JSON
@@ -160,10 +160,11 @@ def dedent_prompt(prompt: str) -> str:
     return dedent(prompt).strip()
 
 
-def change_field_type(
+def change_field_type(  # noqa: PLR0913
     model_type: type[_PydanticModel],
     field_name: str,
     new_type: Any,
+    new_model_type: type[_PydanticModel] | None = None,
     new_model_name: str | None = None,
     default: Any = PydanticUndefined,
     **kwargs: Unpack[_FromFieldInfoInputs],
@@ -219,19 +220,22 @@ def change_field_type(
         TypeError: If the default value doesn't match the new field type
     """
     fields: dict[str, Any] = {}
+    if field := model_type.model_fields.get(field_name):
+        field_kwargs: dict[str, Any] = {}
+        for attr_name in _FromFieldInfoInputs.__annotations__.keys():
+            if attr_value := getattr(field, attr_name, None):
+                field_kwargs[attr_name] = attr_value
+
+        field_kwargs.update(kwargs)
+        field_kwargs.pop("annotation")
+        field_info = field.from_field(default=default, **field_kwargs)
+
+        fields[field_name] = (new_type, field_info)
+    else:
+        fields[field_name] = (new_type, FieldInfo(default=default, **kwargs))
+
     for name, field in model_type.model_fields.items():
-        if name == field_name:
-            field_kwargs: dict[str, Any] = {}
-            for attr_name in _FromFieldInfoInputs.__annotations__.keys():
-                if attr_value := getattr(field, attr_name, None):
-                    field_kwargs[attr_name] = attr_value
-
-            field_kwargs.update(kwargs)
-            field_kwargs.pop("annotation")
-            field_info = field.from_field(default=default, **field_kwargs)
-
-            fields[name] = (new_type, field_info)
-        else:
+        if name != field_name:
             fields[name] = (field.annotation, field)
 
     if default is not PydanticUndefined and kwargs.get("validate_default"):
@@ -248,7 +252,7 @@ def change_field_type(
 
     new_model = create_model(
         updated_model_name,
-        __base__=model_type,
+        __base__=new_model_type or model_type,
         **fields,
     )
 
