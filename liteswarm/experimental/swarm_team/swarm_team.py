@@ -117,6 +117,7 @@ class SwarmTeam:
             planning_agent: Optional custom agent for plan creation
             stream_handler: Optional handler for streaming events
         """
+        # Public properties
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
         self.task_definitions = task_definitions
@@ -126,7 +127,7 @@ class SwarmTeam:
             task_definitions=task_definitions,
         )
 
-        # Private state
+        # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
         self._execution_history: list[ExecutionResult] = []
         self._context: ContextVariables = ContextVariables(
