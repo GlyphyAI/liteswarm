@@ -13,7 +13,24 @@ from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
-from liteswarm.utils.misc import change_field_type, dedent_prompt, extract_json
+from liteswarm.utils.misc import change_field_type, extract_json
+
+AGENT_PLANNER_INSTRUCTIONS = """
+You are a task planning specialist.
+
+Your role is to:
+1. Break down complex requests into clear, actionable tasks
+2. Ensure tasks have appropriate dependencies
+3. Create tasks that match the provided task types
+4. Consider team capabilities when planning
+
+Each task must include:
+- A clear title and description
+- The appropriate task type
+- Any dependencies on other tasks
+
+Follow the output format specified in the prompt to create your plan.
+""".strip()
 
 PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
 """Template for formatting prompts with context.
@@ -188,22 +205,7 @@ class AgentPlanner(PlanningAgent):
         return Agent.create(
             id="agent-planner",
             model="gpt-4o",
-            instructions=dedent_prompt("""
-            You are a task planning specialist.
-
-            Your role is to:
-            1. Break down complex requests into clear, actionable tasks
-            2. Ensure tasks have appropriate dependencies
-            3. Create tasks that match the provided task types
-            4. Consider team capabilities when planning
-
-            Each task must include:
-            - A clear title and description
-            - The appropriate task type
-            - Any dependencies on other tasks
-
-            Follow the output format specified in the prompt to create your plan.
-            """),
+            instructions=AGENT_PLANNER_INSTRUCTIONS,
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
