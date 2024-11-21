@@ -8,7 +8,7 @@ import asyncio
 import os
 
 from liteswarm.core import Swarm
-from liteswarm.types import Agent, ContextVariables, Result
+from liteswarm.types import Agent, ContextVariables, LLMConfig, Result
 from liteswarm.utils import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
@@ -19,10 +19,13 @@ async def instructions_example() -> None:
         user_name: str = context_variables.get("user_name", "John")
         return f"Help the user, {user_name}, do whatever they want."
 
-    agent = Agent.create(
+    agent = Agent(
         id="agent",
-        model="gpt-4o-mini",
         instructions=instructions,
+        llm=LLMConfig(
+            model="gpt-4o-mini",
+            litellm_kwargs={"drop_params": True},
+        ),
     )
 
     swarm = Swarm(include_usage=True)
@@ -51,23 +54,29 @@ async def tool_call_example() -> None:
         language: str = context_variables.get("language", "English")
         return f"Speak with the user in {language} and ask them how they are doing."
 
-    speak_agent = Agent.create(
+    speak_agent = Agent(
         id="speak_agent",
-        model="gpt-4o-mini",
         instructions=speak_instructions,
+        llm=LLMConfig(
+            model="gpt-4o-mini",
+            litellm_kwargs={"drop_params": True},
+        ),
     )
 
     def switch_to_speak_agent() -> Result[Agent]:
         """Switch to the speak agent."""
         return Result(agent=speak_agent)
 
-    welcome_agent = Agent.create(
+    welcome_agent = Agent(
         id="welcome_agent",
-        model="gpt-4o-mini",
         instructions="You are a welcome agent that greets the user. "
         "Switch to the speak agent after greeting the user.",
-        tools=[greet, switch_to_speak_agent],
-        parallel_tool_calls=False,
+        llm=LLMConfig(
+            model="gpt-4o-mini",
+            tools=[greet, switch_to_speak_agent],
+            parallel_tool_calls=False,
+            litellm_kwargs={"drop_params": True},
+        ),
     )
 
     swarm = Swarm(include_usage=True)

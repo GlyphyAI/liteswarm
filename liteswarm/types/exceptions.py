@@ -70,10 +70,10 @@ class ContextLengthError(SwarmError):
         print(f"Original error: {e.original_error}")
 
         # Maybe switch to a model with larger context
-        new_agent = Agent.create(
+        new_agent = Agent(
             id="large-context",
-            model="claude-3-5-sonnet-20241022",
-            instructions=agent.instructions
+            instructions=agent.instructions,
+            llm=LLMConfig(model="claude-3-5-sonnet-20241022")
         )
     ```
     """

@@ -95,12 +95,14 @@ class Swarm:
         )
 
         # Create an agent with math tools
-        agent = Agent.create(
+        agent = Agent(
             id="math",
-            model="gpt-4o",
             instructions=agent_instructions,
-            tools=[add, multiply],
-            tool_choice="auto"
+            llm=LLMConfig(
+                model="gpt-4o",
+                tools=[add, multiply],
+                tool_choice="auto",
+            ),
         )
 
         # Initialize swarm and run calculation
@@ -207,7 +209,7 @@ class Swarm:
         """
         tool_call_result: ToolCallResult
         function_name = tool_call.function.name
-        function_tools_map = {tool.__name__: tool for tool in agent.tools}
+        function_tools_map = {tool.__name__: tool for tool in agent.llm.tools or []}
 
         if function_name not in function_tools_map:
             return ToolCallFailureResult(
@@ -413,9 +415,9 @@ class Swarm:
             ValueError: If agent parameters are invalid
             TypeError: If response is not of expected type
         """
-        dict_messages = dump_messages(messages)
-        tools = [function_to_json(tool) for tool in agent.tools] if agent.tools else None
+        tools = [function_to_json(tool) for tool in agent.llm.tools] if agent.llm.tools else None
         stream_options = {"include_usage": True} if self.include_usage else None
+        dict_messages = dump_messages(messages)
 
         log_verbose(
             f"Sending messages to agent [{agent.id}]: {dict_messages}",
@@ -423,16 +425,14 @@ class Swarm:
         )
 
         completion_kwargs = {
-            "model": agent.model,
             "messages": dict_messages,
             "tools": tools,
-            "tool_choice": agent.tool_choice,
-            "parallel_tool_calls": agent.parallel_tool_calls,
             "stream": True,
             "stream_options": stream_options,
         }
 
-        agent_kwargs = agent.params or {}
+        agent_kwargs = agent.llm.model_dump() or {}
+        agent_kwargs.update(agent_kwargs.pop("litellm_kwargs") or {})
         for key, value in agent_kwargs.items():
             if key not in completion_kwargs:
                 completion_kwargs[key] = value
@@ -623,7 +623,7 @@ class Swarm:
 
         if usage and self.include_cost:
             response_cost = calculate_response_cost(
-                model=agent.model,
+                model=agent.llm.model,
                 usage=usage,
             )
 
@@ -868,8 +868,8 @@ class Swarm:
         """
         if self.summarizer.needs_summarization(self._working_history):
             self._working_history = await self.summarizer.summarize_history(self._full_history)
-        elif history_exceeds_token_limit(self._working_history, agent.model):
-            self._working_history = trim_messages(self._full_history, agent.model)
+        elif history_exceeds_token_limit(self._working_history, agent.llm.model):
+            self._working_history = trim_messages(self._full_history, agent.llm.model)
 
     async def _retry_completion_with_trimmed_history(
         self,
@@ -1049,11 +1049,10 @@ class Swarm:
                 print(f"User {context_variables['user_name']} adding {a} + {b}")
                 return a + b
 
-            agent = Agent.create(
+            agent = Agent(
                 id="math",
-                model="gpt-4",
                 instructions=get_instructions,
-                tools=[add]
+                llm=LLMConfig(model="gpt-4o", tools=[add])
             )
 
             async for response in swarm.stream(
@@ -1164,10 +1163,10 @@ class Swarm:
             def get_instructions(context: ContextVariables) -> str:
                 return f"Help {context['user_name']} with their task."
 
-            agent = Agent.create(
+            agent = Agent(
                 id="helper",
-                model="gpt-4",
-                instructions=get_instructions
+                instructions=get_instructions,
+                llm=LLMConfig(model="gpt-4o")
             )
 
             result = await swarm.execute(

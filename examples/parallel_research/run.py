@@ -10,6 +10,20 @@ from time import sleep
 
 from liteswarm.core import Swarm
 from liteswarm.types import Agent, ChatCompletionDeltaToolCall, Delta, Message, ToolCallResult
+from liteswarm.types.llm import LLMConfig
+
+RESEARCH_AGENT_INSTRUCTIONS = """
+You are a city research analyst. Your task is to gather and analyze data about cities using the available tools.
+
+Important guidelines:
+1. When researching a city, ALWAYS query multiple data sources in parallel
+2. Use all available tools to get a comprehensive view
+3. After gathering data, provide a concise summary highlighting key insights
+4. Compare and contrast different aspects of the data
+5. Make recommendations based on the collected data
+
+Remember to use parallel tool calls efficiently to gather data quickly.
+""".strip()
 
 
 class ConsoleStreamHandler:
@@ -111,28 +125,21 @@ async def run() -> None:
             ),
         }
 
-    research_agent = Agent.create(
+    research_agent = Agent(
         id="research_agent",
-        model="claude-3-5-haiku-20241022",
-        instructions="""You are a city research analyst. Your task is to gather and analyze data about cities using the available tools.
-
-        Important guidelines:
-        1. When researching a city, ALWAYS query multiple data sources in parallel
-        2. Use all available tools to get a comprehensive view
-        3. After gathering data, provide a concise summary highlighting key insights
-        4. Compare and contrast different aspects of the data
-        5. Make recommendations based on the collected data
-
-        Remember to use parallel tool calls efficiently to gather data quickly.""",
-        tools=[
-            query_weather_api,
-            query_population_data,
-            query_tourist_attractions,
-            query_economic_data,
-        ],
-        tool_choice="auto",
-        parallel_tool_calls=True,
-        temperature=0.0,
+        instructions=RESEARCH_AGENT_INSTRUCTIONS,
+        llm=LLMConfig(
+            model="claude-3-5-haiku-20241022",
+            tools=[
+                query_weather_api,
+                query_population_data,
+                query_tourist_attractions,
+                query_economic_data,
+            ],
+            tool_choice="auto",
+            parallel_tool_calls=True,
+            temperature=0.0,
+        ),
     )
 
     console_handler = ConsoleStreamHandler()

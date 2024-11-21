@@ -108,8 +108,8 @@ class AgentRepl:
         print("\nActive Agent:")
         if self.active_agent:
             print(f"  ID: {self.active_agent.id}")
-            print(f"  Model: {self.active_agent.model}")
-            print(f"  Tools: {len(self.active_agent.tools)} available")
+            print(f"  Model: {self.active_agent.llm.model}")
+            print(f"  Tools: {len(self.active_agent.llm.tools or [])} available")
         else:
             print("  None")
 
