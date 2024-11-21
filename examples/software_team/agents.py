@@ -17,6 +17,7 @@ def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -
     agent = Agent.create(
         id="planner",
         model="gpt-4o",
+        response_format={"type": "json_object"},
         instructions=dedent_prompt("""
         You are a technical project planner specializing in Flutter app development.
 
@@ -56,6 +57,7 @@ def create_flutter_engineer() -> Agent:
     return Agent.create(
         id="flutter_engineer",
         model="gpt-4o",
+        response_format={"type": "json_object"},
         instructions=dedent_prompt("""
         You are a Flutter software engineer specializing in mobile app development.
 
