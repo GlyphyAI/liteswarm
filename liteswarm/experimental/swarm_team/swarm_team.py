@@ -24,7 +24,8 @@ from liteswarm.types.swarm_team import (
     TaskStatus,
     TeamMember,
 )
-from liteswarm.utils.misc import dedent_prompt, unwrap_task_output_type
+from liteswarm.utils.misc import dedent_prompt
+from liteswarm.utils.unwrap import unwrap_task_output_type
 
 
 class SwarmTeam:
