@@ -6,7 +6,7 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Literal, Self, TypeAlias
+from typing import Literal, TypeAlias
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
@@ -18,38 +18,7 @@ from litellm.types.utils import Delta as LiteDelta
 from pydantic import BaseModel, ConfigDict, Field
 
 from liteswarm.types.context import ContextVariables
-
-Tool: TypeAlias = Callable[..., Any]
-"""A tool that can be called by an agent.
-
-Tools are functions that agents can use to perform actions. They can:
-- Return simple values (str, int, dict, etc.)
-- Return new agents for agent switching
-- Return Result objects for complex responses
-
-Example:
-```python
-def calculate_sum(numbers: list[float]) -> float:
-    \"\"\"Add up a list of numbers.\"\"\"
-    return sum(numbers)
-
-def switch_to_expert(topic: str) -> Agent:
-    \"\"\"Switch to an expert agent for a specific topic.\"\"\"
-    return Agent.create(
-        id=f"{topic}-expert",
-        model="gpt-4o",
-        instructions=f"You are an expert in {topic}."
-    )
-
-def process_data(data: dict, context_variables: ContextVariables) -> Result:
-    \"\"\"Process data with access to context.\"\"\"
-    return Result(
-        value={"processed": data},
-        context_variables=ContextVariables(last_processed=data)
-    )
-```
-"""
-
+from liteswarm.types.llm import LLMConfig
 
 AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
 """Agent instructions - either a string or a function that takes context variables.
@@ -187,10 +156,10 @@ class ToolMessage(BaseModel):
             content="Switching to math expert",
             tool_call_id="switch_1"
         ),
-        agent=Agent.create(
+        agent=Agent(
             id="math-expert",
-            model="gpt-4o",
-            instructions="You are a math expert."
+            instructions="You are a math expert.",
+            llm=LLMConfig(model="gpt-4o")
         ),
         context_variables=ContextVariables(specialty="mathematics")
     )
@@ -335,15 +304,34 @@ class Agent(BaseModel):
         return f"Code implementing: {spec}"
 
     # Create a coding assistant agent
-    coding_agent = Agent.create(
+    coding_agent = Agent(
         id="coding-assistant",
-        model="gpt-4o",
         instructions='''You are a coding assistant.
                        Use search_docs to find relevant information.
                        Use generate_code to implement solutions.''',
-        tools=[search_docs, generate_code],
-        tool_choice="auto",
-        parallel_tool_calls=True
+        llm=LLMConfig(
+            model="gpt-4o",
+            tools=[search_docs, generate_code],
+            tool_choice="auto",
+            parallel_tool_calls=True,
+            temperature=0.7,
+            response_format=CodeOutput  # Optional Pydantic model
+        )
+    )
+
+    # Create an agent with dynamic instructions
+    def get_instructions(context: ContextVariables) -> str:
+        return f'''You are helping {context["user_name"]}.
+                  Your expertise is in {context["domain"]}.'''
+
+    expert_agent = Agent(
+        id="domain-expert",
+        instructions=get_instructions,
+        llm=LLMConfig(
+            model="gpt-4o",
+            max_tokens=2000,
+            temperature=0.3
+        )
     )
     ```
     """
@@ -351,69 +339,19 @@ class Agent(BaseModel):
     id: str
     """Unique identifier for the agent"""
 
-    model: str
-    """The language model to use"""
-
     instructions: AgentInstructions
-    """System prompt defining the agent's behavior. Can be string or function."""
+    """System prompt defining behavior (string or function)"""
 
-    tools: list[Tool] = Field(default_factory=list)
-    """List of functions the agent can call"""
-
-    tool_choice: str | None = None
-    """How the agent should choose tools ("auto", "none", etc.)"""
-
-    parallel_tool_calls: bool | None = None
-    """Whether multiple tools can be called simultaneously"""
+    llm: LLMConfig
+    """LLM configuration for the agent's behavior and capabilities"""
 
     state: AgentState = AgentState.IDLE
     """Current state of the agent (idle, active, or stale)"""
 
-    params: dict[str, Any] | None = Field(default_factory=dict)
-    """Additional parameters for the language model"""
-
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
-        extra="allow",
     )
-
-    @classmethod
-    def create(
-        cls,
-        id: str,
-        model: str,
-        instructions: AgentInstructions,
-        **kwargs: Any,
-    ) -> Self:
-        """Create a new Agent instance with the given configuration.
-
-        Args:
-            id: Unique identifier for the agent
-            model: The language model to use
-            instructions: System prompt defining behavior
-            **kwargs: Additional configuration (tools, tool_choice, etc.)
-
-        Returns:
-            New Agent instance
-
-        Example:
-        ```python
-        agent = Agent.create(
-            id="math-tutor",
-            model="gpt-4o",
-            instructions="You are a math tutor...",
-            tools=[add, multiply],
-            tool_choice="auto"
-        )
-        ```
-        """
-        return cls(
-            id=id,
-            model=model,
-            instructions=instructions,
-            **kwargs,
-        )
 
 
 class ToolCallResult(BaseModel):
@@ -471,10 +409,10 @@ class ToolCallAgentResult(ToolCallResult):
     ```python
     result = ToolCallAgentResult(
         tool_call=switch_call,
-        agent=Agent.create(
+        agent=Agent(
             id="expert",
-            model="gpt-4o",
-            instructions="You are an expert..."
+            instructions="You are an expert...",
+            llm=LLMConfig(model="gpt-4o")
         ),
         message=Message(
             role="tool",
