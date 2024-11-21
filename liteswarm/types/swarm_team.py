@@ -347,10 +347,10 @@ class TeamMember(BaseModel):
     ```python
     security_reviewer = TeamMember(
         id="security-bot",
-        agent=Agent.create(
+        agent=Agent(
             id="security-gpt",
-            model="gpt-4",
-            instructions="You are a security-focused code reviewer..."
+            instructions="You are a security-focused code reviewer...",
+            llm=LLMConfig(model="gpt-4o")
         ),
         task_types=["code_review"],
         metadata={
