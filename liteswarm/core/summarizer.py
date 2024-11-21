@@ -11,9 +11,9 @@ from typing import Protocol
 from litellm import acompletion
 from litellm.types.utils import Choices, ModelResponse
 
-from liteswarm.logging import log_verbose
-from liteswarm.types import Message
-from liteswarm.utils import filter_tool_call_pairs
+from liteswarm.types.swarm import Message
+from liteswarm.utils.logging import log_verbose
+from liteswarm.utils.messages import filter_tool_call_pairs
 
 GroupedMessages = tuple[list[Message], list[Message]]
 

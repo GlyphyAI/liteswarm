@@ -6,7 +6,7 @@
 
 from pydantic import BaseModel, Field
 
-from liteswarm.swarm_team import Task
+from liteswarm.types import Task
 
 
 class FileContent(BaseModel):
