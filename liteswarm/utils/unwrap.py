@@ -10,7 +10,7 @@ from typing import Any, TypeVar
 from pydantic import BaseModel
 
 from liteswarm.types import ContextVariables
-from liteswarm.types.swarm import Instructions
+from liteswarm.types.swarm import AgentInstructions
 from liteswarm.types.swarm_team import TaskOutput
 
 _GenericType = TypeVar("_GenericType")
@@ -51,7 +51,7 @@ def unwrap_callable(
 
 
 def unwrap_instructions(
-    instructions: Instructions,
+    instructions: AgentInstructions,
     context_variables: ContextVariables | None = None,
 ) -> str:
     """Unwrap instructions if they are a callable.
