@@ -115,7 +115,6 @@ class SwarmTeam:
                 assignee=assignee,
                 timestamp=datetime.now(),
             )
-
             return Result(value=execution_result)
 
         try:
@@ -169,6 +168,7 @@ class SwarmTeam:
         # - Task type specialization scores
         # - Previous task performance
         # - Agent polling/voting
+
         return eligible_members[0]
 
     # ================================================
@@ -224,6 +224,7 @@ class SwarmTeam:
             return Result(value=results)
 
         except Exception as e:
+            plan.status = PlanStatus.FAILED
             return Result(error=e)
 
     async def execute_task(self, task: Task) -> Result[ExecutionResult]:
@@ -242,6 +243,7 @@ class SwarmTeam:
 
         task_definition = self._task_registry.get_task_definition(task.task_type)
         if not task_definition:
+            task.status = TaskStatus.FAILED
             return Result(
                 error=ValueError(f"No TaskDefinition found for task type '{task.task_type}'")
             )
@@ -256,6 +258,7 @@ class SwarmTeam:
         )
 
         if not result.content:
+            task.status = TaskStatus.FAILED
             return Result(error=ValueError("The agent did not return any content"))
 
         execution_result = self._process_execution_result(
