@@ -29,26 +29,13 @@ Do not use backticks to format the output.
 """.strip()
 
 
-def build_flutter_instructions(task: FlutterTask, context: ContextVariables) -> str:
-    """Build the instructions for a Flutter task."""
-    project: dict[str, Any] = context.get("project", {})
-    output_format: dict[str, Any] = context.get_reserved("output_format", {})
-
-    return FLUTTER_TASK_INSTRUCTIONS.format(
-        task=task,
-        project_framework=project.get("framework", "Flutter"),
-        project_directories=project.get("directories", []),
-        output_format=dump_json(output_format),
-    )
-
-
 DEBUG_TASK_INSTRUCTIONS = """
 Debug the following issue:
 - Error Type: {task.error_type}
 - Description: {task.description}
 
 Stack Trace:
-{task.stack_trace or 'No stack trace provided'}
+{stack_trace}
 
 Project Context:
 - Framework: {project_framework}
@@ -67,6 +54,19 @@ Do not use backticks to format the output.
 """.strip()
 
 
+def build_flutter_instructions(task: FlutterTask, context: ContextVariables) -> str:
+    """Build the instructions for a Flutter task."""
+    project: dict[str, Any] = context.get("project", {})
+    output_format: dict[str, Any] = context.get_reserved("output_format", {})
+
+    return FLUTTER_TASK_INSTRUCTIONS.format(
+        task=task,
+        project_framework=project.get("framework", "Flutter"),
+        project_directories=project.get("directories", []),
+        output_format=dump_json(output_format),
+    )
+
+
 def build_debug_instructions(task: DebugTask, context: ContextVariables) -> str:
     """Build the instructions for a Debug task."""
     project: dict[str, Any] = context.get("project", {})
@@ -74,6 +74,7 @@ def build_debug_instructions(task: DebugTask, context: ContextVariables) -> str:
 
     return DEBUG_TASK_INSTRUCTIONS.format(
         task=task,
+        stack_trace=task.stack_trace or "No stack trace provided",
         project_framework=project.get("framework", "Flutter"),
         project_directories=project.get("directories", []),
         output_format=dump_json(output_format),

@@ -7,6 +7,7 @@
 from liteswarm.core import Swarm
 from liteswarm.experimental import AgentPlanner
 from liteswarm.types import JSON, Agent, ContextVariables, Plan, Task, TaskDefinition, TeamMember
+from liteswarm.types.llm import LLMConfig
 from liteswarm.utils import dedent_prompt
 
 from .utils import dump_json
@@ -34,31 +35,6 @@ Do not format the output in any other way than the output format.
 Do not use backticks to format the output.
 """.strip()
 
-
-def build_planner_prompt(prompt: str, context: ContextVariables) -> str:
-    """Build prompt for the plan agent."""
-    project_context: JSON = context.get("project", {})
-    output_format: JSON = context.get_reserved("output_format", {})
-    output_example: Plan = Plan(
-        tasks=[
-            Task(
-                id="<id_0>",
-                title="<title_0>",
-                task_type="<task_type_0>",
-            ),
-        ]
-    )
-
-    return dedent_prompt(
-        AGENT_PLANNER_PROMPT.format(
-            prompt=prompt,
-            project_context=dump_json(project_context),
-            output_format=dump_json(output_format),
-            output_example=output_example.model_dump_json(),
-        )
-    )
-
-
 AGENT_PLANNER_INSTRUCTIONS = """
 You are a technical project planner specializing in Flutter app development.
 
@@ -84,24 +60,6 @@ You MUST follow the output format specified in each task.
 If output format is a JSON schema, you MUST return a valid JSON object.
 """.strip()
 
-
-def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -> AgentPlanner:
-    """Create a software planning agent."""
-    agent = Agent.create(
-        id="planner",
-        model="gpt-4o",
-        response_format={"type": "json_object"},
-        instructions=AGENT_PLANNER_INSTRUCTIONS,
-    )
-
-    return AgentPlanner(
-        swarm=swarm,
-        agent=agent,
-        template=build_planner_prompt,
-        task_definitions=task_definitions,
-    )
-
-
 AGENT_FLUTTER_ENGINEER_INSTRUCTIONS = """
 You are a Flutter software engineer specializing in mobile app development.
 
@@ -117,13 +75,58 @@ If output format is a JSON schema, you MUST return a valid JSON object.
 """.strip()
 
 
+def build_planner_prompt(prompt: str, context: ContextVariables) -> str:
+    """Build prompt for the plan agent."""
+    project_context: JSON = context.get("project", {})
+    output_format: JSON = context.get_reserved("output_format", {})
+    output_example: Plan = Plan(
+        tasks=[
+            Task(
+                id="<id_0>",
+                title="<title_0>",
+                task_type="<task_type_0>",
+            ),
+        ]
+    )
+
+    return dedent_prompt(
+        AGENT_PLANNER_PROMPT.format(
+            prompt=prompt,
+            project_context=dump_json(project_context),
+            output_format=dump_json(output_format),
+            output_example=output_example.model_dump_json(),
+        )
+    )
+
+
+def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -> AgentPlanner:
+    """Create a software planning agent."""
+    agent = Agent(
+        id="planner",
+        instructions=AGENT_PLANNER_INSTRUCTIONS,
+        llm=LLMConfig(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+        ),
+    )
+
+    return AgentPlanner(
+        swarm=swarm,
+        agent=agent,
+        template=build_planner_prompt,
+        task_definitions=task_definitions,
+    )
+
+
 def create_flutter_engineer() -> Agent:
     """Create a Flutter engineer agent."""
-    return Agent.create(
+    return Agent(
         id="flutter_engineer",
-        model="gpt-4o",
-        response_format={"type": "json_object"},
         instructions=AGENT_FLUTTER_ENGINEER_INSTRUCTIONS,
+        llm=LLMConfig(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+        ),
     )
 
 
