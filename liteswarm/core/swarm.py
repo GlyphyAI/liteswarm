@@ -38,8 +38,9 @@ from liteswarm.types.swarm import (
 from liteswarm.utils.function import function_has_parameter, function_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
-from liteswarm.utils.misc import safe_get_attr, unwrap_instructions
+from liteswarm.utils.misc import safe_get_attr
 from liteswarm.utils.retry import retry_with_exponential_backoff
+from liteswarm.utils.unwrap import unwrap_instructions
 from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
 
 litellm.modify_params = True
