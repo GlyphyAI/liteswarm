@@ -4,23 +4,25 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-import operator
 import re
-from collections.abc import Callable
-from functools import reduce
 from textwrap import dedent
-from typing import Any, TypeVar
+from typing import Any, TypeVar, Unpack
 
 import orjson
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, create_model
+from pydantic.fields import _FromFieldInfoInputs
+from pydantic_core import PydanticUndefined
 
-from liteswarm.types import JSON, ContextVariables
-from liteswarm.types.swarm import Instructions
-from liteswarm.types.swarm_team import Plan, Task, TaskDefinition, TaskOutput
+from liteswarm.types.misc import JSON
 
-_GenericType = TypeVar("_GenericType")
 _AttributeType = TypeVar("_AttributeType")
+"""Type variable representing the expected type of an attribute."""
+
 _AttributeDefaultType = TypeVar("_AttributeDefaultType")
+"""Type variable representing the default type of an attribute."""
+
+_PydanticModel = TypeVar("_PydanticModel", bound=BaseModel)
+"""Type variable representing a Pydantic model."""
 
 
 def safe_get_attr(
@@ -83,11 +85,32 @@ def safe_get_attr(
 def extract_json(content: str) -> JSON:
     """Extract a JSON object from a string.
 
+    Attempts to find and parse JSON from:
+    1. Code blocks (with or without language identifier)
+    2. Raw string content
+
+    Example:
+    ```python
+    # From code block
+    content = '''Here's the config:
+    ```json
+    {"name": "test", "value": 42}
+    ```
+    '''
+    config = extract_json(content)  # {"name": "test", "value": 42}
+
+    # From raw string
+    data = extract_json('{"x": 1, "y": 2}')  # {"x": 1, "y": 2}
+    ```
+
     Args:
-        content: The string to extract the JSON from
+        content: String containing JSON data
 
     Returns:
-        The JSON object, or None if no valid JSON is found
+        Parsed JSON object
+
+    Raises:
+        ValueError: If no valid JSON can be found or parsed
     """
     code_block_pattern = r"```(?:json)?\n?(.*?)```"
     matches = re.findall(code_block_pattern, content, re.DOTALL)
@@ -106,97 +129,127 @@ def extract_json(content: str) -> JSON:
 
 
 def dedent_prompt(prompt: str) -> str:
+    """Remove common leading whitespace from every line in a prompt.
+
+    Useful for maintaining readable code while creating clean prompts.
+    Removes both indentation and leading/trailing whitespace.
+
+    Example:
+    ```python
+    prompt = dedent_prompt('''
+        You are a helpful assistant.
+        Follow these rules:
+            1. Be concise
+            2. Be clear
+            3. Be accurate
+    ''')
+    # Returns:
+    # "You are a helpful assistant.
+    #  Follow these rules:
+    #      1. Be concise
+    #      2. Be clear
+    #      3. Be accurate"
+    ```
+
+    Args:
+        prompt: The prompt string to clean
+
+    Returns:
+        The prompt with common leading whitespace removed
+    """
     return dedent(prompt).strip()
 
 
-def unwrap_callable(
-    value: _GenericType | Callable[..., _GenericType],
-    *args: Any,
-    **kwargs: Any,
-) -> _GenericType:
-    """Unwrap a callable if it's wrapped in a callable.
+def change_field_type(
+    model_type: type[_PydanticModel],
+    field_name: str,
+    new_type: Any,
+    new_model_name: str | None = None,
+    default: Any = PydanticUndefined,
+    **kwargs: Unpack[_FromFieldInfoInputs],
+) -> type[_PydanticModel]:
+    """Create a new Pydantic model with a modified field type.
 
-    Args:
-        value: The value to unwrap
-        *args: Arguments to pass to the callable
-        **kwargs: Keyword arguments to pass to the callable
-
-    Returns:
-        The unwrapped value
-    """
-    return value(*args, **kwargs) if callable(value) else value
-
-
-def unwrap_instructions(
-    instructions: Instructions,
-    context_variables: ContextVariables | None = None,
-) -> str:
-    """Unwrap instructions if they are a callable.
-
-    If instructions is a callable, it will be called with the provided context
-    variables. Otherwise, the instructions string will be returned as-is.
-
-    Args:
-        instructions: The instructions to unwrap, either a string or a callable
-            that takes context_variables and returns a string
-        context_variables: Optional dictionary of context variables to pass to
-            the instructions callable
-
-    Returns:
-        The unwrapped instructions string
+    Creates a copy of the original model with one field's type changed,
+    preserving all other fields and model configuration. Useful for:
+    - Dynamically modifying model schemas
+    - Creating variants of existing models
+    - Adjusting field validation rules
 
     Example:
-        ```python
-        def get_instructions(context_variables: ContextVariables) -> str:
-            user = context_variables.get("user_name", "user")
-            return f"Help {user} with their task."
+    ```python
+    class User(BaseModel):
+        id: int
+        name: str
+        age: int
 
-        # With callable instructions
-        instructions = unwrap_instructions(
-            get_instructions,
-            context_variables={"user_name": "Alice"}
-        )
-        # Returns: "Help Alice with their task."
-
-        # With string instructions
-        instructions = unwrap_instructions("Help the user.")
-        # Returns: "Help the user."
-        ```
-    """
-    return unwrap_callable(
-        instructions,
-        context_variables=context_variables or ContextVariables(),
+    # Change age to float and add validation
+    UserFloat = change_field_type(
+        model_type=User,
+        field_name="age",
+        new_type=float,
+        new_model_name="UserFloat",
+        default=0.0,
+        ge=0.0,  # Field validation: greater or equal to 0
+        description="User's age in years"
     )
 
+    # Original model still uses int
+    user1 = User(id=1, name="Alice", age=30)
 
-def unwrap_task_output_type(output_schema: TaskOutput) -> type[BaseModel]:
-    """Generalizes the unpacking of TaskOutput objects to return their JSON schema."""
-    if isinstance(output_schema, type):
-        if issubclass(output_schema, BaseModel):
-            return output_schema
+    # New model uses float with validation
+    user2 = UserFloat(id=2, name="Bob", age=30.5)
+
+    # Validation error if age < 0
+    user3 = UserFloat(id=3, name="Charlie", age=-1.0)  # Raises ValidationError
+    ```
+
+    Args:
+        model_type: The original Pydantic model to modify
+        field_name: Name of the field to change
+        new_type: New type for the field
+        new_model_name: Optional name for the new model (defaults to "Updated" + original name)
+        default: Optional default value for the field
+        **kwargs: Additional field configuration (validation rules, descriptions, etc.)
+
+    Returns:
+        A new Pydantic model class with the modified field
+
+    Raises:
+        TypeError: If the default value doesn't match the new field type
+    """
+    fields: dict[str, Any] = {}
+    for name, field in model_type.model_fields.items():
+        if name == field_name:
+            field_kwargs: dict[str, Any] = {}
+            for attr_name in _FromFieldInfoInputs.__annotations__.keys():
+                if attr_value := getattr(field, attr_name, None):
+                    field_kwargs[attr_name] = attr_value
+
+            field_kwargs.update(kwargs)
+            field_kwargs.pop("annotation")
+            field_info = field.from_field(default=default, **field_kwargs)
+
+            fields[name] = (new_type, field_info)
         else:
-            raise TypeError("TaskOutput is not a BaseModel.")
+            fields[name] = (field.annotation, field)
 
-    try:
-        dummy_output = output_schema("", ContextVariables())
-        if isinstance(dummy_output, BaseModel):
-            return dummy_output.__class__
-        else:
-            raise TypeError("Callable did not return a BaseModel instance.")
-    except Exception as e:
-        raise TypeError(f"TaskOutput is not a callable or a BaseModel: {e}") from e
+    if default is not PydanticUndefined and kwargs.get("validate_default"):
+        try:
+            fields = {field_name: (new_type, default)}
+            temp_model = create_model("TempModel", **fields)
+            temp_model(**{field_name: default})
+        except ValidationError as e:
+            raise TypeError(
+                f"Default value {default!r} is not valid for field '{field_name}' of type {new_type}"
+            ) from e
 
+    updated_model_name = new_model_name or f"Updated{model_type.__name__}"
 
-def create_union_type(types: list[_GenericType]) -> _GenericType:
-    if not types:
-        raise ValueError("No types provided for Union.")
-    elif len(types) == 1:
-        return types[0]
-    else:
-        return reduce(operator.or_, types)
+    new_model = create_model(
+        updated_model_name,
+        __base__=model_type,
+        **fields,
+    )
 
-
-def create_plan_schema(task_definitions: list[TaskDefinition]) -> type[Plan[Task]]:
-    task_schemas = [td.task_schema for td in task_definitions]
-    task_schemas_union = create_union_type(task_schemas)
-    return Plan[task_schemas_union].create(model_name=Plan.__name__)  # type: ignore
+    return new_model
