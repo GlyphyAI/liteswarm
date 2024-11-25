@@ -215,3 +215,18 @@ def function_has_parameter(func: Callable[..., Any], param: str) -> bool:
         True if the function has the parameter, False otherwise
     """
     return param in get_type_hints(func)
+
+
+def functions_to_json(functions: list[Callable[..., Any]] | None) -> list[dict[str, Any]] | None:
+    """Convert a list of functions to a list of JSON-compatible function descriptions.
+
+    Args:
+        functions: The functions to convert
+
+    Returns:
+        List of function descriptions or None if the input is None
+    """
+    if not functions:
+        return None
+
+    return [function_to_json(func) for func in functions]
