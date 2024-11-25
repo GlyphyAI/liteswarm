@@ -124,7 +124,7 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> Any:
     if origin is dict:
         return dict[_unwrap_pydantic_type(args[0]), _unwrap_pydantic_type(args[1])]  # type: ignore
 
-    if origin is UnionType or origin is Union:
+    if origin in (Union, UnionType):
         return Union[tuple(_unwrap_pydantic_type(arg) for arg in args)]  # noqa: UP007
 
     result: Any = None
@@ -178,18 +178,18 @@ def _replace_placeholder_with_default(instance: Any, field_name: str, field: Fie
     Returns:
         True if the placeholder was replaced, False otherwise.
     """
-    if getattr(instance, field_name) == DEFAULT_VALUE_PLACEHOLDER:
-        default_container = next(
-            (
-                metadata
-                for metadata in field.metadata
-                if isinstance(metadata, DefaultValueContainer)
-            ),
-            None,
-        )
-        if default_container:
-            setattr(instance, field_name, default_container.get_default())
-            return True
+    if getattr(instance, field_name) != DEFAULT_VALUE_PLACEHOLDER:
+        return False
+
+    default_container = next(
+        (metadata for metadata in field.metadata if isinstance(metadata, DefaultValueContainer)),
+        None,
+    )
+
+    if default_container:
+        setattr(instance, field_name, default_container.get_default())
+        return True
+
     return False
 
 
@@ -420,9 +420,9 @@ def change_field_type(  # noqa: PLR0913
     else:
         fields[field_name] = (new_type, FieldInfo(default=default, **kwargs))
 
-    for name, field in model_type.model_fields.items():
+    for name, field_info in model_type.model_fields.items():
         if name != field_name:
-            fields[name] = (field.annotation, field)
+            fields[name] = (field_info.annotation, field_info)
 
     if default is not PydanticUndefined and kwargs.get("validate_default"):
         try:
