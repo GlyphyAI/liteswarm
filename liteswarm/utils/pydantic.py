@@ -75,11 +75,16 @@ def is_pydantic_model(model: Any) -> TypeGuard[type[BaseModel]]:
     )
 
 
-def copy_field_info(field_info: FieldInfo, **overrides: Any) -> FieldInfo:
+def copy_field_info(
+    field_info: FieldInfo,
+    default: Any = PydanticUndefined,
+    **overrides: Any,
+) -> FieldInfo:
     """Copy a FieldInfo instance, optionally overriding attributes.
 
     Args:
         field_info: The FieldInfo instance to copy
+        default: The default value to use for the field
         **overrides: Keyword arguments to override attributes
 
     Returns:
@@ -93,7 +98,7 @@ def copy_field_info(field_info: FieldInfo, **overrides: Any) -> FieldInfo:
     field_kwargs.pop("annotation")
     field_kwargs.update(overrides)
 
-    return field_info.from_field(**field_kwargs)
+    return field_info.from_field(default=default, **field_kwargs)
 
 
 def _unwrap_pydantic_type(model_type: type[Any] | None) -> Any:
@@ -253,7 +258,6 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
             # Save the metadata to restore it later
             updated_field = copy_field_info(
                 field,
-                default=None,
                 default_factory=None,
                 metadata=copy(field.metadata),
             )
