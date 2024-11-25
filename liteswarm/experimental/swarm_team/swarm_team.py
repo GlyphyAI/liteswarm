@@ -169,6 +169,7 @@ class SwarmTeam:
         self,
         task: Task,
         task_definition: TaskDefinition,
+        task_output_type: type[BaseModel] | None = None,
     ) -> ContextVariables:
         """Construct the context for task execution.
 
@@ -181,6 +182,7 @@ class SwarmTeam:
         Args:
             task: The task being executed
             task_definition: Definition of the task type
+            task_output_type: Optional output type for the task
 
         Returns:
             Context variables for task execution
@@ -191,9 +193,7 @@ class SwarmTeam:
             **self._context,
         )
 
-        task_output = task_definition.task_output
-        if task_output:
-            task_output_type = unwrap_task_output_type(task_output)
+        if task_output_type:
             context.set_reserved("output_format", task_output_type.model_json_schema())
 
         return context
@@ -622,12 +622,17 @@ class SwarmTeam:
                 error=ValueError(f"No TaskDefinition found for task type '{task.task_type}'")
             )
 
-        task_context = self._build_task_context(task, task_definition)
-        instructions = self._prepare_instructions(task, task_definition, task_context)
+        task_output_type: type[BaseModel] | None = None
+        if task_definition.task_output:
+            task_output_type = unwrap_task_output_type(task_definition.task_output)
+            assignee.agent.llm.response_format = task_output_type
+
+        task_context = self._build_task_context(task, task_definition, task_output_type)
+        task_instructions = self._prepare_instructions(task, task_definition, task_context)
 
         result = await self.swarm.execute(
             agent=assignee.agent,
-            prompt=instructions,
+            prompt=task_instructions,
             context_variables=task_context,
         )
 
