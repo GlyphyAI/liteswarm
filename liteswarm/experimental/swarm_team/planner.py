@@ -11,7 +11,7 @@ from typing import Protocol, TypeAlias
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
-from liteswarm.types.llm import LLMConfig
+from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
 from liteswarm.utils.misc import change_field_type, extract_json
@@ -156,7 +156,7 @@ class AgentPlanner(PlanningAgent):
         agent=Agent(
             id="planner",
             instructions="You are a technical project planner...",
-            llm=LLMConfig(model="gpt-4o")
+            llm=LLM(model="gpt-4o")
         ),
         template=CustomTemplate(),
         task_definitions=[review_def, test_def]
@@ -206,7 +206,7 @@ class AgentPlanner(PlanningAgent):
         return Agent(
             id="agent-planner",
             instructions=AGENT_PLANNER_INSTRUCTIONS,
-            llm=LLMConfig(model="gpt-4o"),
+            llm=LLM(model="gpt-4o"),
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
