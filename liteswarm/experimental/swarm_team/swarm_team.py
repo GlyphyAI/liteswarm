@@ -69,7 +69,7 @@ class SwarmTeam:
         agent=Agent(
             id="review-gpt",
             instructions="You are a code reviewer...",
-            llm=LLMConfig(model="gpt-4o")
+            llm=LLM(model="gpt-4o")
         ),
         task_types=["code_review"]
     )
@@ -79,7 +79,7 @@ class SwarmTeam:
         agent=Agent(
             id="test-gpt",
             instructions="You are a testing expert...",
-            llm=LLMConfig(model="gpt-4o")
+            llm=LLM(model="gpt-4o")
         ),
         task_types=["testing"]
     )
