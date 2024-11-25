@@ -131,18 +131,11 @@ class ResponseSchema(BaseModel):
     """Whether to enforce strict schema validation"""
 
 
-class ResponseFormatText(TypedDict):
-    """Text response format specification."""
+class ResponseFormatBasic(TypedDict):
+    """Basic response format specification."""
 
-    type: Literal["text"]
-    """Type of response format (text)"""
-
-
-class ResponseFormatJsonObject(TypedDict):
-    """JSON object response format specification."""
-
-    type: Literal["json_object"]
-    """Type of response format (json_object)"""
+    type: Literal["text", "json_object"]
+    """Type of response format (text, json_object)"""
 
 
 class ResponseFormatJsonSchema(TypedDict):
@@ -166,12 +159,7 @@ class StreamOptions(BaseModel):
     """Whether to include token usage information"""
 
 
-ResponseFormat: TypeAlias = (
-    ResponseFormatText  # noop
-    | ResponseFormatJsonObject
-    | ResponseFormatJsonSchema
-    | type[BaseModel]
-)
+ResponseFormat: TypeAlias = ResponseFormatBasic | ResponseFormatJsonSchema | type[BaseModel]
 """Response format specification for model outputs.
 
 Controls the structure and validation of responses:
