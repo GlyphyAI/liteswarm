@@ -213,8 +213,8 @@ config = LLMConfig(
 """
 
 
-class LLMConfig(BaseModel):
-    """Configuration parameters for language model interactions.
+class LLM(BaseModel):
+    """LLM configuration used for agent interactions.
 
     Comprehensive configuration for LLM API calls, including:
     - Model selection and deployment

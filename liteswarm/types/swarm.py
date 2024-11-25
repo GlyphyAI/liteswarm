@@ -18,7 +18,7 @@ from litellm.types.utils import Delta as LiteDelta
 from pydantic import BaseModel, ConfigDict, Field
 
 from liteswarm.types.context import ContextVariables
-from liteswarm.types.llm import LLMConfig
+from liteswarm.types.llm import LLM
 
 AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
 """Agent instructions - either a string or a function that takes context variables.
@@ -342,7 +342,7 @@ class Agent(BaseModel):
     instructions: AgentInstructions
     """System prompt defining behavior (string or function)"""
 
-    llm: LLMConfig
+    llm: LLM
     """LLM configuration for the agent's behavior and capabilities"""
 
     state: AgentState = AgentState.IDLE
