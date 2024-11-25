@@ -279,6 +279,7 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
     try:
         transformed_model = create_model(
             f"{model.__name__}Transformed",
+            __base__=model,
             **transformed_fields,
         )
     except TypeError as e:
