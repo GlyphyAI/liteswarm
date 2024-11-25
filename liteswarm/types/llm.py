@@ -34,7 +34,7 @@ def switch_to_expert(topic: str) -> Agent:
     return Agent(
         id=f"{topic}-expert",
         instructions=f"You are an expert in {topic}.",
-        llm=LLMConfig(model="gpt-4o", tools=[calculate_sum]),
+        llm=LLM(model="gpt-4o", tools=[calculate_sum]),
     )
 ```
 """
@@ -77,14 +77,14 @@ Controls how the agent selects and uses tools:
 Example:
 ```python
 # Automatic tool selection
-config = LLMConfig(
+llm = LLM(
     model="gpt-4o",
     tools=[search, calculate],
     tool_choice="auto"
 )
 
 # Force specific tool
-config = LLMConfig(
+llm = LLM(
     model="gpt-4o",
     tools=[search, calculate],
     tool_choice={
@@ -171,19 +171,19 @@ Controls the structure and validation of responses:
 Example:
 ```python
 # Plain text
-config = LLMConfig(
+llm = LLM(
     model="gpt-4o",
     response_format={"type": "text"}
 )
 
 # JSON object
-config = LLMConfig(
+llm = LLM(
     model="gpt-4o",
     response_format={"type": "json_object"}
 )
 
 # JSON schema
-config = LLMConfig(
+llm = LLM(
     model="gpt-4o",
     response_format={
         "type": "json_schema",
@@ -205,7 +205,7 @@ class ReviewOutput(BaseModel):
     approved: bool
     comments: list[str]
 
-config = LLMConfig(
+llm = LLM(
     model="gpt-4o",
     response_format=ReviewOutput
 )
@@ -224,7 +224,7 @@ class LLM(BaseModel):
 
     Example:
     ```python
-    config = LLMConfig(
+    llm = LLM(
         model="gpt-4o",
         tools=[search_docs, generate_code],
         tool_choice="auto",
@@ -343,13 +343,13 @@ class LLM(BaseModel):
             value: int
 
         # Model class -> JSON schema
-        config = LLMConfig(response_format=Output)
+        llm = LLM(response_format=Output)
 
         # Model instance -> JSON
-        config = LLMConfig(response_format=Output(value=42))
+        llm = LLM(response_format=Output(value=42))
 
         # Dict format -> Pass through
-        config = LLMConfig(response_format={"type": "json_object"})
+        llm = LLM(response_format={"type": "json_object"})
         ```
         """
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):
@@ -366,16 +366,16 @@ class LLM(BaseModel):
         """Validate that litellm_kwargs don't conflict with main config.
 
         Ensures that any additional kwargs passed to LiteLLM don't
-        override the explicitly configured fields in LLMConfig.
+        override the explicitly configured fields in LLM.
 
         Raises:
             ValueError: If litellm_kwargs contains keys that conflict
-                      with LLMConfig fields
+                      with LLM fields
 
         Example:
         ```python
         # Valid: no conflicts
-        config = LLMConfig(
+        llm = LLM(
             model="gpt-4o",
             temperature=0.7,
             litellm_kwargs={
@@ -384,7 +384,7 @@ class LLM(BaseModel):
         )
 
         # Invalid: conflicts with main config
-        config = LLMConfig(
+        llm = LLM(
             model="gpt-4o",
             temperature=0.7,
             litellm_kwargs={
@@ -398,7 +398,7 @@ class LLM(BaseModel):
             overlapping_keys = field_names.intersection(self.litellm_kwargs.keys())
             if overlapping_keys:
                 raise ValueError(
-                    f"litellm_kwargs contains keys that are already defined in LLMConfig: {', '.join(overlapping_keys)}"
+                    f"litellm_kwargs contains keys that are already defined in LLM: {', '.join(overlapping_keys)}"
                 )
 
         return self

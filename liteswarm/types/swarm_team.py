@@ -350,7 +350,7 @@ class TeamMember(BaseModel):
         agent=Agent(
             id="security-gpt",
             instructions="You are a security-focused code reviewer...",
-            llm=LLMConfig(model="gpt-4o")
+            llm=LLM(model="gpt-4o")
         ),
         task_types=["code_review"],
         metadata={

@@ -73,7 +73,7 @@ class ContextLengthError(SwarmError):
         new_agent = Agent(
             id="large-context",
             instructions=agent.instructions,
-            llm=LLMConfig(model="claude-3-5-sonnet-20241022")
+            llm=LLM(model="claude-3-5-sonnet-20241022")
         )
     ```
     """

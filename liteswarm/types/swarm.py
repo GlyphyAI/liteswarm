@@ -159,7 +159,7 @@ class ToolMessage(BaseModel):
         agent=Agent(
             id="math-expert",
             instructions="You are a math expert.",
-            llm=LLMConfig(model="gpt-4o")
+            llm=LLM(model="gpt-4o")
         ),
         context_variables=ContextVariables(specialty="mathematics")
     )
@@ -309,7 +309,7 @@ class Agent(BaseModel):
         instructions='''You are a coding assistant.
                        Use search_docs to find relevant information.
                        Use generate_code to implement solutions.''',
-        llm=LLMConfig(
+        llm=LLM(
             model="gpt-4o",
             tools=[search_docs, generate_code],
             tool_choice="auto",
@@ -327,7 +327,7 @@ class Agent(BaseModel):
     expert_agent = Agent(
         id="domain-expert",
         instructions=get_instructions,
-        llm=LLMConfig(
+        llm=LLM(
             model="gpt-4o",
             max_tokens=2000,
             temperature=0.3
@@ -412,7 +412,7 @@ class ToolCallAgentResult(ToolCallResult):
         agent=Agent(
             id="expert",
             instructions="You are an expert...",
-            llm=LLMConfig(model="gpt-4o")
+            llm=LLM(model="gpt-4o")
         ),
         message=Message(
             role="tool",
