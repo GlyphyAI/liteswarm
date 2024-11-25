@@ -6,12 +6,9 @@
 
 import re
 from textwrap import dedent
-from typing import Any, TypeVar, Unpack
+from typing import Any, TypeVar
 
 import orjson
-from pydantic import BaseModel, ValidationError, create_model
-from pydantic.fields import FieldInfo, _FromFieldInfoInputs
-from pydantic_core import PydanticUndefined
 
 from liteswarm.types.misc import JSON
 
@@ -20,9 +17,6 @@ _AttributeType = TypeVar("_AttributeType")
 
 _AttributeDefaultType = TypeVar("_AttributeDefaultType")
 """Type variable representing the default type of an attribute."""
-
-_PydanticModel = TypeVar("_PydanticModel", bound=BaseModel)
-"""Type variable representing a Pydantic model."""
 
 
 def safe_get_attr(
@@ -158,115 +152,3 @@ def dedent_prompt(prompt: str) -> str:
         The prompt with common leading whitespace removed
     """
     return dedent(prompt).strip()
-
-
-def change_field_type(  # noqa: PLR0913
-    model_type: type[_PydanticModel],
-    field_name: str,
-    new_type: Any,
-    new_model_type: type[_PydanticModel] | None = None,
-    new_model_name: str | None = None,
-    default: Any = PydanticUndefined,
-    **kwargs: Unpack[_FromFieldInfoInputs],
-) -> type[_PydanticModel]:
-    """Create a new Pydantic model with a modified or added field.
-
-    Creates a copy of the original model with one field modified or added,
-    preserving all other fields and model configuration. The new model can:
-    - Modify existing field types
-    - Add new fields
-    - Change base model type
-    - Customize field validation
-
-    Args:
-        model_type: The original Pydantic model to modify
-        field_name: Name of the field to modify or add
-        new_type: New type for the field
-        new_model_type: Optional new base model type (defaults to original model)
-        new_model_name: Optional name for the new model (defaults to "Updated" + original name)
-        default: Optional default value for the field
-        **kwargs: Additional field configuration (validation rules, descriptions, etc.)
-
-    Returns:
-        A new Pydantic model class with the modified or added field
-
-    Raises:
-        TypeError: If the default value doesn't match the new field type
-        ValidationError: If default value validation fails when validate_default=True
-
-    Example:
-    ```python
-    class User(BaseModel):
-        id: int
-        name: str
-
-    # Modify existing field
-    UserStr = change_field_type(
-        model_type=User,
-        field_name="id",
-        new_type=str,
-        new_model_name="UserStr"
-    )
-
-    # Add new field
-    UserWithAge = change_field_type(
-        model_type=User,
-        field_name="age",
-        new_type=int,
-        default=0,
-        ge=0,
-        description="User's age in years"
-    )
-
-    # Change base model and add validation
-    class ValidatedModel(BaseModel):
-        model_config = ConfigDict(validate_default=True)
-
-    UserValidated = change_field_type(
-        model_type=User,
-        field_name="name",
-        new_type=str,
-        new_model_type=ValidatedModel,
-        min_length=1,
-        max_length=100
-    )
-    ```
-    """
-    fields: dict[str, Any] = {}
-    if field := model_type.model_fields.get(field_name):
-        field_kwargs: dict[str, Any] = {}
-        for attr_name in _FromFieldInfoInputs.__annotations__.keys():
-            if attr_value := getattr(field, attr_name, None):
-                field_kwargs[attr_name] = attr_value
-
-        field_kwargs.update(kwargs)
-        field_kwargs.pop("annotation")
-        field_info = field.from_field(default=default, **field_kwargs)
-
-        fields[field_name] = (new_type, field_info)
-    else:
-        fields[field_name] = (new_type, FieldInfo(default=default, **kwargs))
-
-    for name, field in model_type.model_fields.items():
-        if name != field_name:
-            fields[name] = (field.annotation, field)
-
-    if default is not PydanticUndefined and kwargs.get("validate_default"):
-        try:
-            fields = {field_name: (new_type, default)}
-            temp_model = create_model("TempModel", **fields)
-            temp_model(**{field_name: default})
-        except ValidationError as e:
-            raise TypeError(
-                f"Default value {default!r} is not valid for field '{field_name}' of type {new_type}"
-            ) from e
-
-    updated_model_name = new_model_name or f"Updated{model_type.__name__}"
-
-    new_model = create_model(
-        updated_model_name,
-        __base__=new_model_type or model_type,
-        **fields,
-    )
-
-    return new_model
