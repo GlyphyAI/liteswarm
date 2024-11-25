@@ -256,19 +256,20 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
         transformed_type = _unwrap_pydantic_type(field.annotation)
 
         if not field.is_required():
-            # Remove default values and factories
-            # Save the metadata to restore it later
+            # Remove default values
             updated_field = copy_field_info(
                 field,
-                default_factory=None,
-                metadata=copy(field.metadata),
+                metadata=[*copy(field.metadata)],
             )
 
             base_type, annotations = _extract_annotations(transformed_type)
             transformed_type = _apply_annotations(
                 base_type | DEFAULT_VALUE_TYPE,
                 *annotations,
-                DefaultValueContainer(value=field.default, factory=field.default_factory),
+                DefaultValueContainer(
+                    value=field.default,
+                    factory=field.default_factory,
+                ),
             )
         else:
             # Preserve required fields
