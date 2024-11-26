@@ -4,17 +4,22 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-import operator
 from collections.abc import Callable
-from functools import reduce
-from typing import Protocol, TypeAlias
+from typing import Any, Protocol, TypeAlias, TypeGuard
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types import Result
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
-from liteswarm.utils.misc import change_field_type, extract_json
+from liteswarm.utils.misc import extract_json
+from liteswarm.utils.pydantic import (
+    change_field_type,
+    is_pydantic_model,
+    remove_default_values,
+    restore_default_values,
+)
+from liteswarm.utils.typing import union_type
 
 AGENT_PLANNER_INSTRUCTIONS = """
 You are a task planning specialist.
@@ -178,6 +183,7 @@ class AgentPlanner(PlanningAgent):
         agent: Agent | None = None,
         template: PromptTemplate | None = None,
         task_definitions: list[TaskDefinition] | None = None,
+        use_response_format: bool = False,
     ) -> None:
         """Initialize a new AgentPlanner instance.
 
@@ -186,22 +192,24 @@ class AgentPlanner(PlanningAgent):
             agent: Optional custom planning agent
             template: Optional custom prompt template
             task_definitions: List of available task types
+            use_response_format: Whether to use response format in LLM calls
         """
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
         self.template = template or self._default_planning_prompt_template()
         self.task_definitions = {td.task_type: td for td in task_definitions or []}
+        self.use_response_format = use_response_format
 
     def _default_planning_agent(self) -> Agent:
         """Create a default agent if none is provided.
-
-        Returns:
-            Agent configured for planning tasks
 
         The default agent:
         - Uses gpt-4o for complex planning
         - Has specialized planning instructions
         - Focuses on task breakdown and dependencies
+
+        Returns:
+            Agent configured for planning tasks
         """
         return Agent(
             id="agent-planner",
@@ -217,7 +225,40 @@ class AgentPlanner(PlanningAgent):
         """
         return "{prompt}"
 
-    async def create_plan(
+    def _patch_plan_response_format(self, plan_schema: type[Plan]) -> type[Plan]:
+        """Patch the response format for plan schemas.
+
+        Args:
+            plan_schema: Pydantic model for plan
+
+        Returns:
+            Patched plan schema with tasks as a union of task schemas
+        """
+        task_definitions = list(self.task_definitions.values())
+        task_schemas = union_type([td.task_schema for td in task_definitions])
+        plan_schema_name = Plan.__name__
+
+        plan_schema = change_field_type(
+            model_type=Plan,
+            field_name="tasks",
+            new_type=list[task_schemas],  # type: ignore [valid-type]
+            new_model_name=plan_schema_name,
+        )
+
+        return plan_schema
+
+    def _is_plan_model(self, obj: Any) -> TypeGuard[type[Plan]]:
+        """Check if the given object is a Pydantic model that subclasses Plan.
+
+        Args:
+            obj: Object to check
+
+        Returns:
+            True if obj is a Pydantic model that subclasses Plan
+        """
+        return is_pydantic_model(obj) and issubclass(obj, Plan)
+
+    async def create_plan(  # noqa: PLR0912
         self,
         prompt: str,
         context: ContextVariables,
@@ -259,24 +300,17 @@ class AgentPlanner(PlanningAgent):
         else:
             full_prompt = prompt
 
-        task_definitions = list(self.task_definitions.values())
-        task_schemas = reduce(operator.or_, [td.task_schema for td in task_definitions])
-        plan_schema_name = Plan.__name__
-        plan_schema = change_field_type(
-            model_type=Plan,
-            field_name="tasks",
-            new_type=list[task_schemas],  # type: ignore [valid-type]
-            new_model_name=plan_schema_name,
-        )
-
-        output_format = plan_schema.model_json_schema()
+        response_format = self._patch_plan_response_format(Plan)
         context = ContextVariables(**context)
-        context.set_reserved("output_format", output_format)
+        context.set_reserved("response_format", response_format)
 
         if callable(self.template):
             formatted_prompt = self.template(full_prompt, context)
         else:
             formatted_prompt = self.template.format(prompt=full_prompt, context=context)
+
+        if self.use_response_format:
+            self.agent.llm.response_format = remove_default_values(response_format)
 
         result = await self.swarm.execute(
             agent=self.agent,
@@ -290,13 +324,21 @@ class AgentPlanner(PlanningAgent):
         try:
             json_plan = extract_json(result.content)
             if not isinstance(json_plan, dict):
-                raise TypeError("Invalid plan format")
+                raise TypeError("Unable to extract plan from response")
+
+            agent_response_format = self.agent.llm.response_format
+            if self.use_response_format and self._is_plan_model(agent_response_format):
+                plan_schema = agent_response_format
+            else:
+                plan_schema = response_format
 
             plan = plan_schema.model_validate(json_plan)
+            if self.use_response_format:
+                plan = restore_default_values(plan, response_format)
 
             for task in plan.tasks:
-                if task.task_type not in self.task_definitions:
-                    return Result(error=ValueError(f"Unknown task type: {task.task_type}"))
+                if task.type not in self.task_definitions:
+                    return Result(error=ValueError(f"Unknown task type: {task.type}"))
 
             if errors := plan.validate_dependencies():
                 return Result(error=ValueError("\n".join(errors)))
