@@ -11,7 +11,7 @@ from collections.abc import AsyncGenerator
 
 import litellm
 import orjson
-from litellm import CustomStreamWrapper, acompletion
+from litellm import CustomStreamWrapper, acompletion, get_supported_openai_params
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 
@@ -35,10 +35,11 @@ from liteswarm.types.swarm import (
     ToolCallResult,
     ToolMessage,
 )
-from liteswarm.utils.function import function_has_parameter, function_to_json
+from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
 from liteswarm.utils.misc import safe_get_attr
+from liteswarm.utils.pydantic import is_pydantic_model
 from liteswarm.utils.retry import retry_with_exponential_backoff
 from liteswarm.utils.unwrap import unwrap_instructions
 from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
@@ -415,30 +416,43 @@ class Swarm:
             ValueError: If agent parameters are invalid
             TypeError: If response is not of expected type
         """
-        tools = [function_to_json(tool) for tool in agent.llm.tools] if agent.llm.tools else None
-        stream_options = {"include_usage": True} if self.include_usage else None
-        dict_messages = dump_messages(messages)
+        exclude_keys = {"response_format", "litellm_kwargs"}
+        llm_kwargs = agent.llm.model_dump(exclude=exclude_keys, exclude_none=True)
+        llm_override_kwargs = {
+            "messages": dump_messages(messages),
+            "stream": True,
+            "stream_options": {"include_usage": True} if self.include_usage else None,
+            "tools": functions_to_json(agent.llm.tools),
+        }
+
+        response_format = agent.llm.response_format
+        supported_params = get_supported_openai_params(agent.llm.model) or []
+        if "response_format" in supported_params and response_format:
+            llm_override_kwargs["response_format"] = response_format
+
+            response_format_str: str | None = None
+            if is_pydantic_model(response_format):
+                response_format_str = orjson.dumps(response_format.model_json_schema()).decode()
+            else:
+                response_format_str = orjson.dumps(response_format).decode()
+
+            log_verbose(
+                f"Using response format: {response_format_str}",
+                level="DEBUG",
+            )
+
+        completion_kwargs = {
+            **llm_kwargs,
+            **llm_override_kwargs,
+            **(agent.llm.litellm_kwargs or {}),
+        }
 
         log_verbose(
-            f"Sending messages to agent [{agent.id}]: {dict_messages}",
+            f"Sending messages to agent [{agent.id}]: {completion_kwargs.get('messages')}",
             level="DEBUG",
         )
 
-        completion_kwargs = {
-            "messages": dict_messages,
-            "tools": tools,
-            "stream": True,
-            "stream_options": stream_options,
-        }
-
-        agent_kwargs = agent.llm.model_dump() or {}
-        agent_kwargs.update(agent_kwargs.pop("litellm_kwargs") or {})
-        for key, value in agent_kwargs.items():
-            if key not in completion_kwargs:
-                completion_kwargs[key] = value
-
         response_stream = await acompletion(**completion_kwargs)
-
         if not isinstance(response_stream, CustomStreamWrapper):
             raise TypeError("Expected a CustomStreamWrapper instance.")
 
