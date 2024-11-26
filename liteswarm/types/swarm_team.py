@@ -123,14 +123,14 @@ class Task(BaseModel):
     ```
     """
 
+    type: str
+    """Type of the task. Critical field used as discriminator for task identification and team member matching."""
+
     id: str
     """Unique identifier for the task. REQUIRED: Must be provided."""
 
     title: str
     """Short descriptive title of the task. REQUIRED: Must be provided."""
-
-    task_type: str
-    """Type of the task. USE_DEFAULT: Do not modify, use default value."""
 
     description: str | None = None
     """Detailed description of the task. OPTIONAL: Provide if needed."""
