@@ -314,7 +314,7 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
     return transformed_model
 
 
-def restore_default_values(instance: T, target_model: type[V]) -> V:
+def restore_default_values(instance: T, target_model_type: type[V]) -> V:
     """Restore default values in a transformed model instance.
 
     Maps an instance of a transformed model (with placeholders) back to the
@@ -322,15 +322,19 @@ def restore_default_values(instance: T, target_model: type[V]) -> V:
 
     Args:
         instance: The transformed model instance
-        target_model: The original target Pydantic model
+        target_model_type: The original target Pydantic model type
 
     Returns:
         An instance of the original target model with defaults restored
     """
     union_values: dict[str, Any] = {}
-
     for field_name, field in instance.model_fields.items():
-        replaced = _replace_placeholder_with_default(instance, field_name, field)
+        replaced = _replace_placeholder_with_default(
+            instance=instance,
+            placeholder=PLACEHOLDER_VALUE,
+            field_name=field_name,
+            field_info=field,
+        )
 
         if not replaced:
             if field.annotation is not None:
@@ -339,7 +343,7 @@ def restore_default_values(instance: T, target_model: type[V]) -> V:
                 setattr(instance, field_name, restored_value)
             else:
                 raise ValueError(
-                    f"Error restoring default values for model '{target_model.__name__}': "
+                    f"Error restoring default values for model '{target_model_type.__name__}': "
                     f"field '{field_name}' has no annotation"
                 )
 
@@ -355,10 +359,10 @@ def restore_default_values(instance: T, target_model: type[V]) -> V:
             dumped_data[field_name] = value
 
     try:
-        return target_model.model_validate(dumped_data)
+        return target_model_type.model_validate(dumped_data)
     except Exception as e:
         raise ValueError(
-            f"Error restoring default values for model '{target_model.__name__}': {e}"
+            f"Error restoring default values for model '{target_model_type.__name__}': {e}"
         ) from e
 
 
