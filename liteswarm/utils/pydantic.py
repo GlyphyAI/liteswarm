@@ -21,9 +21,11 @@ from typing import (
     get_origin,
 )
 
-from pydantic import BaseModel, ValidationError, create_model
+from pydantic import BaseModel, Discriminator, ValidationError, create_model
 from pydantic.fields import FieldInfo, _FromFieldInfoInputs
 from pydantic_core import PydanticUndefined
+
+from liteswarm.utils.typing import union_type
 
 T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V", bound=BaseModel)
