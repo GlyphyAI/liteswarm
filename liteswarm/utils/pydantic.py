@@ -79,14 +79,16 @@ def is_pydantic_model(model: Any) -> TypeGuard[type[BaseModel]]:
 
 def copy_field_info(
     field_info: FieldInfo,
-    default: Any = PydanticUndefined,
+    exclude_attributes: Sequence[str] = (),
+    make_required: bool = False,
     **overrides: Any,
 ) -> FieldInfo:
-    """Copy a FieldInfo instance, optionally overriding attributes.
+    """Copy a FieldInfo instance, optionally overriding attributes and excluding some.
 
     Args:
         field_info: The FieldInfo instance to copy
-        default: The default value to use for the field
+        exclude_attributes: Attributes to exclude from the copied FieldInfo
+        make_required: Whether to make the field required
         **overrides: Keyword arguments to override attributes
 
     Returns:
@@ -94,13 +96,21 @@ def copy_field_info(
     """
     field_kwargs: dict[str, Any] = {}
     for attr_name in _FromFieldInfoInputs.__annotations__.keys():
-        if attr_value := getattr(field_info, attr_name, None):
+        if attr_name in exclude_attributes:
+            continue
+
+        attr_value = getattr(field_info, attr_name, None)
+        if attr_value is not None:
             field_kwargs[attr_name] = attr_value
 
-    field_kwargs.pop("annotation")
+    field_kwargs.pop("annotation", None)
     field_kwargs.update(overrides)
 
-    return field_info.from_field(default=default, **field_kwargs)
+    if make_required:
+        field_kwargs.pop("default", None)
+        field_kwargs.pop("default_factory", None)
+
+    return field_info.from_field(**field_kwargs)
 
 
 def _unwrap_pydantic_type(model_type: type[Any] | None) -> Any:
