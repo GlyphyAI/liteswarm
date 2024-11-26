@@ -176,21 +176,33 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: P
     else:
         return copy(model_type)
 
+
+def _replace_placeholder_with_default(
+    instance: BaseModel,
+    placeholder: Any,
+    field_name: str,
+    field_info: FieldInfo,
+) -> bool:
     """Replace the placeholder with the default value if present.
 
     Args:
         instance: The model instance.
+        placeholder: The placeholder value to replace.
         field_name: The name of the field.
-        field: The field information.
+        field_info: The field information.
 
     Returns:
         True if the placeholder was replaced, False otherwise.
     """
-    if getattr(instance, field_name) != DEFAULT_VALUE_PLACEHOLDER:
+    if getattr(instance, field_name) != placeholder:
         return False
 
     default_container = next(
-        (metadata for metadata in field.metadata if isinstance(metadata, DefaultValueContainer)),
+        (
+            metadata
+            for metadata in field_info.metadata
+            if isinstance(metadata, DefaultValueContainer)
+        ),
         None,
     )
 
