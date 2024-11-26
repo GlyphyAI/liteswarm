@@ -370,6 +370,90 @@ def restore_default_values(instance: T, target_model_type: type[V]) -> V:
         ) from e
 
 
+def replace_default_values(
+    instance: BaseModel,
+    target_model_type: type[V],
+) -> V:
+    """Remove default values from a Pydantic model instance by replacing them with a placeholder.
+
+    This function creates a transformed version of the input model where all fields that had
+    default values are replaced with a predefined placeholder. It handles nested models and
+    various container types recursively to ensure all defaults are appropriately replaced.
+
+    Args:
+        instance: The Pydantic model instance to process.
+        target_model_type: The target model type to validate the instance against.
+
+    Returns:
+        A new instance of the transformed model with default values replaced by the placeholder.
+    """
+    target_model = target_model_type.model_validate_json(instance.model_dump_json())
+
+    def replace_placeholders(model: BaseModel) -> BaseModel:
+        """Recursively replace default values with placeholders in the model.
+
+        Args:
+            model (BaseModel): The model instance to process.
+
+        Returns:
+            BaseModel: A new model instance with placeholders replacing default values.
+        """
+        new_model_data: dict[str, Any] = {}
+        for field_name, field_info in model.model_fields.items():
+            field_value = getattr(model, field_name, None)
+            default_container = next(
+                (
+                    metadata
+                    for metadata in field_info.metadata
+                    if isinstance(metadata, DefaultValueContainer)
+                ),
+                None,
+            )
+
+            new_value: Any
+            match field_value:
+                case BaseModel():
+                    new_value = replace_placeholders(field_value)
+                case list():
+                    new_value = [
+                        replace_placeholders(item) if isinstance(item, BaseModel) else item
+                        for item in field_value
+                    ]
+                case dict():
+                    new_value = {
+                        key: replace_placeholders(value) if isinstance(value, BaseModel) else value
+                        for key, value in field_value.items()
+                    }
+                case set():
+                    new_value = {
+                        replace_placeholders(item) if isinstance(item, BaseModel) else item
+                        for item in field_value
+                    }
+                case tuple():
+                    new_value = tuple(
+                        replace_placeholders(item) if isinstance(item, BaseModel) else item
+                        for item in field_value
+                    )
+                case _:
+                    new_value = field_value
+
+            if default_container and default_container.get_default() == field_value:
+                new_value = PLACEHOLDER_VALUE
+
+            new_model_data[field_name] = new_value
+
+        return model.__class__.model_validate(new_model_data)
+
+    target_model_with_placeholders = replace_placeholders(target_model)
+    if not isinstance(target_model_with_placeholders, target_model_type):
+        raise TypeError(
+            f"Error replacing default values for model '{target_model_type.__name__}': "
+            "transformed model is not a subclass of the target model"
+        )
+
+    return target_model_with_placeholders
+
+
 def change_field_type(  # noqa: PLR0913
     model_type: type[T],
     field_name: str,
