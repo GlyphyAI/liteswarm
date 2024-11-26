@@ -262,9 +262,8 @@ def _restore_nested_models(field_type: Any, field_value: Any) -> Any:  # noqa: P
 def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
     """Transform a Pydantic model by removing default values.
 
-    Creates a new model where fields with default values are made required and
-    use a placeholder value to indicate missing data. This is useful when working
-    with systems that don't support default values in structural outputs.
+    Creates a new model where all fields are made required without any default values.
+    This is useful when working with systems that don't support default values in structural outputs.
 
     Args:
         model: The original Pydantic model
@@ -273,29 +272,28 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
         A new Pydantic model with defaults removed
     """
     transformed_fields: dict[str, Any] = {}
-
     for field_name, field in model.model_fields.items():
-        transformed_type = _unwrap_pydantic_type(field.annotation)
+        transformed_type: Any = _unwrap_pydantic_type(field.annotation)
 
         if not field.is_required():
-            # Remove default values
+            transformed_type = union_type([transformed_type, PLACEHOLDER_TYPE])
+
             updated_field = copy_field_info(
                 field,
-                metadata=[*copy(field.metadata)],
+                exclude_attributes=("discriminator"),
+                make_required=True,
             )
 
-            base_type, annotations = _extract_annotations(transformed_type)
-            transformed_type = _apply_annotations(
-                base_type | DEFAULT_VALUE_TYPE,
-                *annotations,
-                DefaultValueContainer(
-                    value=field.default,
-                    factory=field.default_factory,
-                ),
-            )
+            updated_field.metadata = [
+                *copy(field.metadata),
+                DefaultValueContainer(value=field.default, factory=field.default_factory),
+            ]
+
         else:
-            # Preserve required fields
-            updated_field = copy_field_info(field)
+            updated_field = copy_field_info(
+                field,
+                exclude_attributes=("discriminator"),
+            )
 
         transformed_fields[field_name] = (transformed_type, updated_field)
 
