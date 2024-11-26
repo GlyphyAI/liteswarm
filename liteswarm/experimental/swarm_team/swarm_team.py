@@ -444,7 +444,7 @@ class SwarmTeam:
             return self.members[task.assignee]
 
         eligible_members = [
-            member for member in self.members.values() if task.task_type in member.task_types
+            member for member in self.members.values() if task.type in member.task_types
         ]
 
         if not eligible_members:
@@ -605,9 +605,7 @@ class SwarmTeam:
         """
         assignee = self._select_matching_member(task)
         if not assignee:
-            return Result(
-                error=ValueError(f"No team member found for task type '{task.task_type}'")
-            )
+            return Result(error=ValueError(f"No team member found for task type '{task.type}'"))
 
         if self.stream_handler:
             await self.stream_handler.on_task_started(task)
@@ -615,12 +613,10 @@ class SwarmTeam:
         task.status = TaskStatus.IN_PROGRESS
         task.assignee = assignee.agent.id
 
-        task_definition = self._task_registry.get_task_definition(task.task_type)
+        task_definition = self._task_registry.get_task_definition(task.type)
         if not task_definition:
             task.status = TaskStatus.FAILED
-            return Result(
-                error=ValueError(f"No TaskDefinition found for task type '{task.task_type}'")
-            )
+            return Result(error=ValueError(f"No TaskDefinition found for task type '{task.type}'"))
 
         task_output_type: type[BaseModel] | None = None
         if task_definition.task_output:
