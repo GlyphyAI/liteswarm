@@ -128,6 +128,20 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> Any:
     origin = get_origin(model_type)
     args = get_args(model_type)
 
+    if origin is Annotated:
+        base_type, *annotations = args
+        filtered_annotations = [
+            annotation
+            for annotation in annotations
+            if not isinstance(annotation, FieldInfo | Discriminator)
+        ]
+
+        unwrapped_base = _unwrap_pydantic_type(base_type)
+        if filtered_annotations:
+            return Annotated[unwrapped_base, *filtered_annotations]  # type: ignore
+
+        return unwrapped_base
+
     if origin is list:
         return list[_unwrap_pydantic_type(args[0])]  # type: ignore
 
