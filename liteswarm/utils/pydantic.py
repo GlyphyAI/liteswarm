@@ -172,45 +172,10 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: P
         return union_type(unique_args)
 
     if is_pydantic_model(model_type):
-        result = remove_default_values(model_type)
+        return remove_default_values(model_type)
     else:
-        result = copy(model_type)
+        return copy(model_type)
 
-    return result
-
-
-def _extract_annotations(model_type: type[Any]) -> tuple[type[Any], Sequence[Any]]:
-    """Extract the base type and annotations from an Annotated type.
-
-    Args:
-        model_type: The type to extract from.
-
-    Returns:
-        The base type and its annotations.
-    """
-    origin = get_origin(model_type)
-    if origin is Annotated:
-        args = get_args(model_type)
-        return args[0], args[1:]
-    return model_type, ()
-
-
-def _apply_annotations(base_type: Any, *annotations: Any) -> Any:
-    """Apply annotations to a base type using Annotated.
-
-    Args:
-        base_type: The base type to annotate.
-        *annotations: Annotations to apply.
-
-    Returns:
-        The annotated type.
-    """
-    if annotations:
-        return Annotated[base_type, *annotations]
-    return base_type
-
-
-def _replace_placeholder_with_default(instance: Any, field_name: str, field: FieldInfo) -> bool:
     """Replace the placeholder with the default value if present.
 
     Args:
