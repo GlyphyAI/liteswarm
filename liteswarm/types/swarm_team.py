@@ -235,50 +235,18 @@ class TaskDefinition(BaseModel):
         use_attribute_docstrings=True,
     )
 
-    @classmethod
-    def create(
-        cls,
-        task_type: str,
-        task_schema: type[Task],
-        task_instructions: TaskInstructions,
-        task_output: TaskOutput | None = None,
-    ) -> "TaskDefinition":
-        """Create a new `TaskDefinition` instance with the `task_type` field injected into the `task_schema`.
-
-        Returns:
-            The created `TaskDefinition` instance.
-        """
-        task_schema = change_field_type(
-            model_type=task_schema,
-            field_name="task_type",
-            new_type=str,
-            new_model_name=task_schema.__name__,
-            default=task_type,
-        )
-
-        return cls(
-            task_type=task_type,
-            task_schema=task_schema,
-            task_instructions=task_instructions,
-            task_output=task_output,
-        )
-
     @model_validator(mode="after")
     def inject_task_type_into_schema(self) -> Self:
-        """Ensures that the `task_schema` includes the `task_type` field with the correct default value.
+        """Ensures that the `task_schema` includes the `task_type` field with the correct Literal type.
 
         Returns:
             The updated `TaskDefinition` instance.
         """
-        task_type = self.task_schema.model_fields.get("task_type")
-        if not task_type or task_type.default != self.task_type:
-            self.task_schema = change_field_type(
-                model_type=self.task_schema,
-                field_name="task_type",
-                new_type=str,
-                new_model_name=self.task_schema.__name__,
-                default=self.task_type,
-            )
+        task_type = self.task_schema.get_task_type()
+        task_type_literal = Literal[self.task_type]  # type: ignore
+
+        if not task_type or task_type != task_type_literal:
+            self.task_schema = self.task_schema.set_task_type(task_type_literal)
 
         return self
 
