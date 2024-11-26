@@ -9,7 +9,7 @@ from typing import Any, Literal, TypeAlias, get_args
 
 from liteswarm.types.collections import SupportsKeysAndGetItem
 
-ReservedContextKey: TypeAlias = Literal["output_format"]
+ReservedContextKey: TypeAlias = Literal["response_format"]
 """Literal type for reserved context keys with special system significance."""
 
 RESERVED_CONTEXT_KEYS: set[ReservedContextKey] = set(get_args(ReservedContextKey))
