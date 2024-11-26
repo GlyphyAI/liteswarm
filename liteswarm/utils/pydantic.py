@@ -149,9 +149,25 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: P
         return dict[_unwrap_pydantic_type(args[0]), _unwrap_pydantic_type(args[1])]  # type: ignore
 
     if origin in (Union, UnionType):
-        return Union[tuple(_unwrap_pydantic_type(arg) for arg in args)]  # noqa: UP007
+        # Flatten nested Unions
+        flat_args: list[Any] = []
+        for arg in args:
+            processed_arg = _unwrap_pydantic_type(arg)
+            if get_origin(processed_arg) in (Union, UnionType):
+                flat_args.extend(get_args(processed_arg))
+            else:
+                flat_args.append(processed_arg)
 
-    result: Any = None
+        # Remove duplicates while preserving order
+        unique_args: list[Any] = []
+        seen: set[Any] = set()
+        for arg in flat_args:
+            if arg not in seen:
+                unique_args.append(arg)
+                seen.add(arg)
+
+        return union_type(unique_args)
+
     if is_pydantic_model(model_type):
         result = remove_default_values(model_type)
     else:
