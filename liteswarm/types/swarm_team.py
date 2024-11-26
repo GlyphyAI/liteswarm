@@ -230,6 +230,9 @@ class TaskDefinition(BaseModel):
     task_output: TaskOutput | None = None
     """Optional schema or function for parsing structured task output"""
 
+    use_response_format: bool = False
+    """Whether to use response format in LLM calls"""
+
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
