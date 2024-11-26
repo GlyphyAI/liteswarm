@@ -113,7 +113,7 @@ def copy_field_info(
     return field_info.from_field(**field_kwargs)
 
 
-def _unwrap_pydantic_type(model_type: type[Any] | None) -> Any:
+def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: PLR0911, PLR0912
     """Recursively unwrap Pydantic model types to ensure compatibility.
 
     Args:
