@@ -455,8 +455,8 @@ def change_field_type(  # noqa: PLR0913
 
     if default is not PydanticUndefined and kwargs.get("validate_default"):
         try:
-            fields = {field_name: (new_type, default)}
-            temp_model = create_model("TempModel", **fields)
+            temp_fields: dict[str, Any] = {field_name: (new_type, default)}
+            temp_model = create_model("TempModel", **temp_fields)
             temp_model(**{field_name: default})
         except ValidationError as e:
             raise TypeError(
