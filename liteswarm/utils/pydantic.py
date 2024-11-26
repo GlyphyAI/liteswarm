@@ -28,8 +28,8 @@ from pydantic_core import PydanticUndefined
 T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V", bound=BaseModel)
 
-DEFAULT_VALUE_TYPE: TypeAlias = Literal["__DEFAULT_VALUE__"]
-DEFAULT_VALUE_PLACEHOLDER: DEFAULT_VALUE_TYPE = "__DEFAULT_VALUE__"
+PLACEHOLDER_TYPE: TypeAlias = Literal["___UNKNOWN___"]
+PLACEHOLDER_VALUE: PLACEHOLDER_TYPE = "___UNKNOWN___"
 
 
 @dataclass
