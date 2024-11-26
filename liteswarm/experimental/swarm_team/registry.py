@@ -18,13 +18,13 @@ class TaskRegistry:
     Example:
     ```python
     # Create task definitions
-    review_def = TaskDefinition.create(
+    review_def = TaskDefinition(
         task_type="code_review",
         task_schema=CodeReviewTask,
         task_instructions="Review {task.pr_url}..."
     )
 
-    test_def = TaskDefinition.create(
+    test_def = TaskDefinition(
         task_type="testing",
         task_schema=TestingTask,
         task_instructions="Test {task.test_path}..."
@@ -34,7 +34,7 @@ class TaskRegistry:
     registry = TaskRegistry([review_def, test_def])
 
     # Add another task type
-    deploy_def = TaskDefinition.create(
+    deploy_def = TaskDefinition(
         task_type="deployment",
         task_schema=DeploymentTask,
         task_instructions="Deploy to {task.environment}..."
@@ -68,7 +68,7 @@ class TaskRegistry:
         Example:
         ```python
         registry.register_task(
-            TaskDefinition.create(
+            TaskDefinition(
                 task_type="analysis",
                 task_schema=AnalysisTask,
                 task_instructions="Analyze {task.data_path}..."

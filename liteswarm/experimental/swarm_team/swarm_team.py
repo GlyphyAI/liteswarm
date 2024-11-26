@@ -49,14 +49,14 @@ class SwarmTeam:
         coverage_target: float
 
     # Create task definitions
-    review_def = TaskDefinition.create(
+    review_def = TaskDefinition(
         task_type="code_review",
         task_schema=CodeReviewTask,
         task_instructions="Review {task.pr_url}...",
         task_output=ReviewOutput
     )
 
-    test_def = TaskDefinition.create(
+    test_def = TaskDefinition(
         task_type="testing",
         task_schema=TestingTask,
         task_instructions="Test {task.test_path}...",
@@ -226,7 +226,7 @@ class SwarmTeam:
         )
 
         # Static instructions
-        task_def = TaskDefinition.create(
+        task_def = TaskDefinition(
             task_type="simple",
             task_schema=Task,
             task_instructions="Process {task.title}"
@@ -241,7 +241,7 @@ class SwarmTeam:
         def generate_instructions(task: Task, context: ContextVariables) -> str:
             return f"Process {task.title} using {context.get('tool_version')}"
 
-        task_def = TaskDefinition.create(
+        task_def = TaskDefinition(
             task_type="dynamic",
             task_schema=Task,
             task_instructions=generate_instructions
@@ -426,16 +426,16 @@ class SwarmTeam:
         ```python
         # With specific assignee
         task = Task(
+            type="security_review",
             id="review-1",
             assignee="security-expert",
-            task_type="security_review"
         )
         member = team._select_matching_member(task)  # Returns security-expert
 
         # Based on task type
         task = Task(
+            type="code_review",
             id="review-2",
-            task_type="code_review"
         )
         member = team._select_matching_member(task)  # Returns first available reviewer
         ```

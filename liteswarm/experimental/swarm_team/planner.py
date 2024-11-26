@@ -143,13 +143,13 @@ class AgentPlanner(PlanningAgent):
     Example:
     ```python
     # Create task definitions
-    review_def = TaskDefinition.create(
+    review_def = TaskDefinition(
         task_type="code_review",
         task_schema=CodeReviewTask,
         task_instructions="Review {task.pr_url}..."
     )
 
-    test_def = TaskDefinition.create(
+    test_def = TaskDefinition(
         task_type="testing",
         task_schema=TestingTask,
         task_instructions="Test {task.test_path}..."
