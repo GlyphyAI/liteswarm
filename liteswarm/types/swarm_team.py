@@ -152,6 +152,35 @@ class Task(BaseModel):
         use_attribute_docstrings=True,
     )
 
+    @classmethod
+    def get_task_type(cls) -> str | None:
+        """Get the type of the task.
+
+        Returns:
+            The type of the task if it is a Literal, otherwise None.
+        """
+        type_field = cls.model_fields["type"]
+        type_field_annotation = type_field.annotation
+
+        if type_field_annotation and get_origin(type_field_annotation) is Literal:
+            return get_args(type_field_annotation)[0]
+
+        return None
+
+    @classmethod
+    def set_task_type(cls, task_type: Any) -> ClassType[Self]:  # noqa: UP006
+        """Set the task type of the Task class.
+
+        Returns:
+            The updated Task class.
+        """
+        return change_field_type(
+            model_type=cls,
+            field_name="type",
+            new_type=task_type,
+            new_model_name=cls.__name__,
+        )
+
 
 class TaskDefinition(BaseModel):
     """Definition of a task type, including how to create tasks of this type.
