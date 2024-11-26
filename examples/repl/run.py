@@ -7,7 +7,7 @@
 import asyncio
 
 from liteswarm.repl import start_repl
-from liteswarm.types import Agent, LLMConfig
+from liteswarm.types import LLM, Agent
 
 INSTRUCTIONS = """
 You are a helpful AI assistant.
@@ -20,7 +20,7 @@ async def run() -> None:
     assistant = Agent(
         id="assistant",
         instructions=INSTRUCTIONS,
-        llm=LLMConfig(
+        llm=LLM(
             model="claude-3-5-haiku-20241022",
             temperature=0.7,
         ),

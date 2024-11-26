@@ -7,7 +7,7 @@
 import asyncio
 
 from liteswarm.repl import start_repl
-from liteswarm.types import Agent, AgentTool, LLMConfig
+from liteswarm.types import LLM, Agent, AgentTool
 
 ROUTER_INSTRUCTIONS = """
 You are an intelligent routing agent that coordinates the Flutter app development team.
@@ -110,7 +110,7 @@ async def run() -> None:
         routing_agent = Agent(
             id="router",
             instructions=ROUTER_INSTRUCTIONS,
-            llm=LLMConfig(
+            llm=LLM(
                 model="claude-3-5-haiku-20241022",
                 tools=[],
                 tool_choice="auto",
@@ -121,7 +121,7 @@ async def run() -> None:
         product_manager_agent = Agent(
             id="product_manager",
             instructions=PRODUCT_MANAGER_INSTRUCTIONS,
-            llm=LLMConfig(
+            llm=LLM(
                 model="claude-3-5-haiku-20241022",
                 tools=[],
                 tool_choice="auto",
@@ -132,7 +132,7 @@ async def run() -> None:
         designer_agent = Agent(
             id="designer",
             instructions=DESIGNER_INSTRUCTIONS,
-            llm=LLMConfig(
+            llm=LLM(
                 model="claude-3-5-haiku-20241022",
                 tools=[],
                 tool_choice="auto",
@@ -143,7 +143,7 @@ async def run() -> None:
         engineer_agent = Agent(
             id="engineer",
             instructions=ENGINEER_INSTRUCTIONS,
-            llm=LLMConfig(
+            llm=LLM(
                 model="claude-3-5-haiku-20241022",
                 tools=[],
                 tool_choice="auto",
@@ -154,7 +154,7 @@ async def run() -> None:
         qa_agent = Agent(
             id="qa",
             instructions=QA_INSTRUCTIONS,
-            llm=LLMConfig(
+            llm=LLM(
                 model="claude-3-5-haiku-20241022",
                 tools=[],
                 tool_choice="auto",

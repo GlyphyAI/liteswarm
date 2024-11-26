@@ -9,8 +9,7 @@ import random
 from time import sleep
 
 from liteswarm.core import Swarm
-from liteswarm.types import Agent, ChatCompletionDeltaToolCall, Delta, Message, ToolCallResult
-from liteswarm.types.llm import LLMConfig
+from liteswarm.types import LLM, Agent, ChatCompletionDeltaToolCall, Delta, Message, ToolCallResult
 
 RESEARCH_AGENT_INSTRUCTIONS = """
 You are a city research analyst. Your task is to gather and analyze data about cities using the available tools.
@@ -128,7 +127,7 @@ async def run() -> None:
     research_agent = Agent(
         id="research_agent",
         instructions=RESEARCH_AGENT_INSTRUCTIONS,
-        llm=LLMConfig(
+        llm=LLM(
             model="claude-3-5-haiku-20241022",
             tools=[
                 query_weather_api,
