@@ -7,13 +7,14 @@
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Self, TypeAlias, TypeVar
+from typing import Any, Literal, Self, TypeAlias, TypeVar, get_args, get_origin
+from typing import Type as ClassType  # noqa: UP035
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
-from liteswarm.utils.misc import change_field_type
+from liteswarm.utils.pydantic import change_field_type
 
 TaskType = TypeVar("TaskType", bound="Task")
 """Type variable representing a Task or its subclass."""
