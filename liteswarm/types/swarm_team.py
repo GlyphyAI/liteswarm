@@ -96,31 +96,55 @@ class PlanStatus(str, Enum):
 
 
 class Task(BaseModel):
-    """Instance of a task created based on its `TaskDefinition`.
+    """Base class for defining task schemas in a SwarmTeam workflow.
 
-    A task represents a single unit of work in a plan, with identification,
-    status tracking, dependencies, and metadata. You can define your own
-    custom fields by subclassing this model.
+    When using the SwarmTeam API, you typically don't create Task instances directly.
+    Instead:
+    1. Define your task schema by subclassing Task
+    2. Register it via TaskDefinition
+    3. Let the SwarmTeam handle task instantiation during plan generation
+
+    The `type` field is a critical discriminator that:
+    - Identifies the task type during plan generation by LLMs
+    - Helps match tasks with capable team members
+    - Gets automatically set by TaskDefinition during registration
 
     Example:
     ```python
+    # 1. Define your task schema
     class DataProcessingTask(Task):
+        # task_type: Literal["process_data"]  # Will be set automatically by TaskDefinition
         input_file: str
         batch_size: int = 100
 
-    task_def = TaskDefinition.create(
+    # 2. Define output schema if needed
+    class DataOutput(BaseModel):
+        processed_items: int
+        success_rate: float
+
+    # 3. Register task via TaskDefinition
+    task_def = TaskDefinition(
         task_type="process_data",
         task_schema=DataProcessingTask,
         task_instructions="Process {task.input_file} in batches of {task.batch_size}",
-        task_output=DataOutput  # From previous example
+        task_output=DataOutput
     )
 
-    task = DataProcessingTask(
-        id="task-1",
-        title="Process customer data",
-        input_file="data.csv",
-        dependencies=["task-0"]
+    # 4. Use with SwarmTeam - it will handle task creation
+    team = SwarmTeam(
+        task_definitions=[task_def],
+        team_members=[...],
+        # ...
     )
+
+    # The LLM will generate plans with tasks like:
+    # {
+    #     "type": "process_data",  # Used to match with team members
+    #     "id": "task-1",
+    #     "title": "Process customer data",
+    #     "input_file": "data.csv",
+    #     "dependencies": ["task-0"]
+    # }
     ```
     """
 
@@ -210,7 +234,7 @@ class TaskDefinition(BaseModel):
         return f'''Review the PR at {task.pr_url} focusing on {task.review_type} aspects.
                   Use the team's coding standards from {context.get('standards_doc')}.'''
 
-    review_task_def = TaskDefinition.create(
+    review_task_def = TaskDefinition(
         task_type="code_review",
         task_schema=CodeReviewTask,
         task_instructions=generate_review_instructions,
