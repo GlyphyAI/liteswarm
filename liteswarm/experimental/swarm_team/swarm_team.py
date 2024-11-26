@@ -194,7 +194,7 @@ class SwarmTeam:
         )
 
         if task_output_type:
-            context.set_reserved("output_format", task_output_type.model_json_schema())
+            context.set_reserved("response_format", task_output_type)
 
         return context
 
