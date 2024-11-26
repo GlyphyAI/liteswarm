@@ -146,7 +146,10 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: P
         return list[_unwrap_pydantic_type(args[0])]  # type: ignore
 
     if origin is dict:
-        return dict[_unwrap_pydantic_type(args[0]), _unwrap_pydantic_type(args[1])]  # type: ignore
+        return dict[  # type: ignore
+            _unwrap_pydantic_type(args[0]),
+            _unwrap_pydantic_type(args[1]),
+        ]
 
     if origin in (Union, UnionType):
         # Flatten nested Unions
