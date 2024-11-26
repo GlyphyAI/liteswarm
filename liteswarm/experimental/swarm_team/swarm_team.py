@@ -625,6 +625,8 @@ class SwarmTeam:
         task_output_type: type[BaseModel] | None = None
         if task_definition.task_output:
             task_output_type = unwrap_task_output_type(task_definition.task_output)
+
+        if task_definition.use_response_format:
             assignee.agent.llm.response_format = task_output_type
 
         task_context = self._build_task_context(task, task_definition, task_output_type)
