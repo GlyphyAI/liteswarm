@@ -99,7 +99,7 @@ class Swarm:
         agent = Agent(
             id="math",
             instructions=agent_instructions,
-            llm=LLMConfig(
+            llm=LLM(
                 model="gpt-4o",
                 tools=[add, multiply],
                 tool_choice="auto",
@@ -1066,7 +1066,7 @@ class Swarm:
             agent = Agent(
                 id="math",
                 instructions=get_instructions,
-                llm=LLMConfig(model="gpt-4o", tools=[add])
+                llm=LLM(model="gpt-4o", tools=[add])
             )
 
             async for response in swarm.stream(
@@ -1180,7 +1180,7 @@ class Swarm:
             agent = Agent(
                 id="helper",
                 instructions=get_instructions,
-                llm=LLMConfig(model="gpt-4o")
+                llm=LLM(model="gpt-4o")
             )
 
             result = await swarm.execute(
