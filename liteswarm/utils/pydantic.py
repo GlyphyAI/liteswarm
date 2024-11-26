@@ -206,8 +206,9 @@ def _restore_nested_models(field_type: Any, field_value: Any) -> Any:  # noqa: P
     origin = get_origin(field_type)
     args = get_args(field_type)
 
-    if isinstance(field_value, BaseModel):
-        return restore_default_values(field_value, field_value.__class__)
+    if origin is Annotated:
+        base_type, *_annotations = args
+        return _restore_nested_models(base_type, field_value)
 
     if origin is list and isinstance(field_value, list):
         item_type = args[0] if args else Any
@@ -229,12 +230,13 @@ def _restore_nested_models(field_type: Any, field_value: Any) -> Any:  # noqa: P
                     return field_value
             except (ValidationError, ValueError, TypeError):
                 continue
-        # If none of the types match, return the value as is
+
         return field_value
 
-    else:
-        # For other types, return the value as is
-        return field_value
+    if isinstance(field_value, BaseModel):
+        return restore_default_values(field_value, field_value.__class__)
+
+    return field_value
 
 
 def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
