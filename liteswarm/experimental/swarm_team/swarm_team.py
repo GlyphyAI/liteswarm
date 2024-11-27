@@ -4,12 +4,13 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from collections import defaultdict
 from datetime import datetime
 
 from pydantic import BaseModel
 
 from liteswarm.core.swarm import Swarm
-from liteswarm.experimental.swarm_team.planner import AgentPlanner, PlanningAgent
+from liteswarm.experimental.swarm_team.planner import AgentPlanner, LiteAgentPlanner
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHandler
 from liteswarm.types.result import Result
@@ -20,11 +21,11 @@ from liteswarm.types.swarm_team import (
     PlanStatus,
     Task,
     TaskDefinition,
-    TaskOutput,
+    TaskResponseFormat,
     TaskStatus,
     TeamMember,
 )
-from liteswarm.utils.unwrap import unwrap_task_output_type
+from liteswarm.utils.typing import is_callable, is_subtype
 
 
 class SwarmTeam:
@@ -105,7 +106,7 @@ class SwarmTeam:
         swarm: Swarm,
         members: list[TeamMember],
         task_definitions: list[TaskDefinition],
-        planning_agent: PlanningAgent | None = None,
+        agent_planner: AgentPlanner | None = None,
         stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
         """Initialize a new SwarmTeam instance.
@@ -114,15 +115,14 @@ class SwarmTeam:
             swarm: The Swarm client for agent interactions
             members: List of team members with their capabilities
             task_definitions: List of task types the team can handle
-            planning_agent: Optional custom agent for plan creation
+            agent_planner: Optional custom agent for plan creation
             stream_handler: Optional handler for streaming events
         """
         # Public properties
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
-        self.task_definitions = task_definitions
         self.stream_handler = stream_handler
-        self.planning_agent = planning_agent or AgentPlanner(
+        self.agent_planner = agent_planner or LiteAgentPlanner(
             swarm=self.swarm,
             task_definitions=task_definitions,
         )
@@ -130,8 +130,9 @@ class SwarmTeam:
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
         self._execution_history: list[ExecutionResult] = []
+        self._team_capabilities = self._get_team_capabilities()
         self._context: ContextVariables = ContextVariables(
-            team_capabilities=self._get_team_capabilities(),
+            team_capabilities=self._team_capabilities,
         )
 
     # ================================================
@@ -156,33 +157,23 @@ class SwarmTeam:
             # }
             ```
         """
-        capabilities: dict[str, list[str]] = {}
+        capabilities: dict[str, list[str]] = defaultdict(list[str])
         for member in self.members.values():
             for task_type in member.task_types:
-                if task_type not in capabilities:
-                    capabilities[task_type] = []
-                capabilities[task_type].append(member.agent.id)
+                capabilities[task_type.get_task_type()].append(member.agent.id)
 
         return capabilities
 
-    def _build_task_context(
-        self,
-        task: Task,
-        task_definition: TaskDefinition,
-        task_output_type: type[BaseModel] | None = None,
-    ) -> ContextVariables:
+    def _build_task_context(self, task: Task) -> ContextVariables:
         """Construct the context for task execution.
 
         Builds a context object containing:
         - Task details and metadata
         - Execution history
-        - Team capabilities
-        - Output format schema (if applicable)
+        - Shared context variables
 
         Args:
             task: The task being executed
-            task_definition: Definition of the task type
-            task_output_type: Optional output type for the task
 
         Returns:
             Context variables for task execution
@@ -192,9 +183,6 @@ class SwarmTeam:
             execution_history=self._execution_history,
             **self._context,
         )
-
-        if task_output_type:
-            context.set_reserved("response_format", task_output_type)
 
         return context
 
@@ -315,20 +303,22 @@ class SwarmTeam:
         )
         ```
         """
-        output_schema = task_definition.task_output
-        if not output_schema:
+        response_format = task_definition.task_response_format
+
+        if not response_format:
             execution_result = ExecutionResult(
                 task=task,
                 content=content,
                 assignee=assignee,
                 timestamp=datetime.now(),
             )
+
             return Result(value=execution_result)
 
         try:
-            output = self._parse_output(
-                output_schema=output_schema,
+            output = self._parse_response(
                 content=content,
+                response_format=response_format,
                 task_context=task_context,
             )
 
@@ -343,21 +333,21 @@ class SwarmTeam:
         except Exception as e:
             return Result(error=ValueError(f"Invalid task output: {e}"))
 
-    def _parse_output(
+    def _parse_response(
         self,
-        output_schema: TaskOutput,
         content: str,
+        response_format: TaskResponseFormat,
         task_context: ContextVariables,
     ) -> BaseModel:
-        """Parse the agent's output using the specified schema.
+        """Parse the agent's response using the specified schema.
 
-        Supports two types of output parsing:
+        Supports two types of response formats for parsing:
         1. Direct schema validation using Pydantic model
-        2. Custom parsing function that uses context
+        2. Custom parsing function that uses content and context
 
         Args:
-            output_schema: Schema or parser function
             content: Raw content to parse
+            response_format: Schema or parser function
             task_context: Context variables for parsing
 
         Returns:
@@ -374,9 +364,9 @@ class SwarmTeam:
             approved: bool
             comments: list[str]
 
-        output = team._parse_output(
-            output_schema=ReviewOutput,
+        output = team._parse_response(
             content='{"approved": true, "comments": ["Good work"]}',
+            response_format=ReviewOutput,
             task_context=context
         )
 
@@ -388,19 +378,20 @@ class SwarmTeam:
                 comments=data["notes"]
             )
 
-        output = team._parse_output(
-            output_schema=parse_review,
+        output = team._parse_response(
             content='{"result": "pass", "notes": ["Good work"]}',
+            response_format=parse_review,
             task_context=context
         )
         ```
         """
-        if isinstance(output_schema, type) and issubclass(output_schema, BaseModel):
-            output = output_schema.model_validate_json(content)
-        else:
-            output = output_schema(content, task_context)  # type: ignore
+        if is_subtype(response_format, BaseModel):
+            return response_format.model_validate_json(content)
 
-        return output
+        if is_callable(response_format):
+            return response_format(content, task_context)
+
+        raise ValueError("Invalid response format")
 
     def _select_matching_member(self, task: Task) -> TeamMember | None:
         """Select the best matching team member for a task.
@@ -443,9 +434,8 @@ class SwarmTeam:
         if task.assignee and task.assignee in self.members:
             return self.members[task.assignee]
 
-        eligible_members = [
-            member for member in self.members.values() if task.type in member.task_types
-        ]
+        eligible_member_ids = self._team_capabilities[task.type]
+        eligible_members = [self.members[member_id] for member_id in eligible_member_ids]
 
         if not eligible_members:
             return None
@@ -505,7 +495,7 @@ class SwarmTeam:
         if context:
             self._context.update(context)
 
-        result = await self.planning_agent.create_plan(
+        result = await self.agent_planner.create_plan(
             prompt=prompt,
             context=self._context,
         )
@@ -618,15 +608,12 @@ class SwarmTeam:
             task.status = TaskStatus.FAILED
             return Result(error=ValueError(f"No TaskDefinition found for task type '{task.type}'"))
 
-        task_output_type: type[BaseModel] | None = None
-        if task_definition.task_output:
-            task_output_type = unwrap_task_output_type(task_definition.task_output)
-
-        if task_definition.use_response_format:
-            assignee.agent.llm.response_format = task_output_type
-
-        task_context = self._build_task_context(task, task_definition, task_output_type)
-        task_instructions = self._prepare_instructions(task, task_definition, task_context)
+        task_context = self._build_task_context(task)
+        task_instructions = self._prepare_instructions(
+            task=task,
+            task_definition=task_definition,
+            task_context=task_context,
+        )
 
         result = await self.swarm.execute(
             agent=assignee.agent,
