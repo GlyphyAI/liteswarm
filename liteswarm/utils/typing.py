@@ -4,8 +4,10 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from collections.abc import Sequence
-from typing import Any, TypeVar, Union
+from collections.abc import Callable, Sequence
+from typing import Any, TypeGuard, TypeVar, Union, get_origin
+
+from typing_extensions import TypeIs
 
 T = TypeVar("T")
 
@@ -47,3 +49,33 @@ def union(types: Sequence[T]) -> Union[T]:  # noqa: UP007
     """
     union: Any = Union[tuple(types)]  # noqa: UP007
     return union
+
+
+def is_callable(obj: Any) -> TypeIs[Callable[..., Any]]:
+    """Type guard to check if an object is a callable (function or method), excluding classes.
+
+    Args:
+        obj: Object to check.
+
+    Returns:
+        True if the object is a callable but not a class, False otherwise.
+    """
+    return callable(obj) and not isinstance(obj, type)
+
+
+def is_subtype(obj: Any, obj_type: type[T]) -> TypeGuard[type[T]]:
+    """Type guard to check if an object is a valid subclass of a target type.
+
+    Args:
+        obj: Object to check.
+        obj_type: Target type to check against.
+
+    Returns:
+        True if the object is a valid subclass of the target type, False otherwise.
+    """
+    return (
+        obj is not None
+        and not get_origin(obj)
+        and isinstance(obj, type)
+        and issubclass(obj, obj_type)
+    )
