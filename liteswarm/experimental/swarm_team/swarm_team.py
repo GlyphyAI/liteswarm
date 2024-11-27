@@ -29,76 +29,52 @@ from liteswarm.utils.typing import is_callable, is_subtype
 
 
 class SwarmTeam:
-    """Orchestrates a team of agents with planning and task execution capabilities.
+    """Orchestrates a team of specialized agents for task execution.
 
-    SwarmTeam manages a group of specialized agents that can execute different types
-    of tasks. It handles:
-    - Task planning and execution
-    - Team member assignment
-    - Context and history management
-    - Structured outputs and validation
+    Manages agent teams that can execute different types of tasks, handling planning,
+    execution, and result tracking.
 
     Example:
-    ```python
-    # Define task types
-    class CodeReviewTask(Task):
-        pr_url: str
-        review_type: Literal["security", "style"]
+        ```python
+        # Define task types and team members
+        class ReviewTask(Task):
+            type: Literal["review"]
+            pr_url: str
+            review_type: str
 
-    class TestingTask(Task):
-        test_path: str
-        coverage_target: float
+        class TestTask(Task):
+            type: Literal["test"]
+            pr_url: str
+            test_type: str
 
-    # Create task definitions
-    review_def = TaskDefinition(
-        task_type="code_review",
-        task_schema=CodeReviewTask,
-        task_instructions="Review {task.pr_url}...",
-        task_output=ReviewOutput
-    )
+        review_def = TaskDefinition(
+            task_schema=ReviewTask,
+            task_instructions="Review {task.pr_url}",
+            task_response_format=ReviewOutput
+        )
 
-    test_def = TaskDefinition(
-        task_type="testing",
-        task_schema=TestingTask,
-        task_instructions="Test {task.test_path}...",
-        task_output=TestResult
-    )
+        reviewer = TeamMember(
+            id="reviewer-1",
+            agent=Agent(id="review-gpt", llm=LLM(model="gpt-4o")),
+            task_types=[ReviewTask]
+        )
 
-    # Create team members
-    reviewer = TeamMember(
-        id="reviewer-1",
-        agent=Agent(
-            id="review-gpt",
-            instructions="You are a code reviewer...",
-            llm=LLM(model="gpt-4o")
-        ),
-        task_types=["code_review"]
-    )
+        tester = TeamMember(
+            id="tester-1",
+            agent=Agent(id="tester-gpt", llm=LLM(model="gpt-4o")),
+            task_types=[TestTask]
+        )
 
-    tester = TeamMember(
-        id="tester-1",
-        agent=Agent(
-            id="test-gpt",
-            instructions="You are a testing expert...",
-            llm=LLM(model="gpt-4o")
-        ),
-        task_types=["testing"]
-    )
+        # Create and use team
+        team = SwarmTeam(
+            swarm=swarm,
+            members=[reviewer, tester],
+            task_definitions=[review_def]
+        )
 
-    # Initialize team
-    team = SwarmTeam(
-        swarm=swarm,
-        members=[reviewer, tester],
-        task_definitions=[review_def, test_def]
-    )
-
-    # Create and execute plan
-    plan = await team.create_plan(
-        "Review PR #123 and test the changes"
-    )
-
-    results = await team.execute_plan(plan)
-    ```
+        plan = await team.create_plan("Review PR #123")
+        results = await team.execute_plan(plan)
+        ```
     """
 
     def __init__(
@@ -109,14 +85,14 @@ class SwarmTeam:
         agent_planner: AgentPlanner | None = None,
         stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
-        """Initialize a new SwarmTeam instance.
+        """Initialize a new team.
 
         Args:
-            swarm: The Swarm client for agent interactions
-            members: List of team members with their capabilities
-            task_definitions: List of task types the team can handle
-            agent_planner: Optional custom agent for plan creation
-            stream_handler: Optional handler for streaming events
+            swarm: Swarm client for agent interactions
+            members: Team members with their capabilities
+            task_definitions: Task types the team can handle
+            agent_planner: Optional custom planning agent
+            stream_handler: Optional event stream handler
         """
         # Public properties
         self.swarm = swarm
@@ -136,25 +112,19 @@ class SwarmTeam:
         )
 
     # ================================================
-    # MARK: Task Execution Helpers
+    # MARK: Internal Helpers
     # ================================================
 
     def _get_team_capabilities(self) -> dict[str, list[str]]:
-        """Get a mapping of task types to team member capabilities.
-
-        Creates a dictionary showing which team members can handle each task type.
-        Used for planning and task assignment.
+        """Map task types to capable team members.
 
         Returns:
-            Dict mapping task types to lists of member IDs
+            Dict mapping task types to member IDs
 
         Example:
             ```python
             capabilities = team._get_team_capabilities()
-            # {
-            #     "code_review": ["reviewer-1", "reviewer-2"],
-            #     "testing": ["tester-1"]
-            # }
+            # {"review": ["reviewer-1"], "test": ["tester-1"]}
             ```
         """
         capabilities: dict[str, list[str]] = defaultdict(list[str])
@@ -165,18 +135,13 @@ class SwarmTeam:
         return capabilities
 
     def _build_task_context(self, task: Task) -> ContextVariables:
-        """Construct the context for task execution.
-
-        Builds a context object containing:
-        - Task details and metadata
-        - Execution history
-        - Shared context variables
+        """Build context for task execution.
 
         Args:
-            task: The task being executed
+            task: Task being executed
 
         Returns:
-            Context variables for task execution
+            Context with task details and history
         """
         context = ContextVariables(
             task=task.model_dump(),
@@ -194,52 +159,41 @@ class SwarmTeam:
     ) -> str:
         """Prepare task instructions for execution.
 
-        Handles both static and dynamic instructions:
-        - Static instructions are used as-is
-        - Dynamic instructions are generated using task and context
+        Handles both static templates and dynamic instruction generation.
 
         Args:
-            task: The task being executed
-            task_definition: Definition containing the instructions
-            task_context: Context variables for instruction generation
+            task: Task being executed
+            task_definition: Task type definition
+            task_context: Context for instruction generation
 
         Returns:
-            Final instructions string for the agent
+            Final instructions for agent
 
         Example:
-        ```python
-        context = ContextVariables(
-            tool_version="1.0.0",
-            # ... other context variables
-        )
+            ```python
+            # Static template
+            instructions = team._prepare_instructions(
+                task=task,
+                task_definition=TaskDefinition(
+                    task_schema=Task,
+                    task_instructions="Process {task.title}"
+                ),
+                task_context=context
+            )
 
-        # Static instructions
-        task_def = TaskDefinition(
-            task_type="simple",
-            task_schema=Task,
-            task_instructions="Process {task.title}"
-        )
-        instructions = team._prepare_instructions(
-            task=task,
-            task_definition=task_def,
-            task_context=context
-        )
+            # Dynamic generation
+            def build_task_instructions(task: Task, context: ContextVariables) -> str:
+                return f"Process {task.title} with {context.get('tool')}"
 
-        # Dynamic instructions
-        def generate_instructions(task: Task, context: ContextVariables) -> str:
-            return f"Process {task.title} using {context.get('tool_version')}"
-
-        task_def = TaskDefinition(
-            task_type="dynamic",
-            task_schema=Task,
-            task_instructions=generate_instructions
-        )
-        instructions = team._prepare_instructions(
-            task=task,
-            task_definition=task_def,
-            task_context=context
-        )
-        ```
+            instructions = team._prepare_instructions(
+                task=task,
+                task_definition=TaskDefinition(
+                    task_schema=Task,
+                    task_instructions=build_task_instructions,
+                ),
+                task_context=context
+            )
+            ```
         """
         instructions = task_definition.task_instructions
         return instructions(task, task_context) if callable(instructions) else instructions
@@ -252,56 +206,45 @@ class SwarmTeam:
         content: str,
         task_context: ContextVariables,
     ) -> Result[ExecutionResult]:
-        """Process the agent's response and create an ExecutionResult.
-
-        Handles both unstructured and structured outputs:
-        - For unstructured: Creates ExecutionResult with raw content
-        - For structured: Parses content into specified output schema
+        """Process agent response into execution result.
 
         Args:
-            task: The executed task
-            assignee: Team member who executed the task
-            task_definition: Definition of the task type
-            content: Raw response from the agent
-            task_context: Context used during execution
+            task: Executed task
+            assignee: Team member who executed
+            task_definition: Task type definition
+            content: Raw agent response
+            task_context: Execution context
 
         Returns:
-            Result containing either:
-            - Successful ExecutionResult with parsed output
-            - Error if output parsing fails
+            Result with execution details or error
 
         Example:
-        ```python
-        # Unstructured output
-        result = team._process_execution_result(
-            task=task,
-            assignee=member,
-            task_definition=task_def,
-            content='Task completed successfully',  # LLM response
-            task_context=context
-        )
+            ```python
+            # Unstructured output
+            result = team._process_execution_result(
+                task=task,
+                assignee=member,
+                task_definition=TaskDefinition(
+                    task_schema=Task,
+                    task_instructions="Process data",
+                ),
+                content="Task completed",
+                task_context=context
+            )
 
-        # Structured output with schema
-        class OutputSchema(BaseModel):
-            status: str
-            items_processed: int
-
-        def task_instructions(task: Task, context: ContextVariables) -> str:
-            return f"Process {task.title}"
-
-        result = team._process_execution_result(
-            task=task,
-            assignee=member,
-            task_definition=TaskDefinition(
-                task_type="simple_task",
-                task_schema=Task,
-                task_instructions=task_instructions,
-                task_output=OutputSchema,
-            ),
-            content='{"status": "success", "items_processed": 42}',  # LLM response
-            task_context=context
-        )
-        ```
+            # Structured output
+            result = team._process_execution_result(
+                task=task,
+                assignee=member,
+                task_definition=TaskDefinition(
+                    task_schema=Task,
+                    task_instructions="Process data",
+                    task_response_format=OutputSchema,
+                ),
+                content='{"status": "success"}',
+                task_context=context
+            )
+            ```
         """
         response_format = task_definition.task_response_format
 
@@ -339,51 +282,39 @@ class SwarmTeam:
         response_format: TaskResponseFormat,
         task_context: ContextVariables,
     ) -> BaseModel:
-        """Parse the agent's response using the specified schema.
-
-        Supports two types of response formats for parsing:
-        1. Direct schema validation using Pydantic model
-        2. Custom parsing function that uses content and context
+        """Parse agent response using schema.
 
         Args:
             content: Raw content to parse
             response_format: Schema or parser function
-            task_context: Context variables for parsing
+            task_context: Context for parsing
 
         Returns:
-            Parsed output as a Pydantic model
+            Parsed output model
 
         Raises:
             TypeError: If output doesn't match schema
             ValidationError: If content is invalid
 
         Example:
-        ```python
-        # Using Pydantic model
-        class ReviewOutput(BaseModel):
-            approved: bool
-            comments: list[str]
-
-        output = team._parse_response(
-            content='{"approved": true, "comments": ["Good work"]}',
-            response_format=ReviewOutput,
-            task_context=context
-        )
-
-        # Using custom parser
-        def parse_review(content: str, context: ContextVariables) -> BaseModel:
-            data = json.loads(content)
-            return ReviewOutput(
-                approved=data["result"] == "pass",
-                comments=data["notes"]
+            ```python
+            # Using model
+            output = team._parse_response(
+                content='{"status": "success"}',
+                response_format=OutputSchema,
+                task_context=context
             )
 
-        output = team._parse_response(
-            content='{"result": "pass", "notes": ["Good work"]}',
-            response_format=parse_review,
-            task_context=context
-        )
-        ```
+            # Using parser
+            def parse_output(content: str, context: ContextVariables) -> OutputSchema:
+                return OutputSchema(status=content["result"])
+
+            output = team._parse_response(
+                content='{"result": "pass"}',
+                response_format=parse_output,
+                task_context=context
+            )
+            ```
         """
         if is_subtype(response_format, BaseModel):
             return response_format.model_validate_json(content)
@@ -394,42 +325,31 @@ class SwarmTeam:
         raise ValueError("Invalid response format")
 
     def _select_matching_member(self, task: Task) -> TeamMember | None:
-        """Select the best matching team member for a task.
+        """Select best team member for task.
 
-        Selection process:
-        1. Use assigned member if specified
-        2. Find members capable of task type
-        3. Select best match (currently first available)
-
-        Future improvements could consider:
-        - Member workload
-        - Specialization scores
-        - Past performance
-        - Agent voting
+        Tries to find a member by:
+        1. Using assigned member if specified
+        2. Finding members capable of task type
+        3. Selecting best match (currently first available)
 
         Args:
             task: Task needing assignment
 
         Returns:
-            Selected team member or None if no match
+            Selected member or None if no match
 
         Example:
-        ```python
-        # With specific assignee
-        task = Task(
-            type="security_review",
-            id="review-1",
-            assignee="security-expert",
-        )
-        member = team._select_matching_member(task)  # Returns security-expert
+            ```python
+            # With specific assignee
+            member = team._select_matching_member(
+                Task(type="review", assignee="reviewer-1")
+            )
 
-        # Based on task type
-        task = Task(
-            type="code_review",
-            id="review-2",
-        )
-        member = team._select_matching_member(task)  # Returns first available reviewer
-        ```
+            # Based on task type
+            member = team._select_matching_member(
+                Task(type="review")
+            )
+            ```
         """
         if task.assignee and task.assignee in self.members:
             return self.members[task.assignee]
@@ -458,39 +378,34 @@ class SwarmTeam:
         prompt: str,
         context: ContextVariables | None = None,
     ) -> Result[Plan]:
-        """Create a new plan from the prompt and context.
+        """Create a task execution plan from a natural language prompt.
 
-        Uses the planning agent to:
-        1. Analyze the prompt and requirements
-        2. Break down work into appropriate tasks
-        3. Set up task dependencies
-        4. Validate the resulting plan
+        Uses a planning agent to analyze the prompt, break it down into tasks,
+        and create a structured plan with appropriate dependencies.
 
         Args:
-            prompt: Description of what needs to be done
-            context: Optional additional context variables
+            prompt: Natural language description of work to be done
+            context: Optional variables for plan customization (e.g., URLs, paths)
 
         Returns:
-            Result containing the created plan or error
+            Result with either:
+            - Plan: Structured plan with ordered tasks
+            - Error: If plan creation or validation fails
 
         Example:
-        ```python
-        result = await team.create_plan(
-            prompt='''
-            Review PR #123 which updates authentication:
-            1. Security review of auth changes
-            2. Test the new auth flow
-            ''',
-            context=ContextVariables(
-                pr_url="https://github.com/org/repo/pull/123",
-                priority="high"
-            )
-        )
+            ```python
+            # Basic usage
+            result = await team.create_plan("Review and test PR #123")
 
-        if result.value:
-            plan = result.value
-            print(f"Created plan with {len(plan.tasks)} tasks")
-        ```
+            # With additional context
+            result = await team.create_plan(
+                prompt="Review authentication changes in PR #123",
+                context=ContextVariables(
+                    pr_url="github.com/org/repo/123",
+                    focus_areas=["security", "performance"]
+                )
+            )
+            ```
         """
         if context:
             self._context.update(context)
@@ -511,29 +426,37 @@ class SwarmTeam:
         return Result(value=plan)
 
     async def execute_plan(self, plan: Plan) -> Result[list[ExecutionResult]]:
-        """Execute all tasks in the given plan.
+        """Execute a plan by running all its tasks in dependency order.
 
-        Handles the complete plan execution lifecycle:
-        1. Updates plan status
-        2. Executes tasks in dependency order
-        3. Tracks execution results
-        4. Manages failures and recovery
+        Manages the complete execution lifecycle:
+        1. Executes tasks when their dependencies are met
+        2. Tracks execution results and updates plan status
+        3. Handles failures and notifies via stream handler
 
         Args:
-            plan: The plan to execute
+            plan: Plan with tasks to execute
 
         Returns:
-            Result containing list of execution results or error
+            Result with either:
+            - List[ExecutionResult]: Results from all tasks
+            - Error: If any task fails or dependencies are invalid
 
         Example:
-        ```python
-        result = await team.execute_plan(plan)
-        if result.value:
-            for execution in result.value:
-                print(f"Task {execution.task.id}:")
-                print(f"- Status: {execution.task.status}")
-                print(f"- Output: {execution.output}")
-        ```
+            ```python
+            # Create and execute plan
+            plan_result = await team.create_plan("Review PR #123")
+            if plan_result.error:
+                print(f"Planning failed: {plan_result.error}")
+
+        Return:
+            result = await team.execute_plan(plan_result.value)
+            if result.value:
+                for execution in result.value:
+                    print(f"Task: {execution.task.title}")
+                    print(f"Status: {execution.task.status}")
+                    if execution.output:
+                        print(f"Output: {execution.output.model_dump()}")
+            ```
         """
         plan.status = PlanStatus.IN_PROGRESS
         results: list[ExecutionResult] = []
@@ -562,36 +485,41 @@ class SwarmTeam:
             return Result(error=e)
 
     async def execute_task(self, task: Task) -> Result[ExecutionResult]:
-        """Execute a single task using the appropriate team member.
+        """Execute a single task using an appropriate team member.
 
-        Manages the complete task execution process:
-        1. Selects the best team member
-        2. Prepares task context
-        3. Executes the task
-        4. Processes and validates output
+        Handles the complete task lifecycle:
+        1. Selects a capable team member
+        2. Prepares execution context and instructions
+        3. Executes task and processes response
+        4. Updates task status and history
 
         Args:
-            task: The task to execute
+            task: Task to execute, must match a registered task type
 
         Returns:
-            Result containing execution details or error
+            Result with either:
+            - ExecutionResult: Task execution details and output
+            - Error: If execution fails or no capable member found
 
         Example:
-        ```python
-        result = await team.execute_task(
-            CodeReviewTask(
-                id="review-1",
-                title="Security review of auth changes",
-                pr_url="https://github.com/org/repo/pull/123",
-                review_type="security"
+            ```python
+            # Execute a review task
+            result = await team.execute_task(
+                ReviewTask(
+                    id="review-1",
+                    title="Security review of auth changes",
+                    pr_url="github.com/org/repo/123",
+                    review_type="security"
+                )
             )
-        )
 
-        if result.value:
-            execution = result.value
-            print(f"Review by: {execution.assignee.id}")
-            print(f"Findings: {execution.output.issues}")
-        ```
+            if result.value:
+                execution = result.value
+                print(f"Reviewer: {execution.assignee.id}")
+                print(f"Status: {execution.task.status}")
+                if execution.output:
+                    print(f"Findings: {execution.output.issues}")
+            ```
         """
         assignee = self._select_matching_member(task)
         if not assignee:
