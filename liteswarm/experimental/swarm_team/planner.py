@@ -5,9 +5,10 @@
 # https://opensource.org/licenses/MIT.
 
 from collections.abc import Callable
-from typing import Any, Protocol, TypeAlias, TypeGuard
+from typing import Protocol, TypeAlias
 
 from liteswarm.core.swarm import Swarm
+from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.types import Result
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
@@ -15,11 +16,8 @@ from liteswarm.types.swarm_team import Plan, TaskDefinition
 from liteswarm.utils.misc import extract_json
 from liteswarm.utils.pydantic import (
     change_field_type,
-    is_pydantic_model,
-    remove_default_values,
-    restore_default_values,
 )
-from liteswarm.utils.typing import union_type
+from liteswarm.utils.typing import is_callable, is_subtype, union
 
 AGENT_PLANNER_INSTRUCTIONS = """
 You are a task planning specialist.
@@ -84,8 +82,11 @@ formatted = generate_prompt(
 ```
 """
 
+PlanResponseFormat: TypeAlias = type[Plan] | Callable[[ContextVariables], type[Plan]]
+"""Response format for plan creation."""
 
-class PlanningAgent(Protocol):
+
+class AgentPlanner(Protocol):
     """Protocol for planning agents that create task plans.
 
     Planning agents analyze prompts and create structured plans by:
@@ -131,7 +132,7 @@ class PlanningAgent(Protocol):
         ...
 
 
-class AgentPlanner(PlanningAgent):
+class LiteAgentPlanner(AgentPlanner):
     """Default implementation of the planning strategy using an LLM agent.
 
     Creates plans by:
@@ -181,24 +182,27 @@ class AgentPlanner(PlanningAgent):
         self,
         swarm: Swarm,
         agent: Agent | None = None,
-        template: PromptTemplate | None = None,
+        prompt_template: PromptTemplate | None = None,
         task_definitions: list[TaskDefinition] | None = None,
-        use_response_format: bool = False,
+        response_format: PlanResponseFormat | None = None,
     ) -> None:
         """Initialize a new AgentPlanner instance.
 
         Args:
             swarm: Swarm instance for agent interactions
             agent: Optional custom planning agent
-            template: Optional custom prompt template
+            prompt_template: Optional custom prompt template
             task_definitions: List of available task types
-            use_response_format: Whether to use response format in LLM calls
+            response_format: Optional response format for plan creation
         """
+        # Public properties
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
-        self.template = template or self._default_planning_prompt_template()
-        self.task_definitions = {td.task_type: td for td in task_definitions or []}
-        self.use_response_format = use_response_format
+        self.prompt_template = prompt_template or self._default_planning_prompt_template()
+        self.response_format = response_format or self._default_planning_response_format()
+
+        # Internal state (private)
+        self._task_registry = TaskRegistry(task_definitions)
 
     def _default_planning_agent(self) -> Agent:
         """Create a default agent if none is provided.
@@ -223,19 +227,12 @@ class AgentPlanner(PlanningAgent):
         Returns:
             Simple template that uses raw prompt
         """
-        return "{prompt}"
+        return lambda prompt, _: prompt
 
-    def _patch_plan_response_format(self, plan_schema: type[Plan]) -> type[Plan]:
-        """Patch the response format for plan schemas.
-
-        Args:
-            plan_schema: Pydantic model for plan
-
-        Returns:
-            Patched plan schema with tasks as a union of task schemas
-        """
-        task_definitions = list(self.task_definitions.values())
-        task_schemas = union_type([td.task_schema for td in task_definitions])
+    def _default_planning_response_format(self) -> PlanResponseFormat:
+        """Create a default response format for plan creation."""
+        task_definitions = self._task_registry.get_task_definitions()
+        task_schemas = union([td.task_schema for td in task_definitions])
         plan_schema_name = Plan.__name__
 
         plan_schema = change_field_type(
@@ -247,16 +244,27 @@ class AgentPlanner(PlanningAgent):
 
         return plan_schema
 
-    def _is_plan_model(self, obj: Any) -> TypeGuard[type[Plan]]:
-        """Check if the given object is a Pydantic model that subclasses Plan.
+    def _unwrap_response_format(
+        self,
+        response_format: PlanResponseFormat,
+        context: ContextVariables | None = None,
+    ) -> type[Plan]:
+        """Unwrap the response format for plan schemas.
 
         Args:
-            obj: Object to check
+            response_format: Response format for plan creation
+            context: Optional context variables for response format
 
         Returns:
-            True if obj is a Pydantic model that subclasses Plan
+            Unwrapped response format
         """
-        return is_pydantic_model(obj) and issubclass(obj, Plan)
+        if is_subtype(response_format, Plan):
+            return response_format
+
+        if is_callable(response_format):
+            return response_format(context or ContextVariables())
+
+        raise ValueError("Invalid response format")
 
     async def create_plan(  # noqa: PLR0912
         self,
@@ -295,26 +303,17 @@ class AgentPlanner(PlanningAgent):
         )
         ```
         """
-        if feedback:
-            full_prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
-        else:
-            full_prompt = prompt
-
-        response_format = self._patch_plan_response_format(Plan)
         context = ContextVariables(**context)
-        context.set_reserved("response_format", response_format)
 
-        if callable(self.template):
-            formatted_prompt = self.template(full_prompt, context)
-        else:
-            formatted_prompt = self.template.format(prompt=full_prompt, context=context)
+        if feedback:
+            prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
 
-        if self.use_response_format:
-            self.agent.llm.response_format = remove_default_values(response_format)
+        if is_callable(self.prompt_template):
+            prompt = self.prompt_template(prompt, context)
 
         result = await self.swarm.execute(
             agent=self.agent,
-            prompt=formatted_prompt,
+            prompt=prompt,
             context_variables=context,
         )
 
@@ -326,18 +325,11 @@ class AgentPlanner(PlanningAgent):
             if not isinstance(json_plan, dict):
                 raise TypeError("Unable to extract plan from response")
 
-            agent_response_format = self.agent.llm.response_format
-            if self.use_response_format and self._is_plan_model(agent_response_format):
-                plan_schema = agent_response_format
-            else:
-                plan_schema = response_format
-
+            plan_schema = self._unwrap_response_format(self.response_format, context)
             plan = plan_schema.model_validate(json_plan)
-            if self.use_response_format:
-                plan = restore_default_values(plan, response_format)
 
             for task in plan.tasks:
-                if task.type not in self.task_definitions:
+                if not self._task_registry.contains_task_type(task.type):
                     return Result(error=ValueError(f"Unknown task type: {task.type}"))
 
             if errors := plan.validate_dependencies():
