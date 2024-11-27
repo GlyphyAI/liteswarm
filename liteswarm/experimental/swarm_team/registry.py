@@ -76,7 +76,7 @@ class TaskRegistry:
         )
         ```
         """
-        self._registry[task_definition.task_type] = task_definition
+        self._registry[task_definition.task_schema.get_task_type()] = task_definition
 
     def register_tasks(self, task_definitions: list[TaskDefinition]) -> None:
         """Register multiple task definitions at once.
