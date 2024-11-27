@@ -27,42 +27,35 @@ TaskType = TypeVar("TaskType", bound="Task")
 TaskInstructions: TypeAlias = str | Callable[[TaskType, ContextVariables], str]
 """Instructions for executing a task.
 
-Can be either:
-- A string template with the task instructions
-- A function that generates instructions based on the task and context
+Can be either a string template with static instructions or a function that generates
+dynamic instructions based on the task and context.
 
 Example:
-```python
-# String template
-instructions: TaskInstructions = f"Process the data in {task.metadata['file_path']}"
+    ```python
+    # Static template
+    instructions: TaskInstructions = "Process data in {task.input_file}"
 
-# Function generator
-def generate_instructions(task: Task, context: ContextVariables) -> str:
-    return f"Process {task.title} using context: {context.get('parameters')}"
-```
+    # Dynamic generator
+    def generate_instructions(task: Task, context: ContextVariables) -> str:
+        return f"Process {task.title} with {context.get('parameters')}"
+    ```
 """
 
 TaskResponseFormat: TypeAlias = type[BaseModel] | Callable[[str, ContextVariables], BaseModel]
-"""Schema or parser for task response format.
+"""Schema or parser for parsing the task output.
 
-Can be either:
-- A Pydantic model class for direct JSON parsing
-- A function that parses the output using context
+Can be either a Pydantic model class for direct parsing or a function that parses
+output with context.
 
 Example:
-```python
-class DataOutput(BaseModel):
-    processed_items: int
-    success_rate: float
+    ```python
+    # Direct model
+    response_format: TaskResponseFormat = DataOutput
 
-# Using model directly
-output_schema: TaskOutput = DataOutput
-
-# Using custom parser
-def parse_output(content: str, context: ContextVariables) -> BaseModel:
-    # Custom parsing logic
-    return DataOutput(...)
-```
+    # Custom parser
+    def parse_output(content: str, context: ContextVariables) -> BaseModel:
+        return DataOutput.model_validate_json(content)
+    ```
 """
 
 
@@ -98,84 +91,54 @@ class PlanStatus(str, Enum):
     """All tasks in plan completed successfully"""
 
     FAILED = "failed"
+    """Plan execution failed"""
 
 
 class Task(BaseModel):
     """Base class for defining task schemas in a SwarmTeam workflow.
 
-    When using the SwarmTeam API, you typically don't create Task instances directly.
-    Instead:
-    1. Define your task schema by subclassing Task
-    2. Register it via TaskDefinition
-    3. Let the SwarmTeam handle task instantiation during plan generation
-
-    The `type` field is a critical discriminator that:
-    - Identifies the task type during plan generation by LLMs
-    - Helps match tasks with capable team members
-    - Gets automatically set by TaskDefinition during registration
+    Tasks are the fundamental units of work in a SwarmTeam. Each task has a type,
+    which determines its schema and how it should be executed.
 
     Example:
-    ```python
-    # 1. Define your task schema
-    class DataProcessingTask(Task):
-        # task_type: Literal["process_data"]  # Will be set automatically by TaskDefinition
-        input_file: str
-        batch_size: int = 100
+        ```python
+        class DataProcessingTask(Task):
+            type: Literal["data_processing"]
+            input_file: str
+            batch_size: int = 100
 
-    # 2. Define output schema if needed
-    class DataOutput(BaseModel):
-        processed_items: int
-        success_rate: float
-
-    # 3. Register task via TaskDefinition
-    task_def = TaskDefinition(
-        task_type="process_data",
-        task_schema=DataProcessingTask,
-        task_instructions="Process {task.input_file} in batches of {task.batch_size}",
-        task_output=DataOutput
-    )
-
-    # 4. Use with SwarmTeam - it will handle task creation
-    team = SwarmTeam(
-        task_definitions=[task_def],
-        team_members=[...],
-        # ...
-    )
-
-    # The LLM will generate plans with tasks like:
-    # {
-    #     "type": "process_data",  # Used to match with team members
-    #     "id": "task-1",
-    #     "title": "Process customer data",
-    #     "input_file": "data.csv",
-    #     "dependencies": ["task-0"]
-    # }
-    ```
+        task = DataProcessingTask(
+            type="data_processing",
+            id="task-1",
+            title="Process customer data",
+            input_file="data.csv"
+        )
+        ```
     """
 
     type: str
-    """Type of the task. Critical field used as discriminator for task identification and team member matching."""
+    """Type identifier for task matching with team members"""
 
     id: str
-    """Unique identifier for the task. REQUIRED: Must be provided."""
+    """Unique identifier for the task"""
 
     title: str
-    """Short descriptive title of the task. REQUIRED: Must be provided."""
+    """Short descriptive title of the task"""
 
     description: str | None = None
-    """Detailed description of the task. OPTIONAL: Provide if needed."""
+    """Optional detailed description of the task"""
 
     status: TaskStatus = TaskStatus.PENDING
-    """Current status of the task. USE_DEFAULT: Do not modify, use default value."""
+    """Current execution status of the task"""
 
     assignee: str | None = None
-    """ID of the assigned team member. USE_DEFAULT: Do not modify, use default value."""
+    """ID of the assigned team member executing the task"""
 
     dependencies: list[str] = Field(default_factory=list)
-    """List of task IDs that must be completed before this task. OPTIONAL: Provide if needed."""
+    """IDs of tasks that must complete first"""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
-    """Additional task metadata. USE_DEFAULT: Do not modify, use default value."""
+    """Additional task-specific data"""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -184,13 +147,13 @@ class Task(BaseModel):
 
     @classmethod
     def get_task_type(cls) -> str:
-        """Get the type of the task.
+        """Get the type identifier for this task class.
 
         Returns:
-            The type of the task.
+            The task type string defined in the schema.
 
         Raises:
-            ValueError: If the task type is not defined as a Literal in the task schema.
+            ValueError: If task type is not defined as a Literal.
         """
         type_field = cls.model_fields["type"]
         type_field_annotation = type_field.annotation
@@ -202,49 +165,29 @@ class Task(BaseModel):
 
 
 class TaskDefinition(BaseModel):
-    """Definition of a task type, including how to create tasks of this type.
+    """Definition of a task type and its execution requirements.
 
-    A TaskDefinition serves as a template for creating and executing tasks, defining:
-    - The task type identifier
-    - The schema for tasks of this type (validation)
-    - Instructions for executing the task (prompt)
-    - Optional output format for structured responses
+    TaskDefinition serves as a blueprint for creating and executing tasks, specifying
+    their schema, instructions, and output format.
 
     Example:
-    ```python
-    # Define custom task type with required fields
-    class CodeReviewTask(Task):
-        pr_url: str
-        repository: str
-        review_type: Literal["security", "style", "functionality"]
-
-    # Define output schema
-    class ReviewOutput(BaseModel):
-        approved: bool
-        issues: list[str]
-
-    # Create task definition with dynamic instructions
-    def generate_review_instructions(task: CodeReviewTask, context: ContextVariables) -> str:
-        return f'''Review the PR at {task.pr_url} focusing on {task.review_type} aspects.
-                  Use the team's coding standards from {context.get('standards_doc')}.'''
-
-    review_task_def = TaskDefinition(
-        task_type="code_review",
-        task_schema=CodeReviewTask,
-        task_instructions=generate_review_instructions,
-        task_output=ReviewOutput,
-    )
-    ```
+        ```python
+        task_def = TaskDefinition(
+            task_schema=DataProcessingTask,
+            task_instructions="Process {task.input_file}",
+            task_response_format=ProcessingOutput
+        )
+        ```
     """
 
     task_schema: type[Task]
-    """Pydantic model defining the structure of tasks of this type"""
+    """Pydantic model for task validation"""
 
     task_instructions: TaskInstructions
-    """Instructions template or function to generate task instructions"""
+    """Template or function for task instructions"""
 
     task_response_format: TaskResponseFormat | None = None
-    """Optional schema or function for parsing structured task response"""
+    """Optional schema or parser for parsing the task output"""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -256,43 +199,23 @@ class TaskDefinition(BaseModel):
 class Plan(BaseModel):
     """A plan consisting of ordered tasks with dependencies.
 
-    Plans organize tasks into a workflow, tracking:
-    - The list of tasks to be executed
-    - Dependencies between tasks
-    - Overall execution status
-    - Additional metadata
+    Plans organize tasks into a workflow, tracking their dependencies and execution
+    status.
 
     Example:
-    ```python
-    # Create tasks with dependencies
-    tasks = [
-        CodeReviewTask(
-            id="review-1",
-            title="Review authentication changes",
-            pr_url="https://github.com/org/repo/pull/1",
-            repository="auth-service",
-            review_type="security"
-        ),
-        CodeReviewTask(
-            id="review-2",
-            title="Review API changes",
-            pr_url="https://github.com/org/repo/pull/2",
-            repository="api-service",
-            review_type="functionality",
-            dependencies=["review-1"]  # Must complete security review first
-        )
-    ]
-
-    plan = Plan(tasks=tasks)
-    next_tasks = plan.get_next_tasks()  # Returns [review-1]
-    ```
+        ```python
+        plan = Plan(tasks=[
+            Task(id="task-1", title="First step"),
+            Task(id="task-2", title="Second step", dependencies=["task-1"])
+        ])
+        ```
     """
 
     tasks: Sequence[Task]
-    """List of tasks that make up this plan"""
+    """List of tasks in this plan"""
 
     status: PlanStatus = PlanStatus.DRAFT
-    """Current status of the plan"""
+    """Current plan status"""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
     """Additional plan metadata"""
@@ -306,7 +229,7 @@ class Plan(BaseModel):
         """Validate that all task dependencies exist.
 
         Returns:
-            List of error messages if any dependencies are invalid, otherwise an empty list.
+            List of error messages for invalid dependencies.
         """
         task_ids = {task.id for task in self.tasks}
         errors: list[str] = []
@@ -319,10 +242,12 @@ class Plan(BaseModel):
         return errors
 
     def get_next_tasks(self) -> list[Task]:
-        """Get tasks that are ready to be executed (all dependencies completed).
+        """Get tasks that are ready to be executed.
+
+        A task is ready when it's pending and all its dependencies are completed.
 
         Returns:
-            List of tasks that are ready to be executed.
+            List of tasks ready for execution.
         """
         completed_tasks = {task.id for task in self.tasks if task.status == TaskStatus.COMPLETED}
         return [
@@ -336,41 +261,30 @@ class Plan(BaseModel):
 class TeamMember(BaseModel):
     """Represents a team member that can execute tasks.
 
-    Team members are agents with specific capabilities:
-    - Unique identifier within the team
-    - Associated agent configuration
-    - List of task types they can handle
-    - Additional metadata about the team member
+    Team members are agents with specific capabilities for handling certain types
+    of tasks.
 
     Example:
-    ```python
-    security_reviewer = TeamMember(
-        id="security-bot",
-        agent=Agent(
-            id="security-gpt",
-            instructions="You are a security-focused code reviewer...",
-            llm=LLM(model="gpt-4o")
-        ),
-        task_types=["code_review"],
-        metadata={
-            "specialization": "security",
-            "experience_level": "senior"
-        }
-    )
-    ```
+        ```python
+        member = TeamMember(
+            id="data-processor",
+            agent=Agent(id="processor-gpt"),
+            task_types=[DataProcessingTask]
+        )
+        ```
     """
 
     id: str
     """Unique identifier for the team member"""
 
     agent: Agent
-    """Agent configuration for this team member"""
+    """Agent configuration used to execute tasks"""
 
     task_types: list[type[Task]]
-    """List of task types this member can execute"""
+    """Task types this team member can handle"""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
-    """Additional metadata about the team member"""
+    """Additional team member metadata"""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -379,46 +293,34 @@ class TeamMember(BaseModel):
 
 
 class ExecutionResult(BaseModel):
-    """Represents the result of an executed task.
+    """Result of an executed task.
 
-    Captures all relevant information about a task execution:
-    - The original task
-    - Raw content from the agent
-    - Structured output (if applicable)
-    - Team member who executed the task
-    - Timestamp of execution
+    Captures the output and metadata from a task execution.
 
     Example:
-    ```python
-    result = ExecutionResult(
-        task=code_review_task,
-        content="The PR has several security issues...",
-        output=ReviewOutput(
-            issues=[
-                Issue(severity="high", description="Unvalidated user input"),
-                Issue(severity="medium", description="Weak password policy")
-            ],
-            approved=False
-        ),
-        assignee=security_reviewer,
-    )
-    ```
+        ```python
+        result = ExecutionResult(
+            task=task,
+            content="Processing complete",
+            output=ProcessingOutput(items=100)
+        )
+        ```
     """
 
     task: Task
-    """The task that was executed"""
+    """The executed task"""
 
     content: str | None = None
-    """Raw content returned by the agent"""
+    """Raw output content"""
 
     output: BaseModel | None = None
-    """Structured output parsed according to task schema"""
+    """Structured output data"""
 
     assignee: TeamMember | None = None
-    """Team member who executed the task"""
+    """Member who executed the task"""
 
     timestamp: datetime = Field(default_factory=datetime.now)
-    """When the task was executed"""
+    """Execution timestamp"""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
