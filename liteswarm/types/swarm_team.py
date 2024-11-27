@@ -4,7 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import Enum
 from typing import (
@@ -288,7 +288,7 @@ class Plan(BaseModel):
     ```
     """
 
-    tasks: list[Task]
+    tasks: Sequence[Task]
     """List of tasks that make up this plan"""
 
     status: PlanStatus = PlanStatus.DRAFT
