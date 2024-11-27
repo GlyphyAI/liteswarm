@@ -6,8 +6,8 @@
 
 from .swarm_team import (
     AgentPlanner,
+    LiteAgentPlanner,
     LiteSwarmTeamStreamHandler,
-    PlanningAgent,
     PromptTemplate,
     SwarmTeam,
     SwarmTeamStreamHandler,
@@ -15,8 +15,8 @@ from .swarm_team import (
 
 __all__ = [
     "AgentPlanner",
+    "LiteAgentPlanner",
     "LiteSwarmTeamStreamHandler",
-    "PlanningAgent",
     "PromptTemplate",
     "SwarmTeam",
     "SwarmTeamStreamHandler",
