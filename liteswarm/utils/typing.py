@@ -28,7 +28,7 @@ def union(types: Sequence[T]) -> Union[T]:  # noqa: UP007
         ```python
         # Create a Union type for int, str, and float
         number_types = [int, str, float]
-        NumberUnion = union_type(number_types)  # Union[int, str, float]
+        NumberUnion = union(number_types)  # Union[int, str, float]
 
         # Use in type hints
         def process_number(value: NumberUnion) -> None:
@@ -37,7 +37,7 @@ def union(types: Sequence[T]) -> Union[T]:  # noqa: UP007
         # Create a Union type for custom classes
         class A: pass
         class B: pass
-        custom_union = union_type([A, B])  # Union[A, B]
+        custom_union = union([A, B])  # Union[A, B]
         ```
 
     Note:
