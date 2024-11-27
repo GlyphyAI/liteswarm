@@ -14,9 +14,7 @@ from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
 from liteswarm.utils.misc import extract_json
-from liteswarm.utils.pydantic import (
-    change_field_type,
-)
+from liteswarm.utils.pydantic import change_field_type
 from liteswarm.utils.typing import is_callable, is_subtype, union
 
 AGENT_PLANNER_INSTRUCTIONS = """
