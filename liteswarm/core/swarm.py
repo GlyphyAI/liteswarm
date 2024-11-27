@@ -14,6 +14,7 @@ import orjson
 from litellm import CustomStreamWrapper, acompletion, get_supported_openai_params
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
+from pydantic import BaseModel
 
 from liteswarm.core.stream_handler import LiteStreamHandler, StreamHandler
 from liteswarm.core.summarizer import LiteSummarizer, Summarizer
@@ -39,8 +40,8 @@ from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
 from liteswarm.utils.misc import safe_get_attr
-from liteswarm.utils.pydantic import is_pydantic_model
 from liteswarm.utils.retry import retry_with_exponential_backoff
+from liteswarm.utils.typing import is_subtype
 from liteswarm.utils.unwrap import unwrap_instructions
 from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
 
@@ -431,7 +432,7 @@ class Swarm:
             llm_override_kwargs["response_format"] = response_format
 
             response_format_str: str | None = None
-            if is_pydantic_model(response_format):
+            if is_subtype(response_format, BaseModel):
                 response_format_str = orjson.dumps(response_format.model_json_schema()).decode()
             else:
                 response_format_str = orjson.dumps(response_format).decode()
