@@ -366,7 +366,7 @@ class TeamMember(BaseModel):
     agent: Agent
     """Agent configuration for this team member"""
 
-    task_types: list[str]
+    task_types: list[type[Task]]
     """List of task types this member can execute"""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
