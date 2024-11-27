@@ -7,14 +7,7 @@
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import (
-    Any,
-    Literal,
-    TypeAlias,
-    TypeVar,
-    get_args,
-    get_origin,
-)
+from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
