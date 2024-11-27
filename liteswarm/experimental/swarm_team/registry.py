@@ -120,6 +120,14 @@ class TaskRegistry:
         """
         return self._registry[task_type]
 
+    def get_task_definitions(self) -> list[TaskDefinition]:
+        """Get all registered task definitions.
+
+        Returns:
+            List of task definitions
+        """
+        return list(self._registry.values())
+
     def list_task_types(self) -> list[str]:
         """Get a list of all registered task types.
 
@@ -135,3 +143,14 @@ class TaskRegistry:
         ```
         """
         return list(self._registry.keys())
+
+    def contains_task_type(self, task_type: str) -> bool:
+        """Check if a task type is registered.
+
+        Args:
+            task_type: The type identifier of the task
+
+        Returns:
+            True if the task type is registered, False otherwise
+        """
+        return task_type in self._registry
