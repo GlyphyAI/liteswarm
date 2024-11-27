@@ -88,7 +88,7 @@ def unwrap_instructions(
     """
     return unwrap_callable(
         instructions,
-        context_variables=context_variables or ContextVariables(),
+        context_variables or ContextVariables(),
     )
 
 
