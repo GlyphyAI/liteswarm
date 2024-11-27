@@ -16,7 +16,7 @@ from typing import (
     get_origin,
 )
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
@@ -42,8 +42,8 @@ def generate_instructions(task: Task, context: ContextVariables) -> str:
 ```
 """
 
-TaskOutput: TypeAlias = type[BaseModel] | Callable[[str, ContextVariables], BaseModel]
-"""Schema or parser for structured task output.
+TaskResponseFormat: TypeAlias = type[BaseModel] | Callable[[str, ContextVariables], BaseModel]
+"""Schema or parser for task response format.
 
 Can be either:
 - A Pydantic model class for direct JSON parsing
@@ -237,40 +237,20 @@ class TaskDefinition(BaseModel):
     ```
     """
 
-    task_type: str
-    """Unique identifier for this type of task"""
-
     task_schema: type[Task]
     """Pydantic model defining the structure of tasks of this type"""
 
     task_instructions: TaskInstructions
     """Instructions template or function to generate task instructions"""
 
-    task_output: TaskOutput | None = None
-    """Optional schema or function for parsing structured task output"""
-
-    use_response_format: bool = False
-    """Whether to use response format in LLM calls"""
+    task_response_format: TaskResponseFormat | None = None
+    """Optional schema or function for parsing structured task response"""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
-
-    @model_validator(mode="after")
-    def inject_task_type_into_schema(self) -> Self:
-        """Ensures that the `task_schema` includes the `task_type` field with the correct Literal type.
-
-        Returns:
-            The updated `TaskDefinition` instance.
-        """
-        task_type = self.task_schema.get_task_type()
-        task_type_literal = Literal[self.task_type]  # type: ignore
-
-        if not task_type or task_type != task_type_literal:
-            self.task_schema = self.task_schema.set_task_type(task_type_literal)
-
-        return self
 
 
 class Plan(BaseModel):
