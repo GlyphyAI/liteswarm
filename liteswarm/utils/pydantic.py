@@ -13,7 +13,6 @@ from typing import (
     Any,
     Literal,
     TypeAlias,
-    TypeGuard,
     TypeVar,
     Union,
     Unpack,
@@ -25,7 +24,7 @@ from pydantic import BaseModel, Discriminator, ValidationError, create_model
 from pydantic.fields import FieldInfo, _FromFieldInfoInputs
 from pydantic_core import PydanticUndefined
 
-from liteswarm.utils.typing import union_type
+from liteswarm.utils.typing import is_subtype, union
 
 T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V", bound=BaseModel)
@@ -62,23 +61,6 @@ class DefaultValueContainer:
 
     def __hash__(self) -> int:
         return hash((self.value, self.factory))
-
-
-def is_pydantic_model(model: Any) -> TypeGuard[type[BaseModel]]:
-    """Check if the provided model is a subclass of Pydantic's BaseModel.
-
-    Args:
-        model: The model to check.
-
-    Returns:
-        TypeGuard[type[BaseModel]]: True if it's a Pydantic BaseModel subclass, False otherwise.
-    """
-    return (
-        model is not None
-        and not get_origin(model)
-        and isinstance(model, type)
-        and issubclass(model, BaseModel)
-    )
 
 
 def copy_field_info(
@@ -173,9 +155,9 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: P
                 unique_args.append(arg)
                 seen.add(arg)
 
-        return union_type(unique_args)
+        return union(unique_args)
 
-    if is_pydantic_model(model_type):
+    if is_subtype(model_type, BaseModel):
         return remove_default_values(model_type)
     else:
         return copy(model_type)
@@ -247,7 +229,7 @@ def _restore_nested_models(field_type: Any, field_value: Any) -> Any:  # noqa: P
     if origin in (Union, UnionType):
         for possible_type in args:
             try:
-                if is_pydantic_model(possible_type):
+                if is_subtype(possible_type, BaseModel):
                     model_instance = possible_type.model_validate(field_value)
                     return restore_default_values(model_instance, possible_type)
                 else:
@@ -280,7 +262,7 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
         transformed_type: Any = _unwrap_pydantic_type(field.annotation)
 
         if not field.is_required():
-            transformed_type = union_type([transformed_type, PLACEHOLDER_TYPE])
+            transformed_type = union([transformed_type, PLACEHOLDER_TYPE])
 
             updated_field = copy_field_info(
                 field,
