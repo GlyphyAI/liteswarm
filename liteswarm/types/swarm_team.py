@@ -7,14 +7,19 @@
 from collections.abc import Callable
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, Self, TypeAlias, TypeVar, get_args, get_origin
-from typing import Type as ClassType  # noqa: UP035
+from typing import (
+    Any,
+    Literal,
+    TypeAlias,
+    TypeVar,
+    get_args,
+    get_origin,
+)
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
-from liteswarm.utils.pydantic import change_field_type
 
 TaskType = TypeVar("TaskType", bound="Task")
 """Type variable representing a Task or its subclass."""
@@ -178,11 +183,14 @@ class Task(BaseModel):
     )
 
     @classmethod
-    def get_task_type(cls) -> str | None:
+    def get_task_type(cls) -> str:
         """Get the type of the task.
 
         Returns:
-            The type of the task if it is a Literal, otherwise None.
+            The type of the task.
+
+        Raises:
+            ValueError: If the task type is not defined as a Literal in the task schema.
         """
         type_field = cls.model_fields["type"]
         type_field_annotation = type_field.annotation
@@ -190,21 +198,7 @@ class Task(BaseModel):
         if type_field_annotation and get_origin(type_field_annotation) is Literal:
             return get_args(type_field_annotation)[0]
 
-        return None
-
-    @classmethod
-    def set_task_type(cls, task_type: Any) -> ClassType[Self]:  # noqa: UP006
-        """Set the task type of the Task class.
-
-        Returns:
-            The updated Task class.
-        """
-        return change_field_type(
-            model_type=cls,
-            field_name="type",
-            new_type=task_type,
-            new_model_name=cls.__name__,
-        )
+        raise ValueError("Task type is not defined as a Literal in the task schema")
 
 
 class TaskDefinition(BaseModel):
