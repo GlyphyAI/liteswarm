@@ -10,7 +10,7 @@ from typing import Any, TypeVar, Union
 T = TypeVar("T")
 
 
-def union_type(types: Sequence[T]) -> Union[T]:  # noqa: UP007
+def union(types: Sequence[T]) -> Union[T]:  # noqa: UP007
     """Create a Union type from a sequence of types dynamically.
 
     This utility function creates a Union type from a sequence of types at runtime.
