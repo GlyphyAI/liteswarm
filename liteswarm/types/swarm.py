@@ -21,107 +21,107 @@ from liteswarm.types.context import ContextVariables
 from liteswarm.types.llm import LLM
 
 AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
-"""Agent instructions - either a string or a function that takes context variables.
+"""Instructions for defining agent behavior.
 
-Can be either:
-- A static string defining the agent's behavior
-- A function that generates instructions using context
+Can be either a static string or a function that generates instructions
+dynamically based on context.
 
-Example:
-```python
-# Static instructions
-instructions: Instructions = "You are a helpful assistant."
+Examples:
+    Static instructions:
+        ```python
+        instructions: AgentInstructions = '''
+            You are a helpful assistant.
+            Follow these guidelines:
+            1. Be concise and clear.
+            2. Ask for clarification when needed.
+            '''
+        ```
 
-# Dynamic instructions
-AGENT_INSTRUCTIONS = \"\"\"
-You are helping {user_name}.
-Focus on their {interests}.
-Use {preferred_language}.
-\"\"\".strip()
-
-def generate_instructions(context: ContextVariables) -> str:
-    return AGENT_INSTRUCTIONS.format(**context)
-```
+    Dynamic instructions:
+        ```python
+        def generate_instructions(context: ContextVariables) -> str:
+            return f'''
+                You are helping {context.get('user_name')}.
+                Your expertise is in {context.get('domain')}.
+                Use {context.get('preferred_language')} when possible.
+            '''
+        ```
 """
 
 
 class AgentState(str, Enum):
-    """The state of an agent in the conversation lifecycle.
+    """State of an agent in the conversation lifecycle.
 
-    States indicate whether an agent is:
-    - Ready to handle tasks (IDLE)
-    - Currently processing a task (ACTIVE)
-    - Needs to be replaced (STALE)
+    Tracks whether an agent is ready for tasks, actively processing,
+    or needs replacement.
     """
 
     IDLE = "idle"
-    """The agent is idle and waiting for a task"""
+    """Agent is ready to handle new tasks."""
 
     ACTIVE = "active"
-    """The agent is actively working on a task"""
+    """Agent is currently processing a task."""
 
     STALE = "stale"
-    """The agent is stale and needs to be replaced"""
+    """Agent needs to be replaced or refreshed."""
 
 
 class Message(BaseModel):
-    """A message in the conversation between users, assistants, and tools.
+    """Message in a conversation between users, assistants, and tools.
 
-    Messages represent all communication in a conversation, including:
-    - System instructions
-    - User inputs
-    - Assistant responses
-    - Tool call results
+    Represents all types of communication including system instructions,
+    user inputs, assistant responses, and tool results.
 
-    Example:
-    ```python
-    # System message with instructions
-    system_msg = Message(
-        role="system",
-        content="You are a helpful assistant."
-    )
-
-    # User question
-    user_msg = Message(
-        role="user",
-        content="What's 2 + 2?"
-    )
-
-    # Assistant response with tool call
-    assistant_msg = Message(
-        role="assistant",
-        content="Let me calculate that.",
-        tool_calls=[
-            ChatCompletionDeltaToolCall(
-                id="call_1",
-                function={"name": "add", "arguments": '{"a": 2, "b": 2}'}
+    Examples:
+        Create different message types:
+            ```python
+            # System instructions
+            system_msg = Message(
+                role="system",
+                content="You are a helpful assistant."
             )
-        ]
-    )
 
-    # Tool response
-    tool_msg = Message(
-        role="tool",
-        content="4",
-        tool_call_id="call_1"
-    )
-    ```
+            # User input
+            user_msg = Message(
+                role="user",
+                content="Calculate 2 + 2"
+            )
+
+            # Assistant response with tool
+            assistant_msg = Message(
+                role="assistant",
+                content="Let me calculate that.",
+                tool_calls=[
+                    ChatCompletionDeltaToolCall(
+                        id="calc_1",
+                        function={"name": "add", "arguments": '{"a": 2, "b": 2}'}
+                    )
+                ]
+            )
+
+            # Tool result
+            tool_msg = Message(
+                role="tool",
+                content="4",
+                tool_call_id="calc_1"
+            )
+            ```
     """
 
     role: Literal["assistant", "user", "system", "tool"]
-    """The role of the message sender ("assistant", "user", "system", or "tool")"""
+    """Role of the message sender."""
 
     content: str | None = None
-    """The text content of the message"""
+    """Text content of the message."""
 
     tool_calls: list[ChatCompletionDeltaToolCall] | None = None
-    """List of tool calls made in this message"""
+    """Tool calls made in this message."""
 
     tool_call_id: str | None = None
-    """ID of the tool call this message is responding to"""
+    """ID of the tool call this message responds to."""
 
     audio: ChatCompletionAudioResponse | None = None
-    """Audio response data, if any"""
+    """Audio response data if available."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -131,49 +131,52 @@ class Message(BaseModel):
 
 
 class ToolMessage(BaseModel):
-    """A message resulting from a tool call, optionally including a new agent.
+    """Message resulting from a tool call.
 
-    Tool messages can:
-    - Return simple responses from tool execution
-    - Trigger agent switches with new context
-    - Update conversation context variables
+    Contains the tool's response and optionally includes a new agent
+    or context updates.
 
-    Example:
-    ```python
-    # Simple tool response
-    calc_msg = ToolMessage(
-        message=Message(
-            role="tool",
-            content="4",
-            tool_call_id="calc_1"
-        )
-    )
+    Examples:
+        Simple tool response:
+            ```python
+            msg = ToolMessage(
+                message=Message(
+                    role="tool",
+                    content="4",
+                    tool_call_id="calc_1"
+                )
+            )
+            ```
 
-    # Agent switch with context
-    switch_msg = ToolMessage(
-        message=Message(
-            role="tool",
-            content="Switching to math expert",
-            tool_call_id="switch_1"
-        ),
-        agent=Agent(
-            id="math-expert",
-            instructions="You are a math expert.",
-            llm=LLM(model="gpt-4o")
-        ),
-        context_variables=ContextVariables(specialty="mathematics")
-    )
-    ```
+        Agent switch with context:
+            ```python
+            msg = ToolMessage(
+                message=Message(
+                    role="tool",
+                    content="Switching to expert",
+                    tool_call_id="switch_1"
+                ),
+                agent=Agent(
+                    id="math-expert",
+                    instructions="You are a math expert.",
+                    llm=LLM(model="gpt-4o")
+                ),
+                context_variables=ContextVariables(
+                    specialty="mathematics",
+                    confidence=0.9
+                )
+            )
+            ```
     """
 
     message: Message
-    """The message containing the tool's response"""
+    """Tool's response message."""
 
     agent: "Agent | None" = None
-    """Optional new agent to switch to (for agent-switching tools)"""
+    """Optional new agent for switching."""
 
     context_variables: ContextVariables | None = None
-    """Context variables to pass to the next agent"""
+    """Optional context updates."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -182,58 +185,56 @@ class ToolMessage(BaseModel):
 
 
 class Delta(BaseModel):
-    """A partial update in a streaming response.
+    """Partial update in a streaming response.
 
-    Deltas represent incremental updates during streaming, containing:
-    - Text content chunks
-    - Role updates
-    - Tool/function calls
-    - Audio response data
+    Represents incremental updates during streaming, including content
+    chunks, role changes, and tool calls.
 
-    Example:
-    ```python
-    # Content update
-    content_delta = Delta(
-        role="assistant",
-        content="Hello, "
-    )
-
-    # Tool call update
-    tool_delta = Delta(
-        tool_calls=[
-            ChatCompletionDeltaToolCall(
-                id="calc_1",
-                function={"name": "add", "arguments": '{"a": 2'}
+    Examples:
+        Different types of updates:
+            ```python
+            # Content chunk
+            content_delta = Delta(
+                role="assistant",
+                content="Hello, "
             )
-        ]
-    )
 
-    # Function completion
-    completion_delta = Delta(
-        tool_calls=[
-            ChatCompletionDeltaToolCall(
-                id="calc_1",
-                function={"name": "add", "arguments": ', "b": 2}'}
+            # Tool call start
+            tool_delta = Delta(
+                tool_calls=[
+                    ChatCompletionDeltaToolCall(
+                        id="calc_1",
+                        function={"name": "add", "arguments": '{"a": 2'}
+                    )
+                ]
             )
-        ]
-    )
-    ```
+
+            # Tool call completion
+            completion_delta = Delta(
+                tool_calls=[
+                    ChatCompletionDeltaToolCall(
+                        id="calc_1",
+                        function={"name": "add", "arguments": ', "b": 2}'}
+                    )
+                ]
+            )
+            ```
     """
 
     content: str | None = None
-    """Text content in this update"""
+    """Text content in this update."""
 
     role: str | None = None
-    """Role of the message being updated"""
+    """Role of the message being updated."""
 
     function_call: FunctionCall | dict | None = None
-    """Function call information"""
+    """Function call information."""
 
     tool_calls: list[ChatCompletionDeltaToolCall | dict] | None = None
-    """Tool calls being made"""
+    """Tool calls being made."""
 
     audio: ChatCompletionAudioResponse | None = None
-    """Audio response data"""
+    """Audio response data."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -242,13 +243,13 @@ class Delta(BaseModel):
 
     @classmethod
     def from_delta(cls, delta: LiteDelta) -> "Delta":
-        """Create a Delta instance from a LiteLLM delta object.
+        """Create a Delta from a LiteLLM delta object.
 
         Args:
-            delta: The LiteLLM delta to convert
+            delta: LiteLLM delta to convert.
 
         Returns:
-            New Delta instance with copied attributes
+            New Delta instance with copied attributes.
         """
         return cls(
             content=delta.content,
@@ -262,91 +263,90 @@ class Delta(BaseModel):
 class ResponseCost(BaseModel):
     """Cost information for a model response.
 
-    Tracks the cost of tokens used in:
-    - The input prompt
-    - The model's completion
+    Tracks token costs for both input prompts and model completions.
 
-    Example:
-    ```python
-    cost = ResponseCost(
-        prompt_tokens_cost=0.001,  # Cost for input tokens
-        completion_tokens_cost=0.002  # Cost for output tokens
-    )
-
-    total_cost = cost.prompt_tokens_cost + cost.completion_tokens_cost
-    ```
+    Examples:
+        Calculate total cost:
+            ```python
+            cost = ResponseCost(
+                prompt_tokens_cost=0.001,  # $0.001 for input
+                completion_tokens_cost=0.002  # $0.002 for output
+            )
+            total = cost.prompt_tokens_cost + cost.completion_tokens_cost
+            ```
     """
 
     prompt_tokens_cost: float
-    """Cost of tokens in the prompt"""
+    """Cost of tokens in the prompt."""
 
     completion_tokens_cost: float
-    """Cost of tokens in the completion"""
+    """Cost of tokens in the completion."""
 
 
 class Agent(BaseModel):
-    """An AI agent that can participate in conversations and use tools.
+    """AI agent that participates in conversations and uses tools.
 
-    Agents are the core participants in conversations, with capabilities for:
-    - Following system instructions
-    - Using tools to perform actions
-    - Maintaining conversation state
-    - Supporting parallel tool execution
+    Represents an AI participant with specific instructions, capabilities,
+    and state management.
 
-    Example:
-    ```python
-    def search_docs(query: str) -> str:
-        \"\"\"Search documentation for information.\"\"\"
-        return f"Results for: {query}"
+    Examples:
+        Create a specialized agent:
+            ```python
+            # Define tool functions
+            def search_docs(query: str) -> str:
+                \"\"\"Search documentation.\"\"\"
+                return f"Results for: {query}"
 
-    def generate_code(spec: str) -> str:
-        \"\"\"Generate code based on specification.\"\"\"
-        return f"Code implementing: {spec}"
+            def generate_code(spec: str) -> str:
+                \"\"\"Generate code from spec.\"\"\"
+                return f"Code for: {spec}"
 
-    # Create a coding assistant agent
-    coding_agent = Agent(
-        id="coding-assistant",
-        instructions='''You are a coding assistant.
-                       Use search_docs to find relevant information.
-                       Use generate_code to implement solutions.''',
-        llm=LLM(
-            model="gpt-4o",
-            tools=[search_docs, generate_code],
-            tool_choice="auto",
-            parallel_tool_calls=True,
-            temperature=0.7,
-            response_format=CodeOutput  # Optional Pydantic model
-        )
-    )
+            # Create coding assistant
+            agent = Agent(
+                id="coding-assistant",
+                instructions='''
+                    You are a coding assistant.
+                    1. Search docs for relevant info.
+                    2. Generate code solutions.
+                    3. Explain your changes.
+                ''',
+                llm=LLM(
+                    model="gpt-4o",
+                    tools=[search_docs, generate_code],
+                    tool_choice="auto",
+                    temperature=0.7
+                )
+            )
+            ```
 
-    # Create an agent with dynamic instructions
-    def get_instructions(context: ContextVariables) -> str:
-        return f'''You are helping {context["user_name"]}.
-                  Your expertise is in {context["domain"]}.'''
+        Dynamic instructions:
+            ```python
+            def get_instructions(context: ContextVariables) -> str:
+                return f'''
+                    You are helping {context.get('user_name')}.
+                    Expertise: {context.get('domain')}.
+                    Language: {context.get('language')}.
+                '''
 
-    expert_agent = Agent(
-        id="domain-expert",
-        instructions=get_instructions,
-        llm=LLM(
-            model="gpt-4o",
-            max_tokens=2000,
-            temperature=0.3
-        )
-    )
-    ```
+            agent = Agent(
+                id="expert",
+                instructions=get_instructions,
+                llm=LLM(model="gpt-4o")
+            )
+            ```
     """
 
     id: str
-    """Unique identifier for the agent"""
+    """Unique identifier for the agent."""
 
     instructions: AgentInstructions
-    """System prompt defining behavior (string or function)"""
+    """Behavior definition (static or dynamic)."""
 
     llm: LLM
-    """LLM configuration for the agent's behavior and capabilities"""
+    """Language model configuration."""
 
     state: AgentState = AgentState.IDLE
-    """Current state of the agent (idle, active, or stale)"""
+    """Current agent state."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -355,15 +355,13 @@ class Agent(BaseModel):
 
 
 class ToolCallResult(BaseModel):
-    """Base class for results of tool calls.
+    """Base class for tool call results.
 
-    Provides common structure for all tool call results:
-    - The original tool call that produced this result
-    - Subclasses add specific result types
+    Provides common structure for all tool execution results.
     """
 
     tool_call: ChatCompletionDeltaToolCall
-    """The tool call that produced this result"""
+    """Tool call that produced this result."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -374,120 +372,128 @@ class ToolCallResult(BaseModel):
 class ToolCallMessageResult(ToolCallResult):
     """Result of a tool call that produced a message.
 
-    Used for tool calls that return data or text responses.
-    Can optionally update context variables.
+    Used for tools that return data or text responses, optionally
+    with context updates.
 
-    Example:
-    ```python
-    result = ToolCallMessageResult(
-        tool_call=calc_call,
-        message=Message(
-            role="tool",
-            content="42",
-            tool_call_id="calc_1"
-        ),
-        context_variables=ContextVariables(last_result=42)
-    )
-    ```
+    Examples:
+        Tool response with context:
+            ```python
+            result = ToolCallMessageResult(
+                tool_call=calc_call,
+                message=Message(
+                    role="tool",
+                    content="42",
+                    tool_call_id="calc_1"
+                ),
+                context_variables=ContextVariables(
+                    last_result=42,
+                    calculation_type="simple"
+                )
+            )
+            ```
     """
 
     message: Message
-    """The message containing the tool's response"""
+    """Tool's response message."""
 
     context_variables: ContextVariables | None = None
-    """Context variables to pass to the next agent"""
+    """Optional context updates."""
 
 
 class ToolCallAgentResult(ToolCallResult):
     """Result of a tool call that produced a new agent.
 
-    Used for agent-switching tools that return a new agent
-    to handle the conversation. Can include a transition
-    message and context updates.
+    Used for agent-switching tools that return a new agent with
+    optional transition message and context.
 
-    Example:
-    ```python
-    result = ToolCallAgentResult(
-        tool_call=switch_call,
-        agent=Agent(
-            id="expert",
-            instructions="You are an expert...",
-            llm=LLM(model="gpt-4o")
-        ),
-        message=Message(
-            role="tool",
-            content="Switching to expert",
-            tool_call_id="switch_1"
-        ),
-        context_variables=ContextVariables(expertise="math")
-    )
-    ```
+    Examples:
+        Switch to expert agent:
+            ```python
+            result = ToolCallAgentResult(
+                tool_call=switch_call,
+                agent=Agent(
+                    id="math-expert",
+                    instructions="You are a math expert.",
+                    llm=LLM(model="gpt-4o")
+                ),
+                message=Message(
+                    role="tool",
+                    content="Switching to math expert",
+                    tool_call_id="switch_1"
+                ),
+                context_variables=ContextVariables(
+                    expertise="mathematics",
+                    difficulty="advanced"
+                )
+            )
+            ```
     """
 
     agent: Agent
-    """The new agent to switch to"""
+    """New agent to switch to."""
 
     message: Message | None = None
-    """Optional message to add to the conversation"""
+    """Optional transition message."""
 
     context_variables: ContextVariables | None = None
-    """Context variables to pass to the next agent"""
+    """Optional context updates."""
 
 
 class ToolCallFailureResult(ToolCallResult):
     """Result of a failed tool call.
 
-    Captures errors that occur during tool execution
-    for proper error handling and reporting.
+    Captures errors during tool execution for proper handling.
 
-    Example:
-    ```python
-    result = ToolCallFailureResult(
-        tool_call=failed_call,
-        error=ValueError("Invalid input")
-    )
-    ```
+    Examples:
+        Handle tool failure:
+            ```python
+            result = ToolCallFailureResult(
+                tool_call=failed_call,
+                error=ValueError("Invalid input: negative number")
+            )
+            ```
     """
 
     error: Exception
-    """The exception that occurred during tool execution"""
+    """Error that occurred during execution."""
 
 
 class CompletionResponse(BaseModel):
-    """A response chunk from the language model.
+    """Response chunk from the language model.
 
-    Represents a single chunk in a streaming response,
-    including content updates and metadata.
+    Represents a single chunk in a streaming response with
+    content and metadata.
 
-    Example:
-    ```python
-    response = CompletionResponse(
-        delta=Delta(content="Hello"),
-        finish_reason=None,
-        usage=Usage(
-            prompt_tokens=10,
-            completion_tokens=1,
-            total_tokens=11
-        ),
-        response_cost=ResponseCost(
-            prompt_tokens_cost=0.0001,
-            completion_tokens_cost=0.0002
-        )
-    )
-    ```
+    Examples:
+        Process response chunk:
+            ```python
+            response = CompletionResponse(
+                delta=Delta(content="Hello"),
+                finish_reason=None,
+                usage=Usage(
+                    prompt_tokens=10,
+                    completion_tokens=1,
+                    total_tokens=11
+                ),
+                response_cost=ResponseCost(
+                    prompt_tokens_cost=0.0001,
+                    completion_tokens_cost=0.0002
+                )
+            )
+            ```
     """
 
     delta: Delta
-    """The content update in this chunk"""
+    """Content update in this chunk."""
 
     finish_reason: str | None = None
-    """Why the response ended (if it did)"""
+    """Reason for response completion."""
 
     usage: Usage | None = None
-    """Token usage statistics"""
+    """Token usage statistics."""
 
     response_cost: ResponseCost | None = None
-    """Cost information for this response"""
+    """Cost information."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -496,41 +502,45 @@ class CompletionResponse(BaseModel):
 
 
 class AgentResponse(BaseModel):
-    """A processed response from an agent, including accumulated state.
+    """Processed response from an agent with accumulated state.
 
-    Combines the current update with accumulated content and
-    tool calls from previous updates in the stream.
+    Combines current update with accumulated content and tool calls
+    from previous updates.
 
-    Example:
-    ```python
-    response = AgentResponse(
-        delta=Delta(content=" world"),
-        content="Hello world",  # Accumulated
-        tool_calls=[calc_call],  # Accumulated
-        finish_reason=None,
-        usage=Usage(...),
-        response_cost=ResponseCost(...)
-    )
-    ```
+    Examples:
+        Track response progress:
+            ```python
+            response = AgentResponse(
+                delta=Delta(content=" world"),
+                content="Hello world",  # Accumulated
+                tool_calls=[calc_call],  # Accumulated
+                finish_reason=None,
+                usage=Usage(prompt_tokens=10, completion_tokens=2),
+                response_cost=ResponseCost(
+                    prompt_tokens_cost=0.0001,
+                    completion_tokens_cost=0.0002
+                )
+            )
+            ```
     """
 
     delta: Delta
-    """The content update in this response"""
+    """Current content update."""
 
     finish_reason: str | None = None
-    """Why the response ended (if it did)"""
+    """Reason for response completion."""
 
     content: str | None = None
-    """Accumulated content so far"""
+    """Accumulated content so far."""
 
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
-    """Accumulated tool calls"""
+    """Accumulated tool calls."""
 
     usage: Usage | None = None
-    """Token usage statistics"""
+    """Token usage statistics."""
 
     response_cost: ResponseCost | None = None
-    """Cost information for this response"""
+    """Cost information."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -541,45 +551,50 @@ class AgentResponse(BaseModel):
 class ConversationState(BaseModel):
     """Complete state of a conversation.
 
-    Captures the entire state of a conversation, including:
-    - Final content and active agent
-    - Message histories (full and agent-specific)
-    - Usage statistics and costs
+    Captures all aspects of a conversation including content,
+    agents, history, and metrics.
 
-    Example:
-    ```python
-    state = ConversationState(
-        content="Final response",
-        agent=current_agent,
-        agent_messages=[...],  # Current agent's context
-        agent_queue=[backup_agent],  # Queued agents
-        messages=[...],  # Full conversation history
-        usage=Usage(...),
-        response_cost=ResponseCost(...)
-    )
-    ```
+    Examples:
+        Track conversation state:
+            ```python
+            state = ConversationState(
+                content="Final response",
+                agent=current_agent,
+                agent_messages=[  # Current context
+                    Message(role="user", content="Hello"),
+                    Message(role="assistant", content="Hi")
+                ],
+                agent_queue=[backup_agent],  # Queued agents
+                messages=[],  # Full history
+                usage=Usage(total_tokens=100),
+                response_cost=ResponseCost(
+                    prompt_tokens_cost=0.001,
+                    completion_tokens_cost=0.002
+                )
+            )
+            ```
     """
 
     content: str | None = None
-    """Final content of the conversation"""
+    """Final conversation content."""
 
     agent: Agent | None = None
-    """Currently active agent"""
+    """Currently active agent."""
 
     agent_messages: list[Message] = Field(default_factory=list)
-    """Messages for the current agent"""
+    """Current agent's message context."""
 
     agent_queue: list[Agent] = Field(default_factory=list)
-    """Queue of agents waiting to be activated"""
+    """Queue of pending agents."""
 
     messages: list[Message] = Field(default_factory=list)
-    """Complete conversation history"""
+    """Complete conversation history."""
 
     usage: Usage | None = None
-    """Total token usage statistics"""
+    """Total token usage."""
 
     response_cost: ResponseCost | None = None
-    """Total cost information"""
+    """Total cost information."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
