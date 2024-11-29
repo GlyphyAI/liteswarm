@@ -14,8 +14,8 @@ from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
 from liteswarm.utils.misc import extract_json
-from liteswarm.utils.pydantic import change_field_type
-from liteswarm.utils.typing import is_callable, is_subtype, union
+from liteswarm.utils.tasks import create_plan_with_tasks
+from liteswarm.utils.typing import is_callable, is_subtype
 
 AGENT_PLANNER_INSTRUCTIONS = """
 You are a task planning specialist.
@@ -167,17 +167,8 @@ class LiteAgentPlanner(AgentPlanner):
             Plan schema with task types from registry
         """
         task_definitions = self._task_registry.get_task_definitions()
-        task_schemas = union([td.task_schema for td in task_definitions])
-        plan_schema_name = Plan.__name__
-
-        plan_schema = change_field_type(
-            model_type=Plan,
-            field_name="tasks",
-            new_type=list[task_schemas],  # type: ignore [valid-type]
-            new_model_name=plan_schema_name,
-        )
-
-        return plan_schema
+        task_types = [td.task_schema for td in task_definitions]
+        return create_plan_with_tasks(task_types)
 
     def _unwrap_response_format(
         self,
