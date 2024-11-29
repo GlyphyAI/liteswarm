@@ -8,6 +8,7 @@ import sys
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
+from liteswarm.core.stream_handler import SwarmStreamHandler
 from liteswarm.types.swarm import (
     Agent,
     Delta,
@@ -18,7 +19,7 @@ from liteswarm.types.swarm import (
 )
 
 
-class ReplStreamHandler:
+class ReplStreamHandler(SwarmStreamHandler):
     """Stream handler for REPL interface with better formatting."""
 
     def __init__(self) -> None:
