@@ -14,7 +14,11 @@ from liteswarm.types.exceptions import CompletionError
 from liteswarm.utils.logging import log_verbose
 
 _RetryReturnType = TypeVar("_RetryReturnType")
-"""Type variable representing the return type of the operation being retried."""
+"""Type variable for retry operation's return type.
+
+Used to preserve type information when retrying operations
+that return different types of values.
+"""
 
 
 async def retry_with_exponential_backoff(
@@ -24,20 +28,75 @@ async def retry_with_exponential_backoff(
     max_delay: float = 10.0,
     backoff_factor: float = 2.0,
 ) -> _RetryReturnType:
-    """Execute an operation with exponential backoff retry logic.
+    """Retry async operation with exponential backoff.
+
+    Executes an async operation with configurable retry behavior:
+    - Exponentially increasing delays between retries
+    - Maximum retry count and delay limits
+    - Automatic handling of common API errors
+    - Detailed logging of retry attempts
 
     Args:
-        operation: Async operation to execute
-        max_retries: Maximum number of retry attempts
-        initial_delay: Initial delay between retries in seconds
-        max_delay: Maximum delay between retries in seconds
-        backoff_factor: Factor to multiply delay by after each retry
+        operation: Async function to execute.
+        max_retries: Maximum retry attempts (default: 3).
+        initial_delay: Starting delay in seconds (default: 1.0).
+        max_delay: Maximum delay in seconds (default: 10.0).
+        backoff_factor: Delay multiplier after each retry (default: 2.0).
 
     Returns:
-        The result of the operation if successful
+        Result from the successful operation execution.
 
     Raises:
-        The last error encountered if all retries fail
+        CompletionError: If all retry attempts fail, wraps the last error.
+
+    Examples:
+        Basic retry:
+            ```python
+            async def make_api_call() -> dict:
+                response = await api.request()
+                return response.json()
+
+            try:
+                result = await retry_with_exponential_backoff(
+                    make_api_call,
+                    max_retries=3
+                )
+            except CompletionError as e:
+                print(f"API call failed: {e}")
+            ```
+
+        Custom configuration:
+            ```python
+            async def unstable_operation() -> str:
+                if random.random() < 0.8:
+                    raise ServiceUnavailableError("Server busy")
+                return "success"
+
+            result = await retry_with_exponential_backoff(
+                unstable_operation,
+                max_retries=5,
+                initial_delay=0.1,
+                max_delay=5.0,
+                backoff_factor=3.0
+            )
+            # Retries with delays: 0.1s, 0.3s, 0.9s, 2.7s, 5.0s
+            ```
+
+        Rate limiting:
+            ```python
+            async def rate_limited_call() -> Response:
+                try:
+                    return await api.request()
+                except RateLimitError:
+                    # Will be caught and retried with backoff
+                    raise
+
+            response = await retry_with_exponential_backoff(
+                rate_limited_call,
+                max_retries=3,
+                initial_delay=2.0  # Start with longer delay
+            )
+            ```
     """
     last_error: Exception | None = None
     delay = initial_delay

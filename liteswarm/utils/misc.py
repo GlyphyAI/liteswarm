@@ -13,10 +13,18 @@ import orjson
 from liteswarm.types.misc import JSON
 
 _AttributeType = TypeVar("_AttributeType")
-"""Type variable representing the expected type of an attribute."""
+"""Type variable for attribute value type.
+
+Used to preserve type information when safely accessing
+and validating object attributes.
+"""
 
 _AttributeDefaultType = TypeVar("_AttributeDefaultType")
-"""Type variable representing the default type of an attribute."""
+"""Type variable for attribute default value type.
+
+Used to preserve type information for default values when
+the attribute doesn't exist or has wrong type.
+"""
 
 
 def safe_get_attr(
@@ -45,29 +53,32 @@ def safe_get_attr(
         The attribute's value if it exists and matches the expected type,
         or the `default` value otherwise.
 
-    Example:
-        ```python
-        class Example:
-            attribute: int = 42
+    Examples:
+        Basic usage:
+            ```python
+            class Example:
+                attribute: int = 42
 
-        instance = Example()
+            instance = Example()
 
-        # Attribute exists and matches expected type
-        value1 = safe_get_attr(instance, "attribute", int, default=0)
-        print(value1)  # Output: 42
+            # Attribute exists and matches expected type
+            value1: int = safe_get_attr(instance, "attribute", int, default=0)
+            print(value1)  # Output: 42
 
-        # Attribute exists but does not match expected type
-        value2 = safe_get_attr(instance, "attribute", str, default="default_value")
-        print(value2)  # Output: "default_value"
+            # Attribute exists but does not match expected type
+            value2: str = safe_get_attr(
+                instance, "attribute", str, default="default_value"
+            )
+            print(value2)  # Output: "default_value"
 
-        # Attribute does not exist, returns default
-        value3 = safe_get_attr(instance, "nonexistent", int, default=100)
-        print(value3)  # Output: 100
+            # Attribute does not exist, returns default
+            value3: int = safe_get_attr(instance, "nonexistent", int, default=100)
+            print(value3)  # Output: 100
 
-        # Attribute does not exist, no default provided
-        value4 = safe_get_attr(instance, "nonexistent", int)
-        print(value4)  # Output: None
-        ```
+            # Attribute does not exist, no default provided
+            value4: int | None = safe_get_attr(instance, "nonexistent", int)
+            print(value4)  # Output: None
+            ```
     """
     value = getattr(obj, attr, default)
     if isinstance(value, expected_type):
@@ -77,34 +88,59 @@ def safe_get_attr(
 
 
 def extract_json(content: str) -> JSON:
-    """Extract a JSON object from a string.
+    """Extract and parse JSON data from text content.
 
-    Attempts to find and parse JSON from:
-    1. Code blocks (with or without language identifier)
-    2. Raw string content
-
-    Example:
-    ```python
-    # From code block
-    content = '''Here's the config:
-    ```json
-    {"name": "test", "value": 42}
-    ```
-    '''
-    config = extract_json(content)  # {"name": "test", "value": 42}
-
-    # From raw string
-    data = extract_json('{"x": 1, "y": 2}')  # {"x": 1, "y": 2}
-    ```
+    Attempts to find and parse JSON from multiple formats:
+    - Markdown code blocks (with or without language tag)
+    - Raw JSON strings
+    - Indented or formatted JSON
 
     Args:
-        content: String containing JSON data
+        content: Text that may contain JSON data.
 
     Returns:
-        Parsed JSON object
+        Parsed JSON data as a Python object.
 
     Raises:
-        ValueError: If no valid JSON can be found or parsed
+        ValueError: If no valid JSON found or parsing fails.
+
+    Examples:
+        Code block:
+            ```python
+            text = \"\"\"
+            Here's the configuration:
+            ```json
+            {
+                "api_key": "abc123",
+                "settings": {
+                    "timeout": 30,
+                    "retry": true
+                }
+            }
+            ```
+            \"\"\"
+            config = extract_json(text)
+            assert config["settings"]["timeout"] == 30
+            ```
+
+        Raw JSON:
+            ```python
+            # Simple object
+            data = extract_json('{"x": 1, "y": 2}')
+            assert data == {"x": 1, "y": 2}
+
+            # Array
+            items = extract_json('[1, 2, 3]')
+            assert items == [1, 2, 3]
+            ```
+
+        Error handling:
+            ```python
+            try:
+                extract_json("Invalid JSON")
+            except ValueError as e:
+                print(f"Failed to parse: {e}")
+            ```
     """
     code_block_pattern = r"```(?:json)?\n?(.*?)```"
     matches = re.findall(code_block_pattern, content, re.DOTALL)
@@ -123,32 +159,57 @@ def extract_json(content: str) -> JSON:
 
 
 def dedent_prompt(prompt: str) -> str:
-    """Remove common leading whitespace from every line in a prompt.
+    """Clean and format multiline prompt text.
 
-    Useful for maintaining readable code while creating clean prompts.
-    Removes both indentation and leading/trailing whitespace.
-
-    Example:
-    ```python
-    prompt = dedent_prompt('''
-        You are a helpful assistant.
-        Follow these rules:
-            1. Be concise
-            2. Be clear
-            3. Be accurate
-    ''')
-    # Returns:
-    # "You are a helpful assistant.
-    #  Follow these rules:
-    #      1. Be concise
-    #      2. Be clear
-    #      3. Be accurate"
-    ```
+    Removes common leading whitespace and trims surrounding
+    whitespace while preserving relative indentation.
 
     Args:
-        prompt: The prompt string to clean
+        prompt: Raw prompt text to clean.
 
     Returns:
-        The prompt with common leading whitespace removed
+        Cleaned and formatted prompt text.
+
+    Examples:
+        Basic cleaning:
+            ```python
+            text = dedent_prompt(\"\"\"
+                Hello!
+                This is a multiline prompt.
+                    - With indented items
+                    - And proper spacing
+            \"\"\")
+            print(text)
+            # Hello!
+            # This is a multiline prompt.
+            #     - With indented items
+            #     - And proper spacing
+            ```
+
+        Code examples:
+            ```python
+            code = dedent_prompt(\"\"\"
+                ```python
+                def my_function():
+                    return "Hello, world!"
+                ```
+            \"\"\")
+
+            print(code)
+            # ```python
+            # def my_function():
+            #     return "Hello, world!"
+            # ```
+            ```
+
+        System prompts:
+            ```python
+            system = dedent_prompt(\"\"\"
+                You are an AI assistant that:
+                1. Responds concisely
+                2. Uses markdown
+                3. Includes examples
+            \"\"\")
+            ```
     """
     return dedent(prompt).strip()

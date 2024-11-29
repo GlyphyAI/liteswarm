@@ -38,13 +38,55 @@ LEVEL_MAP: dict[LogLevel, int] = {
 
 
 class FancyFormatter(logging.Formatter):
-    """A fancy formatter with colors and better visual organization."""
+    r"""Enhanced log formatter with color and visual organization.
+
+    Provides a visually appealing log format with:
+    - Color-coded log levels
+    - Timestamp prefixes
+    - Proper indentation for multiline messages
+    - Visual separators between components
+
+    Examples:
+        Basic usage:
+            ```python
+            handler = logging.StreamHandler()
+            handler.setFormatter(FancyFormatter())
+            logger.addHandler(handler)
+
+            logger.info("Starting process")
+            # [14:23:15] INFO    │ Starting process
+
+            logger.error("Error occurred:\\nDetails:\\n- Missing file")
+            # [14:23:16] ERROR   │ Error occurred
+            # │ Details:
+            # │ - Missing file
+            ```
+
+        Custom logger:
+            ```python
+            logger = logging.getLogger("myapp")
+            logger.setLevel(logging.DEBUG)
+
+            handler = logging.StreamHandler()
+            handler.setFormatter(FancyFormatter())
+            logger.addHandler(handler)
+
+            logger.debug("Initializing...")
+            # [14:23:15] DEBUG   │ Initializing...
+            ```
+    """
 
     def format(self, record: logging.LogRecord) -> str:
-        """Format the log record with colors and structure.
+        """Format log record with colors and structure.
 
-        Format: [TIME] LEVEL | MESSAGE
-        Example: [14:23:15] INFO | Starting process...
+        Formats the log record with the following structure:
+        [TIME] LEVEL │ MESSAGE
+
+        Args:
+            record: Log record to format.
+
+        Returns:
+            Formatted log message with colors and structure.
         """
         # Get the corresponding color
         color = ANSI_COLORS.get(record.levelname, ANSI_COLORS["RESET"])
@@ -73,13 +115,34 @@ class FancyFormatter(logging.Formatter):
 
 @lru_cache(maxsize=1)
 def get_log_level(default: LogLevel = "INFO") -> int:
-    """Get the log level from environment or default.
+    """Get configured logging level from environment.
+
+    Checks LITESWARM_LOG_LEVEL environment variable and falls
+    back to default if not set or invalid.
 
     Args:
-        default: Default log level if not set in environment
+        default: Fallback log level if not configured.
 
     Returns:
-        The logging level as an int
+        Numeric logging level (e.g., logging.INFO).
+
+    Examples:
+        Default behavior:
+            ```python
+            # No environment variable set
+            level = get_log_level()  # Returns logging.INFO
+
+            # With default override
+            level = get_log_level("DEBUG")  # Returns logging.DEBUG
+            ```
+
+        Environment variable:
+            ```python
+            # In shell:
+            # export LITESWARM_LOG_LEVEL=DEBUG
+
+            level = get_log_level()  # Returns logging.DEBUG
+            ```
     """
     level_name = os.getenv("LITESWARM_LOG_LEVEL", default).upper()
     if level_name in LEVEL_MAP:
@@ -90,13 +153,34 @@ def get_log_level(default: LogLevel = "INFO") -> int:
 
 @lru_cache(maxsize=1)
 def get_verbose_level(default: LogLevel = "INFO") -> LogLevel | None:
-    """Get the verbose printing level from environment.
+    """Get configured verbose logging level.
+
+    Checks LITESWARM_VERBOSE environment variable for:
+    - Boolean flags: "1", "true", "yes", "on" (enables default level)
+    - Specific level: "DEBUG", "INFO", etc.
+    - Empty/other: Disables verbose logging
 
     Args:
-        default: Default level if not set in environment
+        default: Level to use when enabled without specific level.
 
     Returns:
-        LogLevel if specific level set, or None if disabled
+        Configured level or None if verbose logging disabled.
+
+    Examples:
+        Boolean flags:
+            ```python
+            # export LITESWARM_VERBOSE=true
+            level = get_verbose_level()  # Returns "INFO"
+
+            # export LITESWARM_VERBOSE=1
+            level = get_verbose_level("DEBUG")  # Returns "DEBUG"
+            ```
+
+        Specific level:
+            ```python
+            # export LITESWARM_VERBOSE=WARNING
+            level = get_verbose_level()  # Returns "WARNING"
+            ```
     """
     verbose = os.getenv("LITESWARM_VERBOSE", "").upper()
 
@@ -111,13 +195,32 @@ def get_verbose_level(default: LogLevel = "INFO") -> LogLevel | None:
 
 @lru_cache(maxsize=len(LEVEL_MAP))
 def should_print(level: LogLevel) -> bool:
-    """Check if verbose printing is enabled for given level.
+    """Check if message at given level should be printed.
+
+    Determines if verbose printing is enabled for the specified
+    level based on LITESWARM_VERBOSE configuration.
 
     Args:
-        level: Log level to check
+        level: Log level to check.
 
     Returns:
-        True if verbose printing is enabled for this level
+        True if messages at this level should be printed.
+
+    Examples:
+        Level comparison:
+            ```python
+            # export LITESWARM_VERBOSE=WARNING
+
+            should_print("ERROR")    # Returns True
+            should_print("WARNING")  # Returns True
+            should_print("INFO")     # Returns False
+            ```
+
+        Disabled verbose:
+            ```python
+            # LITESWARM_VERBOSE not set
+            should_print("ERROR")  # Returns False
+            ```
     """
     verbose_level = get_verbose_level()
     if verbose_level is None:
@@ -127,10 +230,28 @@ def should_print(level: LogLevel) -> bool:
 
 
 def enable_logging(default_level: LogLevel = "INFO") -> None:
-    """Configure logging for liteswarm.
+    """Configure liteswarm logger with fancy formatting.
+
+    Sets up the liteswarm logger with:
+    - Configured or default log level
+    - Color-coded fancy formatter
+    - Console output handler
 
     Args:
-        default_level: Default log level if not set in environment
+        default_level: Fallback level if not configured.
+
+    Examples:
+        Basic setup:
+            ```python
+            enable_logging()  # Uses INFO level
+            logger.info("Ready")  # [14:23:15] INFO    │ Ready
+            ```
+
+        Custom level:
+            ```python
+            enable_logging("DEBUG")
+            logger.debug("Starting")  # [14:23:15] DEBUG   │ Starting
+            ```
     """
     verbose_logger.setLevel(get_log_level(default_level))
     verbose_logger.handlers.clear()
@@ -142,15 +263,32 @@ def enable_logging(default_level: LogLevel = "INFO") -> None:
 
 @contextmanager
 def disable_logging() -> Generator[None, None, None]:
-    """Disable logging for the duration of the context manager.
+    """Temporarily disable all logging output.
 
-    Example:
-        ```python
-        with disable_logging():
-            logging.info("This will not be printed")
+    Context manager that suppresses all log messages by setting
+    the root logger's level above CRITICAL. Restores the original
+    level when exiting the context.
 
-        logging.info("This will be printed")
-        ```
+    Examples:
+        Suppress specific section:
+            ```python
+            logger.info("This will show")
+
+            with disable_logging():
+                logger.info("This won't show")
+                process_data()  # No logs from this
+                logger.error("Not even errors show")
+
+            logger.info("Back to normal")
+            ```
+
+        In testing:
+            ```python
+            def test_noisy_function():
+                with disable_logging():
+                    result = noisy_function()  # Logs suppressed
+                assert result == expected
+            ```
     """
     old_level = logging.root.getEffectiveLevel()
     logging.root.setLevel(logging.CRITICAL + 1)
@@ -165,19 +303,49 @@ def log_verbose(
     print_fn: Callable[[str], None] | None = print,
     **kwargs: Any,
 ) -> None:
-    """Log a message with optional printing.
+    r"""Log message with optional console output.
+
+    Logs message through liteswarm logger and optionally prints
+    to console if verbose output is enabled for the specified level.
 
     Args:
-        message: The message to log (supports f-strings and multiline)
-        *args: Additional args passed to the message (formatting)
-        level: Log level to use
-        print_fn: Optional function to print the message
-        **kwargs: Additional kwargs passed to logger
+        message: Log message (supports formatting).
+        *args: Format string arguments.
+        level: Log level to use.
+        print_fn: Function for console output (None to disable).
+        **kwargs: Additional logger arguments.
 
-    Environment Variables:
-        LITESWARM_LOG_LEVEL: Set logging level (default: "INFO")
-        LITESWARM_VERBOSE: Enable printing for specified level and above.
-                          Use level name or "1"/"true"/"yes"/"on" for INFO
+    Examples:
+        Basic logging:
+            ```python
+            log_verbose("Processing %d items", 5)
+            # [14:23:15] INFO    │ Processing 5 items
+            ```
+
+        Different levels:
+            ```python
+            log_verbose("Debug info", level="DEBUG")
+            log_verbose("Warning!", level="WARNING")
+            ```
+
+        Custom print function:
+            ```python
+            def my_print(msg: str) -> None:
+                sys.stderr.write(f"{msg}\\n")
+
+            log_verbose("Error", level="ERROR", print_fn=my_print)
+            ```
+
+        Environment control:
+            ```python
+            # export LITESWARM_VERBOSE=WARNING
+
+            # This only logs, no console output
+            log_verbose("Starting", level="INFO")
+
+            # This logs and prints to console
+            log_verbose("Warning!", level="WARNING")
+            ```
     """
     log_fn = getattr(verbose_logger, level.lower())
     log_fn(message, *args, **kwargs)
