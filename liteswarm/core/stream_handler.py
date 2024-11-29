@@ -11,7 +11,7 @@ from litellm.types.utils import ChatCompletionDeltaToolCall
 from liteswarm.types.swarm import Agent, Delta, Message
 
 
-class StreamHandler(Protocol):
+class SwarmStreamHandler(Protocol):
     """Protocol for handlers that process streaming events from agents.
 
     Stream handlers receive and process various events during agent interactions:
@@ -183,7 +183,7 @@ class StreamHandler(Protocol):
         ...
 
 
-class LiteStreamHandler(StreamHandler):
+class LiteSwarmStreamHandler(SwarmStreamHandler):
     """Default no-op implementation of the StreamHandler protocol.
 
     Provides empty implementations of all event handlers.

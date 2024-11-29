@@ -16,7 +16,7 @@ from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 from pydantic import BaseModel
 
-from liteswarm.core.stream_handler import LiteStreamHandler, StreamHandler
+from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from liteswarm.core.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types.exceptions import CompletionError, ContextLengthError
 from liteswarm.types.result import Result
@@ -127,7 +127,7 @@ class Swarm:
 
     def __init__(  # noqa: PLR0913
         self,
-        stream_handler: StreamHandler | None = None,
+        stream_handler: SwarmStreamHandler | None = None,
         summarizer: Summarizer | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
@@ -170,7 +170,7 @@ class Swarm:
         self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
-        self.stream_handler = stream_handler or LiteStreamHandler()
+        self.stream_handler = stream_handler or LiteSwarmStreamHandler()
         self.summarizer = summarizer or LiteSummarizer()
         self.include_usage = include_usage
         self.include_cost = include_cost

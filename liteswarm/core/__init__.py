@@ -4,14 +4,14 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from .stream_handler import LiteStreamHandler, StreamHandler
+from .stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from .summarizer import LiteSummarizer, Summarizer
 from .swarm import Swarm
 
 __all__ = [
-    "LiteStreamHandler",
     "LiteSummarizer",
-    "StreamHandler",
+    "LiteSwarmStreamHandler",
     "Summarizer",
     "Swarm",
+    "SwarmStreamHandler",
 ]
