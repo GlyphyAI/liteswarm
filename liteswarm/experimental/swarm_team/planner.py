@@ -21,15 +21,15 @@ AGENT_PLANNER_INSTRUCTIONS = """
 You are a task planning specialist.
 
 Your role is to:
-1. Break down complex requests into clear, actionable tasks
-2. Ensure tasks have appropriate dependencies
-3. Create tasks that match the provided task types
-4. Consider team capabilities when planning
+1. Break down complex requests into clear, actionable tasks.
+2. Ensure tasks have appropriate dependencies.
+3. Create tasks that match the provided task types.
+4. Consider team capabilities when planning.
 
 Each task must include:
-- A clear title and description
-- The appropriate task type
-- Any dependencies on other tasks
+- A clear title and description.
+- The appropriate task type.
+- Any dependencies on other tasks.
 
 Follow the output format specified in the prompt to create your plan.
 """.strip()
@@ -40,15 +40,18 @@ PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
 Can be either a static template string or a function that generates prompts
 dynamically based on context.
 
-Example:
-    ```python
-    # Static template
-    template: PromptTemplate = "Process {prompt} with {context}"
+Examples:
+    Static template:
+        ```python
+        template: PromptTemplate = "Process {prompt} using {context.get('tools')}"
+        ```
 
-    # Dynamic template
-    def generate_prompt(prompt: str, context: ContextVariables) -> str:
-        return f"Process {prompt} using {context.get('tools')}"
-    ```
+    Dynamic template:
+        ```python
+        def generate_prompt(prompt: str, context: ContextVariables) -> str:
+            tools = context.get("tools", [])
+            return f"Process {prompt} using available tools: {', '.join(tools)}"
+        ```
 """
 
 PlanResponseFormat: TypeAlias = type[Plan] | Callable[[ContextVariables], type[Plan]]
@@ -56,44 +59,66 @@ PlanResponseFormat: TypeAlias = type[Plan] | Callable[[ContextVariables], type[P
 
 Can be either a Plan subclass or a function that generates a Plan subclass
 based on context.
+
+Examples:
+    Static format:
+        ```python
+        class CustomPlan(Plan):
+            tasks: list[ReviewTask | TestTask]
+            metadata: dict[str, str]
+
+        response_format: PlanResponseFormat = CustomPlan
+        ```
+
+    Dynamic format:
+        ```python
+        def create_plan_schema(context: ContextVariables) -> type[Plan]:
+            task_types = context.get("task_types", [])
+            return create_plan_with_tasks(task_types)
+        ```
 """
 
 
 class AgentPlanner(Protocol):
     """Protocol for agents that create task plans.
 
-    Planning agents break down work into tasks, set dependencies, and validate
-    against task definitions.
+    Defines the interface for planning agents that can analyze prompts and create
+    structured plans with tasks and dependencies.
 
-    Example:
-        ```python
-        class CustomPlanner(AgentPlanner):
-            async def create_plan(
-                self,
-                prompt: str,
-                feedback: str | None = None,
-                context: ContextVariables | None = None,
-            ) -> Result[Plan]:
-                # Create and validate plan
-                return Result(value=plan)
-        ```
+    Examples:
+        Create a custom planner:
+            ```python
+            class CustomPlanner(AgentPlanner):
+                async def create_plan(
+                    self,
+                    prompt: str,
+                    context: ContextVariables,
+                    feedback: str | None = None
+                ) -> Result[Plan]:
+                    # Analyze prompt and create tasks
+                    tasks = [
+                        Task(id="task-1", title="First step"),
+                        Task(id="task-2", title="Second step", dependencies=["task-1"])
+                    ]
+                    return Result(value=Plan(tasks=tasks))
+            ```
     """
 
     async def create_plan(
         self,
         prompt: str,
-        feedback: str | None = None,
         context: ContextVariables | None = None,
+        feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan from the given prompt and context.
 
         Args:
-            prompt: Description of work to be done
-            feedback: Optional feedback on previous attempts
-            context: Additional context variables
+            prompt: Description of work to be done.
+            context: Optional additional context variables.
+            feedback: Optional feedback on previous attempts.
 
         Returns:
-            Result containing either a valid Plan or an error
+            Result containing either a valid Plan or an error.
         """
         ...
 
@@ -101,17 +126,36 @@ class AgentPlanner(Protocol):
 class LiteAgentPlanner(AgentPlanner):
     """LLM-based implementation of the planning protocol.
 
-    Creates plans by using an LLM to analyze requirements, generate structured plans,
-    and validate them against task definitions.
+    Uses an LLM agent to analyze requirements and generate structured plans,
+    validating them against task definitions.
 
-    Example:
-        ```python
-        planner = LiteAgentPlanner(
-            swarm=swarm,
-            agent=Agent(id="planner", llm=LLM(model="gpt-4o")),
-            task_definitions=[review_def, test_def]
-        )
-        ```
+    Examples:
+        Create and use a planner:
+            ```python
+            # Define task types
+            class ReviewTask(Task):
+                pr_url: str
+                review_type: str
+
+            # Create task definitions
+            review_def = TaskDefinition(
+                task_schema=ReviewTask,
+                task_instructions="Review {task.pr_url}"
+            )
+
+            # Initialize planner
+            planner = LiteAgentPlanner(
+                swarm=swarm,
+                agent=Agent(id="planner", llm=LLM(model="gpt-4o")),
+                task_definitions=[review_def]
+            )
+
+            # Create plan
+            result = await planner.create_plan(
+                prompt="Review PR #123",
+                context=ContextVariables(pr_url="github.com/org/repo/123")
+            )
+            ```
     """
 
     def __init__(
@@ -125,11 +169,11 @@ class LiteAgentPlanner(AgentPlanner):
         """Initialize a new planner instance.
 
         Args:
-            swarm: Swarm instance for agent interactions
-            agent: Optional custom planning agent
-            prompt_template: Optional custom prompt template
-            task_definitions: Available task types
-            response_format: Optional plan response format
+            swarm: Swarm client for agent interactions.
+            agent: Optional custom planning agent.
+            prompt_template: Optional custom prompt template.
+            task_definitions: Available task types.
+            response_format: Optional plan response format.
         """
         # Public properties
         self.swarm = swarm
@@ -144,7 +188,7 @@ class LiteAgentPlanner(AgentPlanner):
         """Create the default planning agent.
 
         Returns:
-            Agent configured with GPT-4o and planning instructions
+            Agent configured with GPT-4o and planning instructions.
         """
         return Agent(
             id="agent-planner",
@@ -156,7 +200,7 @@ class LiteAgentPlanner(AgentPlanner):
         """Create the default prompt template.
 
         Returns:
-            Simple template that uses raw prompt
+            Simple template that uses raw prompt.
         """
         return lambda prompt, _: prompt
 
@@ -164,7 +208,7 @@ class LiteAgentPlanner(AgentPlanner):
         """Create the default plan response format.
 
         Returns:
-            Plan schema with task types from registry
+            Plan schema with task types from registered task definitions.
         """
         task_definitions = self._task_registry.get_task_definitions()
         task_types = [td.task_schema for td in task_definitions]
@@ -178,14 +222,14 @@ class LiteAgentPlanner(AgentPlanner):
         """Unwrap the response format into a Plan type.
 
         Args:
-            response_format: Format to unwrap
-            context: Optional context for dynamic formats
+            response_format: Format to unwrap.
+            context: Optional context for dynamic formats.
 
         Returns:
-            Concrete Plan type
+            Concrete Plan type.
 
         Raises:
-            ValueError: If format is invalid
+            ValueError: If format is invalid.
         """
         if is_subtype(response_format, Plan):
             return response_format
@@ -198,29 +242,40 @@ class LiteAgentPlanner(AgentPlanner):
     async def create_plan(
         self,
         prompt: str,
-        feedback: str | None = None,
         context: ContextVariables | None = None,
+        feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan using the configured agent.
 
         Args:
-            prompt: Description of work to be done
-            feedback: Optional feedback on previous attempts
-            context: Additional context variables
+            prompt: Description of work to be done.
+            context: Optional context variables for planning.
+            feedback: Optional feedback on previous attempts.
 
         Returns:
-            Result containing either a valid Plan or an error
+            Result containing either:
+                - Valid Plan with tasks and dependencies.
+                - Error if plan creation or validation fails.
 
-        Example:
-            ```python
-            result = await planner.create_plan(
-                prompt="Review and test PR #123",
-                feedback="Add security tests",
-                context=ContextVariables(pr_url="github.com/org/repo/123"),
-            )
-            ```
+        Examples:
+            Create a plan:
+                ```python
+                result = await planner.create_plan(
+                    prompt="Review and test PR #123",
+                    context=ContextVariables(
+                        pr_url="github.com/org/repo/123",
+                        focus_areas=["security", "performance"]
+                    )
+                )
+
+                if result.value:
+                    plan = result.value
+                    print(f"Created plan with {len(plan.tasks)} tasks")
+                    for task in plan.tasks:
+                        print(f"- {task.title}")
+                ```
         """
-        context = context or ContextVariables()
+        context = ContextVariables(context or ContextVariables())
 
         if feedback:
             prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"

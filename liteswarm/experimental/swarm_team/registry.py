@@ -10,38 +10,48 @@ from liteswarm.types import TaskDefinition
 class TaskRegistry:
     """Registry for managing task definitions.
 
-    Maintains a mapping of task types to their definitions, providing methods for
-    registration and lookup.
+    Maintains a central store of task definitions, providing methods for registration,
+    lookup, and type validation.
 
-    Example:
-        ```python
-        # Create registry with initial tasks
-        registry = TaskRegistry([
-            TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions="Review {task.pr_url}"
-            ),
-            TaskDefinition(
-                task_schema=TestTask,
-                task_instructions="Test {task.path}"
-            )
-        ])
+    Examples:
+        Create a registry with initial tasks:
+            ```python
+            # Define task types
+            class ReviewTask(Task):
+                pr_url: str
+                review_type: str
 
-        # Add another task type
-        registry.register_task(
-            TaskDefinition(
-                task_schema=DeployTask,
-                task_instructions="Deploy to {task.env}"
+            class TestTask(Task):
+                path: str
+                coverage: float
+
+            # Create and initialize registry
+            registry = TaskRegistry([
+                TaskDefinition(
+                    task_schema=ReviewTask,
+                    task_instructions="Review {task.pr_url}"
+                ),
+                TaskDefinition(
+                    task_schema=TestTask,
+                    task_instructions="Test {task.path} with {task.coverage}% coverage"
+                )
+            ])
+
+            # Add another task type
+            registry.register_task(
+                TaskDefinition(
+                    task_schema=DeployTask,
+                    task_instructions="Deploy to {task.env}"
+                )
             )
-        )
-        ```
+            ```
     """
 
     def __init__(self, task_definitions: list[TaskDefinition] | None = None) -> None:
         """Initialize a new registry.
 
         Args:
-            task_definitions: Optional initial task definitions
+            task_definitions: Optional list of initial task definitions.
         """
         self._registry: dict[str, TaskDefinition] = {}
         if task_definitions:
@@ -51,17 +61,19 @@ class TaskRegistry:
         """Register a single task definition.
 
         Args:
-            task_definition: Task definition to register
+            task_definition: Task definition to register.
 
-        Example:
-            ```python
-            registry.register_task(
-                TaskDefinition(
-                    task_schema=AnalysisTask,
-                    task_instructions="Analyze {task.data}"
+        Examples:
+            Register a new task type:
+                ```python
+                registry.register_task(
+                    TaskDefinition(
+                        task_schema=AnalysisTask,
+                        task_instructions="Analyze data in {task.path}",
+                        task_response_format=AnalysisOutput
+                    )
                 )
-            )
-            ```
+                ```
         """
         self._registry[task_definition.task_schema.get_task_type()] = task_definition
 
@@ -69,12 +81,22 @@ class TaskRegistry:
         """Register multiple task definitions.
 
         Args:
-            task_definitions: List of definitions to register
+            task_definitions: List of task definitions to register.
 
-        Example:
-            ```python
-            registry.register_tasks([review_def, test_def])
-            ```
+        Examples:
+            Register multiple task types:
+                ```python
+                registry.register_tasks([
+                    TaskDefinition(
+                        task_schema=ReviewTask,
+                        task_instructions="Review {task.pr_url}"
+                    ),
+                    TaskDefinition(
+                        task_schema=TestTask,
+                        task_instructions="Test {task.path}"
+                    )
+                ])
+                ```
         """
         for task_definition in task_definitions:
             self.register_task(task_definition)
@@ -83,22 +105,24 @@ class TaskRegistry:
         """Get a task definition by type.
 
         Args:
-            task_type: Type identifier to look up
+            task_type: Type identifier to look up.
 
         Returns:
-            Corresponding task definition
+            Corresponding task definition.
 
         Raises:
-            KeyError: If task type is not registered
+            KeyError: If task type is not registered.
 
-        Example:
-            ```python
-            review_def = registry.get_task_definition("review")
-            task = review_def.task_schema(
-                id="review-1",
-                title="Review PR #123"
-            )
-            ```
+        Examples:
+            Look up and use a task definition:
+                ```python
+                review_def = registry.get_task_definition("review")
+                task = review_def.task_schema(
+                    id="review-1",
+                    title="Review PR #123",
+                    pr_url="github.com/org/repo/123"
+                )
+                ```
         """
         return self._registry[task_type]
 
@@ -106,7 +130,7 @@ class TaskRegistry:
         """Get all registered task definitions.
 
         Returns:
-            List of all task definitions
+            List of all registered task definitions.
         """
         return list(self._registry.values())
 
@@ -114,12 +138,15 @@ class TaskRegistry:
         """Get all registered task types.
 
         Returns:
-            List of task type identifiers
+            List of registered task type identifiers.
 
-        Example:
-            ```python
-            types = registry.list_task_types()  # ["review", "test", "deploy"]
-            ```
+        Examples:
+            List available task types:
+                ```python
+                types = registry.list_task_types()  # ["review", "test", "deploy"]
+                for task_type in types:
+                    print(f"Registered task type: {task_type}")
+                ```
         """
         return list(self._registry.keys())
 
@@ -127,9 +154,16 @@ class TaskRegistry:
         """Check if a task type exists.
 
         Args:
-            task_type: Type identifier to check
+            task_type: Type identifier to check.
 
         Returns:
-            True if type is registered, False otherwise
+            True if type is registered, False otherwise.
+
+        Examples:
+            Check task type availability:
+                ```python
+                if registry.contains_task_type("review"):
+                    review_def = registry.get_task_definition("review")
+                ```
         """
         return task_type in self._registry
