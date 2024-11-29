@@ -49,80 +49,81 @@ litellm.modify_params = True
 
 
 class Swarm:
-    """A class that manages conversations with AI agents and their interactions.
+    """Orchestrator for AI agent conversations and interactions.
 
-    The Swarm class orchestrates complex conversations involving multiple AI agents,
+    Swarm orchestrates complex conversations involving multiple AI agents,
     handling message history, tool execution, and agent switching. It provides both
     streaming and synchronous interfaces for agent interactions.
 
-    Key Features:
-        - Message history management with automatic summarization
-        - Tool execution and agent switching
-        - Response streaming with customizable handlers
-        - Token usage and cost tracking
-        - Automatic retry with exponential backoff
-        - Automatic continuation of responses when hitting length limits
-        - Safety limits for response length and agent switches
+    Manages complex conversations with multiple AI agents, handling:
+    - Message history and automatic summarization
+    - Tool execution and agent switching
+    - Response streaming with custom handlers
+    - Token usage and cost tracking
+    - Automatic retry with exponential backoff
+    - Response continuation for length limits
+    - Safety limits for responses and switches
 
-    Example:
-        ```python
-        def add(a: float, b: float) -> float:
-            \"\"\"Add two numbers together.
+    Examples:
+        Basic calculation:
+            ```python
+            def add(a: float, b: float) -> float:
+                \"\"\"Add two numbers together.
 
-            Args:
-                a: First number.
-                b: Second number.
+                Args:
+                    a: First number.
+                    b: Second number.
 
-            Returns:
-                Sum of the two numbers.
-            \"\"\"
-            return a + b
+                Returns:
+                    Sum of the two numbers.
+                \"\"\"
+                return a + b
 
-        def multiply(a: float, b: float) -> float:
-            \"\"\"Multiply two numbers together.
+            def multiply(a: float, b: float) -> float:
+                \"\"\"Multiply two numbers together.
 
-            Args:
-                a: First number.
-                b: Second number.
+                Args:
+                    a: First number.
+                    b: Second number.
 
-            Returns:
-                Product of the two numbers.
-            \"\"\"
-            return a * b
+                Returns:
+                    Product of the two numbers.
+                \"\"\"
+                return a * b
 
-        agent_instructions = (
-            "You are a math assistant. Use tools to perform calculations. "
-            "When making tool calls, you must provide valid JSON arguments with correct quotes. "
-            "After calculations, output must strictly follow this format: 'The result is <tool_result>'"
-        )
+            agent_instructions = (
+                "You are a math assistant. Use tools to perform calculations. "
+                "When making tool calls, you must provide valid JSON arguments with correct quotes. "
+                "After calculations, output must strictly follow this format: 'The result is <tool_result>'"
+            )
 
-        # Create an agent with math tools
-        agent = Agent(
-            id="math",
-            instructions=agent_instructions,
-            llm=LLM(
-                model="gpt-4o",
-                tools=[add, multiply],
-                tool_choice="auto",
-            ),
-        )
+            # Create an agent with math tools
+            agent = Agent(
+                id="math",
+                instructions=agent_instructions,
+                llm=LLM(
+                    model="gpt-4o",
+                    tools=[add, multiply],
+                    tool_choice="auto",
+                ),
+            )
 
-        # Initialize swarm and run calculation
-        swarm = Swarm(include_usage=True)
-        result = await swarm.execute(
-            agent=agent,
-            prompt="What is (2 + 3) * 4?"
-        )
+            # Initialize swarm and run calculation
+            swarm = Swarm(include_usage=True)
+            result = await swarm.execute(
+                agent=agent,
+                prompt="What is (2 + 3) * 4?"
+            )
 
-        # The agent will:
-        # 1. Use add(2, 3) to get 5
-        # 2. Use multiply(5, 4) to get 20
-        print(result.content)  # "The result is 20"
-        ```
+            # The agent will:
+            # 1. Use add(2, 3) to get 5
+            # 2. Use multiply(5, 4) to get 20
+            print(result.content)  # "The result is 20"
+            ```
 
-    Note:
-        The class maintains internal state during conversations.
-        For concurrent conversations, create separate Swarm instances.
+    Notes:
+        - Maintains internal state during conversations
+        - Create separate instances for concurrent conversations
     """  # noqa: D214
 
     def __init__(  # noqa: PLR0913
@@ -142,24 +143,24 @@ class Swarm:
 
         Args:
             stream_handler: Handler for streaming events during conversation.
-                Defaults to `LiteStreamHandler`.
+                Defaults to LiteSwarmStreamHandler.
             summarizer: Handler for summarizing conversation history.
-                Defaults to `LiteSummarizer`.
-            include_usage: Whether to include token usage statistics in responses.
-            include_cost: Whether to include cost statistics in responses.
-            max_retries: Maximum number of retry attempts for failed API calls.
-            initial_retry_delay: Initial delay between retries in seconds.
-            max_retry_delay: Maximum delay between retries in seconds.
-            backoff_factor: Multiplicative factor for retry delay after each attempt.
-            max_response_continuations: Maximum times a response can be continued
-                when hitting length limits.
-            max_agent_switches: Maximum number of agent switches allowed in a
-                single conversation.
+                Defaults to LiteSummarizer.
+            include_usage: Whether to include token usage statistics.
+            include_cost: Whether to include cost statistics.
+            max_retries: Maximum retry attempts for failed API calls.
+            initial_retry_delay: Initial delay between retries (seconds).
+            max_retry_delay: Maximum delay between retries (seconds).
+            backoff_factor: Multiplier for retry delay after each attempt.
+            max_response_continuations: Maximum times a response can be
+                continued when hitting length limits.
+            max_agent_switches: Maximum number of agent switches allowed
+                in a single conversation.
 
-        Note:
-            The retry configuration (max_retries, delays, backoff) applies to
-            API calls that fail due to transient errors. Context length errors
-            are handled separately through history management.
+        Notes:
+            The retry configuration (max_retries, delays, backoff) applies
+            to API calls that fail due to transient errors. Context length
+            errors are handled separately through history management.
         """
         # Internal state (private)
         self._active_agent: Agent | None = None
@@ -195,19 +196,25 @@ class Swarm:
         context_variables: ContextVariables,
         tool_call: ChatCompletionDeltaToolCall,
     ) -> ToolCallResult:
-        """Process a single tool call and return its result.
+        """Process a single tool call and handle its execution lifecycle.
 
-        Handles the execution of a function call, including error handling
-        and result transformation. Supports both regular function results
-        and agent switching.
+        Manages the complete execution of a function call, including error handling,
+        argument validation, and result transformation. The method supports both
+        regular function return values and special cases like agent switching.
 
         Args:
-            agent: Agent that initiated the tool call
-            context_variables: Context variables to pass to the tool function
-            tool_call: Tool call to process, containing function name and arguments
+            agent: Agent that initiated the tool call.
+            context_variables: Context variables to pass to the tool function for dynamic resolution.
+            tool_call: Tool call details containing function name and arguments to execute.
 
         Returns:
-            ToolCallResult indicating success or failure of the tool execution
+            ToolCallResult indicating success or failure of the tool execution.
+
+        Notes:
+            Tool calls can return different types of results:
+            - Regular values that get converted to conversation messages
+            - New agents that trigger agent switching behavior
+            - Complex result objects for special response handling
         """
         tool_call_result: ToolCallResult
         function_name = tool_call.function.name
@@ -292,27 +299,26 @@ class Swarm:
         context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[ToolCallResult]:
-        """Process multiple tool calls efficiently and concurrently.
+        """Process multiple tool calls with optimized execution strategies.
 
-        This method handles the execution of multiple tool calls, optimizing for both
-        single and multiple call scenarios:
-        - For a single tool call: Processes directly to avoid concurrency overhead
-        - For multiple tool calls: Uses asyncio.gather() for concurrent execution
+        This method intelligently handles tool call execution based on the number of calls:
+        - For a single tool call: Uses direct processing to avoid concurrency overhead
+        - For multiple tool calls: Leverages asyncio.gather() for efficient parallel execution
 
         Args:
-            agent: Agent that initiated the tool calls
-            context_variables: Context variables for the agent
-            tool_calls: List of tool calls to process, each containing function name and arguments
+            agent: Agent that initiated the calls, providing execution context.
+            context_variables: Context variables for dynamic resolution in tool functions.
+            tool_calls: List of tool calls to process, each with function details (name and arguments).
 
         Returns:
-            List of successful ToolCallResult objects. Failed tool calls are filtered out.
-            Each result can be either:
-            - ToolCallMessageResult: Contains the function's return value
-            - ToolCallAgentResult: Contains a new agent for switching
+            List of successful ToolCallResult objects. Failed calls are filtered out.
+            Results can be either:
+            - ToolCallMessageResult containing function return values
+            - ToolCallAgentResult containing new agents for switching
 
-        Note:
-            Tool calls that fail or reference unknown functions are silently filtered out
-            of the results rather than raising exceptions.
+        Notes:
+            Tool calls that fail or reference unknown functions are filtered from results
+            rather than raising exceptions to maintain conversation flow.
         """
         tasks = [
             self._process_tool_call(
@@ -338,30 +344,27 @@ class Swarm:
         self,
         result: ToolCallResult,
     ) -> ToolMessage:
-        """Process a tool call result and prepare the appropriate message response.
+        """Process a tool call result into an appropriate conversation message.
 
-        This method handles the following types of tool call results:
-        1. Message results: Function return values that should be added to conversation
-        2. Agent results: Requests to switch to a new agent
-        3. Failure results: Errors that occurred during execution
+        Handles different types of tool call results with specialized processing:
+        - Message results: Converts function return values into conversation entries
+        - Agent results: Creates switch notifications and requests agent switching
+        - Failure results: Generates appropriate error messages for conversation
 
         Args:
-            result: The tool call result to process, either:
-                - ToolCallMessageResult containing a function's return value
-                - ToolCallAgentResult containing a new agent to switch to
-                - ToolCallFailureResult containing an error that occurred during execution
+            result: Tool call result to process, which can be:
+                - ToolCallMessageResult with function return value
+                - ToolCallAgentResult with new agent for switching
+                - ToolCallFailureResult with execution error details
 
         Returns:
             ToolMessage containing:
-            - message: The message to add to conversation history
-            - agent: Optional new agent to switch to (None for message results)
+            - message: Formatted message for conversation history
+            - agent: Optional new agent for switching scenarios
+            - context_variables: Optional context updates for next steps
 
         Raises:
-            TypeError: If result is not a recognized ToolCallResult subclass
-
-        Note:
-            For agent switches, creates a message indicating the switch is occurring
-            while also including the new agent in the return value.
+            TypeError: If result type is not a recognized ToolCallResult subclass.
         """
         match result:
             case ToolCallMessageResult() as message_result:
@@ -404,18 +407,25 @@ class Swarm:
         agent: Agent,
         messages: list[Message],
     ) -> CustomStreamWrapper:
-        """Create a completion request with the given agent and messages.
+        """Create a completion request with comprehensive configuration.
+
+        Prepares and sends a completion request with full configuration:
+        - Message history with proper formatting
+        - Tool configurations and permissions
+        - Response format specifications
+        - Usage tracking and cost monitoring settings
+        - Model-specific parameters from agent
 
         Args:
-            agent: The agent to use for completion
-            messages: The messages to send
+            agent: Agent to use for completion, providing model settings.
+            messages: Messages to send as conversation context.
 
         Returns:
-            Response stream from the completion
+            Response stream from the completion API.
 
         Raises:
-            ValueError: If agent parameters are invalid
-            TypeError: If response is not of expected type
+            ValueError: If agent parameters are invalid or inconsistent.
+            TypeError: If response format is unexpected.
         """
         exclude_keys = {"response_format", "litellm_kwargs"}
         llm_kwargs = agent.llm.model_dump(exclude=exclude_keys, exclude_none=True)
@@ -465,15 +475,21 @@ class Swarm:
         previous_content: str,
         context_variables: ContextVariables,
     ) -> CustomStreamWrapper:
-        """Continue generation after hitting output token limit.
+        """Continue generation after reaching the output token limit.
+
+        Creates a new completion request optimized for continuation:
+        - Includes previous content as meaningful context
+        - Maintains original agent instructions and settings
+        - Adds continuation-specific prompting
+        - Preserves conversation coherence
 
         Args:
-            agent: Agent to use for continuation
-            previous_content: Content generated so far
-            context_variables: Context variables for the agent
+            agent: Agent for continuation, maintaining consistency.
+            previous_content: Content generated before hitting limit.
+            context_variables: Context for dynamic resolution.
 
         Returns:
-            Response stream for the continuation
+            Response stream for the continuation request.
         """
         instructions = unwrap_instructions(agent.instructions, context_variables)
         continuation_messages = [
@@ -493,29 +509,30 @@ class Swarm:
         agent_messages: list[Message],
         context_variables: ContextVariables,
     ) -> AsyncGenerator[CompletionResponse, None]:
-        """Stream completion responses from the agent, handling continuations and errors.
+        """Stream agent completion responses handling continuations and errors.
 
-        This method manages the streaming response lifecycle, including:
-        1. Getting the initial response stream
-        2. Processing stream chunks into completion responses
-        3. Handling response continuations when output length limits are reached
-        4. Managing errors and retries
+        Manages the complete response lifecycle with advanced features:
+        - Initial response stream creation and validation
+        - Chunk processing with proper delta extraction
+        - Automatic continuation on length limits
+        - Error handling with intelligent retries
+        - Usage tracking and cost monitoring
 
         Args:
-            agent: Agent to use for completion
-            agent_messages: Messages to send to the agent
-            context_variables: Context variables for the agent
+            agent: Agent for completion, providing model settings.
+            agent_messages: Messages forming conversation context.
+            context_variables: Context for dynamic resolution.
 
         Yields:
-            CompletionResponse objects containing:
-            - Current response delta
-            - Finish reason
-            - Token usage statistics (if enabled)
-            - Response cost (if enabled)
+            CompletionResponse containing:
+            - Current response delta with content updates
+            - Finish reason for proper flow control
+            - Usage statistics for monitoring (if enabled)
+            - Cost information for tracking (if enabled)
 
         Raises:
-            CompletionError: If completion fails after all retries
-            ContextLengthError: If context window is exceeded and can't be reduced
+            CompletionError: If completion fails after all retry attempts.
+            ContextLengthError: If context exceeds limits and cannot be reduced.
         """
         accumulated_content = ""
         continuation_count = 0
@@ -563,24 +580,25 @@ class Swarm:
         agent_messages: list[Message],
         context_variables: ContextVariables | None = None,
     ) -> CustomStreamWrapper:
-        """Create initial completion stream with retry and context reduction.
+        """Create initial completion stream with robust error handling.
 
-        This method:
-        1. Attempts to create a completion stream with the given messages
-        2. On context window errors, retries with reduced context
-        3. Uses exponential backoff for retries
+        Implements a comprehensive completion strategy:
+        - Multiple retry attempts with exponential backoff
+        - Automatic context reduction on length errors
+        - Intelligent history trimming when needed
+        - Proper error propagation for unrecoverable cases
 
         Args:
-            agent: Agent to use for completion
-            agent_messages: Messages to send to the agent
-            context_variables: Context variables for the agent
+            agent: Agent for completion with model settings.
+            agent_messages: Messages forming the conversation context.
+            context_variables: Optional context for dynamic resolution.
 
         Returns:
-            Stream wrapper for the completion response
+            Stream wrapper for managing completion response.
 
         Raises:
-            CompletionError: If completion fails after all retries
-            ContextLengthError: If context window is exceeded and can't be reduced
+            CompletionError: If completion fails after exhausting retries.
+            ContextLengthError: If context remains too large after reduction.
         """
 
         async def get_initial_response() -> CustomStreamWrapper:
@@ -610,22 +628,24 @@ class Swarm:
         agent: Agent,
         chunk: ModelResponse,
     ) -> CompletionResponse:
-        """Convert a raw stream chunk into a structured completion response.
+        """Process a raw stream chunk into a structured completion response.
 
-        This method:
-        1. Extracts delta and finish reason from the chunk
-        2. Processes usage statistics if enabled
-        3. Calculates response cost if enabled
+        Performs stream chunk processing:
+        - Extracts and validates response delta
+        - Determines appropriate finish reason
+        - Calculates detailed usage statistics
+        - Computes accurate response cost
+        - Handles special token cases
 
         Args:
-            agent: Agent to use for model and cost calculation
-            chunk: Raw response chunk from the model
+            agent: Agent providing model info and cost settings.
+            chunk: Raw response chunk from the model API.
 
         Returns:
-            Structured completion response with delta, finish reason, and optional stats
+            Structured completion response with all metadata.
 
         Raises:
-            TypeError: If chunk format is invalid
+            TypeError: If chunk format is invalid or unexpected.
         """
         choice = chunk.choices[0]
         if not isinstance(choice, StreamingChoices):
@@ -656,21 +676,23 @@ class Swarm:
         accumulated_content: str,
         context_variables: ContextVariables,
     ) -> CustomStreamWrapper | None:
-        """Create a continuation stream when response length limit is reached.
+        """Handle response continuation with proper limits and tracking.
 
-        This method:
-        1. Checks if maximum continuations are reached
-        2. Creates a new completion stream with accumulated content
-        3. Logs continuation progress
+        Manages the continuation process with safeguards:
+        - Checks for maximum continuation limit
+        - Creates properly contextualized completions
+        - Maintains conversation coherence
+        - Tracks and logs continuation progress
+        - Handles resource cleanup
 
         Args:
-            agent: Agent to use for continuation
-            continuation_count: Number of continuations so far
-            accumulated_content: Content generated up to this point
-            context_variables: Context variables for the agent
+            agent: Agent for continuation, maintaining consistency.
+            continuation_count: Number of continuations performed.
+            accumulated_content: Previously generated content.
+            context_variables: Context for dynamic resolution.
 
         Returns:
-            New stream for continuation, or None if max continuations reached
+            New stream for continuation, or None if max continuations reached.
         """
         if continuation_count >= self.max_response_continuations:
             log_verbose(
@@ -697,30 +719,30 @@ class Swarm:
         agent_messages: list[Message],
         context_variables: ContextVariables,
     ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream agent responses while maintaining conversation state.
+        """Process agent responses with state management and tracking.
 
-        This method:
-        1. Streams completion responses from the agent
-        2. Accumulates content and tool calls
-        3. Notifies the stream handler of updates
-        4. Yields responses with the current conversation state
+        Implements agent response handling:
+        - Streams completion responses with proper buffering
+        - Accumulates content and tool calls accurately
+        - Updates stream handler with progress
+        - Maintains conversation state consistency
+        - Tracks usage and costs throughout
 
         Args:
-            agent: Agent to use for completion
-            agent_messages: Messages to send to the agent
-            context_variables: Context variables for the agent
+            agent: Agent processing the response.
+            agent_messages: Messages providing conversation context.
+            context_variables: Context for dynamic resolution.
 
         Yields:
-            AgentResponse objects containing:
-            - Current response delta
-            - Accumulated content
-            - Accumulated tool calls
-            - Token usage statistics (if enabled)
-            - Response cost (if enabled)
+            AgentResponse containing:
+            - Current response delta with updates
+            - Accumulated content for context
+            - Collected tool calls for execution
+            - Usage and cost statistics for monitoring
 
         Raises:
-            CompletionError: If completion fails after all retries
-            ContextLengthError: If context window is exceeded and can't be reduced
+            CompletionError: If completion fails after retries.
+            ContextLengthError: If context exceeds limits after reduction.
         """
         full_content = ""
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
@@ -765,29 +787,31 @@ class Swarm:
         context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall],
     ) -> list[Message]:
-        """Process the assistant's response and execute any tool calls.
+        """Process complete assistant response, and handle tool calls.
 
-        This method handles the complete assistant response cycle:
-        1. Creates an assistant message with the text response and/or tool calls
-        2. Processes any tool calls and their results
-        3. Handles potential agent switches from tool calls
-        4. Maintains proper message ordering and relationships
+        Handles the full response cycle with proper ordering:
+        - Creates formatted assistant message with content
+        - Processes tool calls in correct sequence
+        - Manages potential agent switches
+        - Maintains message relationships
+        - Updates conversation state
 
         Args:
-            agent: Agent that generated the response
-            content: Text content of the assistant's response, may be None if only tool calls
-            context_variables: Context variables for the agent
-            tool_calls: List of tool calls to process, may be empty if only text response
+            agent: Agent that generated the response.
+            content: Text content of response, may be None.
+            context_variables: Context for tool execution.
+            tool_calls: Tool calls to process in order.
 
         Returns:
-            List of messages including:
-            - The initial assistant message (with content and/or tool calls)
-            - Any tool response messages
-            - Any agent switch notification messages
+            Messages including all components:
+            - Primary assistant message
+            - Tool response messages
+            - Switch notification messages
+            - Related status updates
 
-        Note:
-            If a tool call results in an agent switch, the current agent's state
-            is marked as "stale" and the new agent is added to the queue.
+        Notes:
+            Updates agent state and queue when switches occur by marking the current
+            agent as stale and adding the new agent to the queue.
         """
         messages: list[Message] = [
             Message(
@@ -830,20 +854,21 @@ class Swarm:
         prompt: str | None = None,
         context_variables: ContextVariables | None = None,
     ) -> list[Message]:
-        """Prepare the agent's context using the working history.
+        """Prepare the agent context for execution.
 
-        Creates initial context for an agent by combining:
-        1. Agent's system instructions (resolved with context variables if callable)
-        2. Filtered working history (excluding system messages)
-        3. Optional user prompt
+        Builds complete context by combining:
+        - System instructions with variable resolution
+        - Filtered working history for relevance
+        - Optional user prompt for direction
+        - Required metadata for processing
 
         Args:
-            agent: The agent whose context is being prepared
-            prompt: Optional initial user message to add
-            context_variables: Optional variables for resolving instructions
+            agent: Agent requiring context preparation.
+            prompt: Optional user message to include.
+            context_variables: Optional context for dynamic resolution.
 
         Returns:
-            List of messages representing the agent's context
+            Messages representing the complete agent context.
         """
         instructions = unwrap_instructions(agent.instructions, context_variables)
         history = [msg for msg in self._working_history if msg.role != "system"]
@@ -855,31 +880,26 @@ class Swarm:
         return messages
 
     async def _update_working_history(self, agent: Agent) -> None:
-        """Update the working history by summarizing or trimming messages as needed.
+        """Update working history with intelligent management.
 
-        This method maintains the working history within token and complexity limits
-        through two mechanisms:
+        Maintains history quality through multiple mechanisms:
+        - Summarization based on complexity metrics
+        - Token-based trimming when needed
+        - Context limit enforcement
+        - Conversation coherence preservation
 
-        1. Summarization:
-           - Triggered when the summarizer determines history needs condensing
-           - Typically based on length, complexity, or time thresholds
-           - Creates a new condensed history while preserving key information
-           - Takes precedence over trimming
-
-        2. Token-based Trimming:
-           - Triggered when history exceeds the model's token limit
-           - Removes older messages while keeping recent context
-           - Only applied if summarization isn't needed
-           - Uses the agent's model context limits
+        The method prioritizes summarization over trimming when possible,
+        as it better preserves conversation context and meaning.
 
         Args:
-            agent: The agent whose model context limits will be used for trimming
+            agent: Agent providing context limits and settings.
 
-        Note:
-            - The full history remains unchanged while working history is updated
-            - This method modifies self._working_history in place
-            - The choice between summarization and trimming is automatic
-            - If neither is needed, the working history remains unchanged
+        Notes:
+            - Full history remains preserved for reference
+            - Working history is modified as needed
+            - Summarization is preferred for context preservation
+            - Trimming serves as fallback mechanism
+            - Updates are performed in place
         """
         if self.summarizer.needs_summarization(self._working_history):
             self._working_history = await self.summarizer.summarize_history(self._full_history)
@@ -891,22 +911,23 @@ class Swarm:
         agent: Agent,
         context_variables: ContextVariables | None = None,
     ) -> CustomStreamWrapper:
-        """Attempt completion with a trimmed message history.
+        """Retry completion with optimized context reduction.
 
-        This method:
-        1. Updates the working history to fit the active agent's token limit
-        2. Prepares new messages with reduced context
-        3. Attempts completion with reduced context
+        Implements intelligent context reduction:
+        - Updates working history within limits
+        - Prepares minimal but sufficient context
+        - Attempts completion with reduced context
+        - Maintains conversation coherence
 
         Args:
-            agent: Agent to use for completion
-            context_variables: Context variables for the agent
+            agent: Agent for completion attempt.
+            context_variables: Context for resolution.
 
         Returns:
-            Response stream from the completion
+            Response stream from completion.
 
         Raises:
-            ContextLengthError: If context is still too large after reduction
+            ContextLengthError: If context remains too large after reduction.
         """
         await self._update_working_history(agent)
 
@@ -937,14 +958,18 @@ class Swarm:
     ) -> None:
         """Initialize the conversation state.
 
-        Sets up the initial state for the conversation, including the active agent,
-        full history, working history, and agent messages.
+        Sets up complete conversation environment:
+        - Configures active agent with settings
+        - Initializes message histories
+        - Sets up context variables
+        - Prepares initial messages
+        - Establishes tracking state
 
         Args:
-            agent: Initial agent to handle the conversation
-            prompt: Initial user prompt
-            messages: Optional previous conversation history
-            context_variables: Optional context variables for the agent
+            agent: Initial agent for conversation.
+            prompt: Starting user prompt.
+            messages: Optional existing history.
+            context_variables: Optional context for dynamic resolution.
         """
         if messages:
             self._full_history = copy.deepcopy(messages)
@@ -977,21 +1002,22 @@ class Swarm:
         prompt: str | None = None,
         context_variables: ContextVariables | None = None,
     ) -> bool:
-        """Switch to the next agent in the queue.
+        """Handle agent switch with proper state management.
 
-        This method:
-        1. Gets the next agent from the queue
-        2. Updates the active agent and agent messages
-        3. Notifies the stream handler of the switch
-        4. Preserves conversation history for the new agent
+        Manages complete switch process:
+        - Retrieves next agent from queue
+        - Updates active agent state
+        - Notifies stream handler of change
+        - Preserves conversation context
+        - Maintains execution state
 
         Args:
-            switch_count: Current number of agent switches in the conversation
-            prompt: Optional prompt to send to the new agent
-            context_variables: Optional context variables for the new agent
+            switch_count: Current switch iteration.
+            prompt: Optional message for new agent.
+            context_variables: Optional context for dynamic resolution.
 
         Returns:
-            True if the switch was successful, False otherwise
+            True if switch completed successfully, False otherwise.
         """
         if switch_count >= self.max_agent_switches:
             log_verbose(
@@ -1035,51 +1061,72 @@ class Swarm:
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream agent responses and manage the conversation flow.
+        """Stream responses from a swarm of agents.
 
-        Handles the complete conversation lifecycle including:
-        1. History initialization and management
-        2. Agent responses and tool calls
-        3. Agent switching
-        4. History summarization
+        This is the main entry point for streaming responses from a swarm of agents.
+        The swarm processes the prompt through a series of agents, where each agent
+        can contribute to the response or delegate to other agents. The process
+        continues until a complete response is generated or an error occurs.
+
+        The swarm maintains conversation state and handles:
+        - Agent initialization and switching
+        - Message history management
+        - Response streaming and accumulation
+        - Tool call execution
+        - Error recovery and retries
 
         Args:
-            agent: Initial agent to handle the conversation
-            prompt: Initial user prompt
-            messages: Optional previous conversation history
-            context_variables: Optional dictionary of variables accessible to:
-                - Agent instructions (if using callable instructions)
-                - Tool functions (automatically injected as context_variables parameter)
-            cleanup: Whether to clear agent state after completion
+            agent: Initial agent to handle the conversation.
+            prompt: The user's input prompt to process.
+            messages: Optional list of previous conversation messages for context.
+                If provided, these messages are used as conversation history.
+            context_variables: Optional variables for dynamic instruction resolution
+                and tool execution. These variables are passed to agents and tools.
+            cleanup: Whether to clear agent state after completion.
 
         Yields:
-            AgentResponse objects containing response content and state
-
-        Example:
-            ```python
-            def get_instructions(context: ContextVariables) -> str:
-                return f"Help {context['user_name']} with math."
-
-            def add(a: float, b: float, context_variables: ContextVariables) -> float:
-                print(f"User {context_variables['user_name']} adding {a} + {b}")
-                return a + b
-
-            agent = Agent(
-                id="math",
-                instructions=get_instructions,
-                llm=LLM(model="gpt-4o", tools=[add])
-            )
-
-            async for response in swarm.stream(
-                agent=agent,
-                prompt="What is 2 + 2?",
-                context_variables={"user_name": "Alice"}
-            ):
-                print(response.content)
-            ```
+            AgentResponse objects containing:
+            - Current response delta with content updates
+            - Accumulated content so far
+            - Tool calls being processed
+            - Usage statistics if enabled
+            - Cost information if enabled
 
         Raises:
-            Exception: Any errors during conversation processing
+            SwarmError: If an unrecoverable error occurs during processing.
+            ContextLengthError: If the context becomes too large to process.
+            MaxAgentSwitchesError: If too many agent switches occur.
+            MaxResponseContinuationsError: If response requires too many continuations.
+
+        Notes:
+            - The swarm uses a queue of agents to handle complex tasks
+            - Each agent can process the input or delegate to other agents
+            - The conversation history is preserved across agent switches
+            - The stream can be interrupted at any point
+            - Errors during processing may be recovered automatically
+
+        Examples:
+            Basic usage:
+                ```python
+                def get_instructions(context: ContextVariables) -> str:
+                    return f"Help {context['user_name']} with math."
+
+                def add(a: float, b: float, context_variables: ContextVariables) -> float:
+                    return a + b
+
+                agent = Agent(
+                    id="math",
+                    instructions=get_instructions,
+                    llm=LLM(model="gpt-4o", tools=[add])
+                )
+
+                async for response in swarm.stream(
+                    agent=agent,
+                    prompt="What is 2 + 2?",
+                    context_variables=ContextVariables({"user_name": "Alice"}),
+                ):
+                    print(response.content)
+                ```
         """
         await self._initialize_conversation(
             agent=agent,
@@ -1152,49 +1199,64 @@ class Swarm:
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> ConversationState:
-        """Execute the agent's task and return the final conversation state.
+        """Execute a prompt and return the complete response.
 
-        A high-level method that manages the entire conversation flow and collects
-        the final results. Uses stream() internally but provides a simpler interface
-        for cases where streaming updates aren't needed.
+        This is a convenience method that wraps the stream() method to provide
+        a simpler interface when streaming isn't required. It accumulates all
+        content from the stream and returns the final response as a string.
+
+        The method provides the same functionality as stream() but with:
+        - Automatic response accumulation
+        - Simplified error handling
+        - Single string return value
+        - Blocking execution until completion
 
         Args:
-            agent: Agent to execute the task
-            prompt: Prompt describing the task
-            messages: Optional previous messages for context
-            context_variables: Optional dictionary of variables accessible to:
-                - Agent instructions (if using callable instructions)
-                - Tool functions (automatically injected as context_variables parameter)
-            cleanup: Whether to clear agent state after completion
+            agent: Agent to execute the task.
+            prompt: The user's input prompt to process.
+            messages: Optional list of previous conversation messages for context.
+                If provided, these messages are used as conversation history.
+            context_variables: Optional variables for dynamic instruction resolution
+                and tool execution. These variables are passed to agents and tools.
+            cleanup: Whether to clear agent state after completion.
 
         Returns:
             ConversationState containing:
-                - Final response content
-                - Active agent and message history
-                - Token usage and cost statistics (if enabled)
-
-        Example:
-            ```python
-            def get_instructions(context: ContextVariables) -> str:
-                return f"Help {context['user_name']} with their task."
-
-            agent = Agent(
-                id="helper",
-                instructions=get_instructions,
-                llm=LLM(model="gpt-4o")
-            )
-
-            result = await swarm.execute(
-                agent=agent,
-                prompt="Hello!",
-                context_variables={"user_name": "Bob"}
-            )
-            print(result.content)  # Response will be personalized for Bob
-            ```
+            - Final response content
+            - Active agent and message history
+            - Token usage and cost statistics (if enabled)
 
         Raises:
-            ValueError: If there is no active agent
-            Exception: Any errors during processing
+            SwarmError: If an unrecoverable error occurs during processing.
+            ContextLengthError: If the context becomes too large to process.
+            MaxAgentSwitchesError: If too many agent switches occur.
+            MaxResponseContinuationsError: If response requires too many continuations.
+
+        Notes:
+            - This method blocks until the complete response is generated
+            - All streaming responses are accumulated internally
+            - The same error handling and recovery as stream() applies
+            - The conversation history is preserved in the same way
+
+        Examples:
+            Basic usage:
+                ```python
+                def get_instructions(context: ContextVariables) -> str:
+                    return f"Help {context['user_name']} with their task."
+
+                agent = Agent(
+                    id="helper",
+                    instructions=get_instructions,
+                    llm=LLM(model="gpt-4o")
+                )
+
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello!",
+                    context_variables=ContextVariables({"user_name": "Bob"}),
+                )
+                print(result.content)  # Response will be personalized for Bob
+                ```
         """
         full_response = ""
         full_usage: Usage | None = None

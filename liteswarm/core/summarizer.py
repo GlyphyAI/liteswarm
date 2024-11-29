@@ -16,6 +16,10 @@ from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import filter_tool_call_pairs
 
 GroupedMessages = tuple[list[Message], list[Message]]
+"""Tuple used to group messages into two lists:
+- Messages to preserve unchanged
+- Messages to summarize
+"""
 
 
 class Summarizer(Protocol):
@@ -24,16 +28,26 @@ class Summarizer(Protocol):
     This protocol defines the interface that all summarizer implementations must follow.
     Summarizers are responsible for managing conversation history length while preserving
     context and maintaining tool call/result relationships.
+
+    The protocol ensures that all summarizers provide consistent functionality for:
+    - Determining when summarization is needed
+    - Creating concise summaries of conversations
+    - Processing complete conversation histories
+
+    Notes:
+        Implementations should focus on maintaining conversation coherence
+        and preserving important context while reducing history length.
     """
 
     def needs_summarization(self, messages: Sequence[Message]) -> bool:
         """Determine if the conversation history needs summarization.
 
         Args:
-            messages: The messages to check
+            messages: The conversation messages to evaluate for summarization.
 
         Returns:
-            True if the messages exceed length limits and need summarization
+            True if the messages exceed length limits and need summarization,
+            False otherwise.
         """
         ...
 
@@ -41,13 +55,13 @@ class Summarizer(Protocol):
         """Create a concise summary of the conversation history.
 
         Args:
-            messages: The messages to summarize
+            messages: The conversation messages to summarize.
 
         Returns:
-            A string containing the summarized conversation
+            A string containing the summarized conversation content.
 
         Raises:
-            NotImplementedError: If the summarizer doesn't support direct summarization
+            NotImplementedError: If the summarizer doesn't support direct summarization.
         """
         ...
 
@@ -55,10 +69,11 @@ class Summarizer(Protocol):
         """Summarize conversation history while preserving important context.
 
         Args:
-            messages: The complete list of messages to process
+            messages: The complete list of messages to process and summarize.
 
         Returns:
-            A list of Message objects containing the processed history
+            A list of Message objects containing the processed history with
+            important context preserved.
         """
         ...
 
@@ -66,27 +81,32 @@ class Summarizer(Protocol):
 class LiteSummarizer:
     """Summarizes conversations using LiteLLM while preserving important context.
 
-    This summarizer:
-    1. Maintains recent messages unchanged
-    2. Summarizes older messages in chunks
-    3. Preserves tool call/result relationships
-    4. Processes chunks concurrently for efficiency
-    5. Excludes system messages from summarization
-    6. Supports fallback to another summarizer on failure
+    This summarizer implements an intelligent conversation management strategy:
+    - Maintains recent messages unchanged for immediate context
+    - Summarizes older messages in chunks for efficiency
+    - Preserves tool call/result relationships for coherence
+    - Processes chunks concurrently for better performance
+    - Excludes system messages from summarization
+    - Supports fallback to another summarizer on failure
 
-    Attributes:
-        model: The LLM model to use for summarization
-        system_prompt: Instructions for the summarization model
-        summarize_prompt: The prompt template for summarization requests
-        max_history_length: Maximum number of messages before summarization
-        preserve_recent: Number of recent messages to keep unchanged
-        chunk_size: Number of messages to summarize in each chunk
-        fallback_summarizer: Optional summarizer to use if LLM summarization fails
+    Example:
+        ```python
+        summarizer = LiteSummarizer(
+            model="gpt-4o",
+            max_history_length=50,
+            preserve_recent=25
+        )
+
+        # Check if summarization is needed
+        if summarizer.needs_summarization(messages):
+            # Summarize while preserving recent context
+            summarized = await summarizer.summarize_history(messages)
+        ```
     """
 
     def __init__(  # noqa: PLR0913
         self,
-        model: str = "claude-3-5-haiku-20241022",
+        model: str = "gpt-4o",
         system_prompt: str | None = None,
         summarize_prompt: str | None = None,
         max_history_length: int = 50,
@@ -97,13 +117,16 @@ class LiteSummarizer:
         """Initialize the LiteLLM-based summarizer.
 
         Args:
-            model: The LLM model to use for summarization
-            system_prompt: Custom system prompt for the summarization model
-            summarize_prompt: Custom prompt template for summarization requests
-            max_history_length: Maximum number of messages before summarization
-            preserve_recent: Number of recent messages to keep unchanged
-            chunk_size: Number of messages to summarize in each chunk
-            fallback_summarizer: Optional summarizer to use if LLM summarization fails
+            model: The LLM model identifier for summarization.
+            system_prompt: Custom system prompt for the summarization model.
+                If None, uses a default prompt focused on clear and concise summaries.
+            summarize_prompt: Custom prompt template for summarization requests.
+                If None, uses a default template focusing on key information.
+            max_history_length: Maximum number of messages before triggering summarization.
+            preserve_recent: Number of recent messages to keep unchanged.
+            chunk_size: Number of messages to include in each summarization chunk.
+            fallback_summarizer: Optional backup summarizer to use if LLM fails.
+                If None, creates a TruncationSummarizer with the same parameters.
         """
         self.model = model
         self.system_prompt = system_prompt or (
@@ -129,17 +152,19 @@ class LiteSummarizer:
     def _group_messages_for_summary(self, messages: list[Message]) -> GroupedMessages:
         """Group messages into those to preserve and those to summarize.
 
-        This method:
-        1. Filters out system messages
-        2. Preserves the most recent messages
-        3. Ensures tool call/result pairs stay together
-        4. Prepares older messages for chunked summarization
+        Implements a careful grouping strategy:
+        - Filters out system messages as they're handled separately
+        - Preserves the most recent messages for immediate context
+        - Ensures tool call/result pairs remain together
+        - Prepares older messages for efficient chunked summarization
 
         Args:
-            messages: List of messages to process
+            messages: List of messages to process and group.
 
         Returns:
-            A tuple of (messages_to_preserve, messages_to_summarize)
+            A tuple containing:
+            - List of messages to preserve unchanged
+            - List of messages to summarize
         """
         if not self.needs_summarization(messages):
             return messages, []
@@ -163,15 +188,21 @@ class LiteSummarizer:
     async def _summarize_message_chunk(self, messages: Sequence[Message]) -> str:
         """Summarize a chunk of messages using the LLM.
 
+        Handles the LLM-based summarization process:
+        - Prepares messages with system and user prompts
+        - Sends request to the LLM
+        - Validates and processes the response
+        - Handles potential errors
+
         Args:
-            messages: The chunk of messages to summarize
+            messages: The chunk of messages to summarize.
 
         Returns:
-            A string containing the chunk's summary
+            A string containing the chunk's summary.
 
         Raises:
-            TypeError: If the LLM response is not of the expected type
-            ValueError: If the LLM fails to generate a summary
+            TypeError: If the LLM response format is unexpected.
+            ValueError: If the LLM fails to generate a valid summary.
         """
         summary_messages = [
             Message(role="system", content=self.system_prompt),
@@ -205,17 +236,17 @@ class LiteSummarizer:
     def _create_message_chunks(self, messages: list[Message]) -> list[list[Message]]:
         """Create chunks of messages while preserving tool call/result pairs.
 
-        This method:
-        1. Respects the chunk size limit when possible
-        2. Keeps tool calls and their results in the same chunk
-        3. Filters each chunk to maintain tool call integrity
-        4. Handles pending tool calls across chunk boundaries
+        Implements a sophisticated chunking strategy:
+        - Respects the configured chunk size limit when possible
+        - Keeps related tool calls and results in the same chunk
+        - Filters each chunk to maintain tool call integrity
+        - Handles pending tool calls across chunk boundaries
 
         Args:
-            messages: List of messages to chunk
+            messages: List of messages to divide into chunks.
 
         Returns:
-            List of message chunks, each containing complete tool call/result pairs
+            List of message chunks, each containing complete tool call/result pairs.
         """
         if not messages:
             return []
@@ -265,42 +296,61 @@ class LiteSummarizer:
         """Check if the message history exceeds the length limit.
 
         Args:
-            messages: The messages to check
+            messages: The conversation messages to evaluate.
 
         Returns:
-            True if the number of messages exceeds max_history_length
+            True if the number of messages exceeds max_history_length,
+            False otherwise.
         """
         return len(messages) > self.max_history_length
 
     async def summarize(self, messages: Sequence[Message]) -> str:
         """Create a direct summary of the provided messages.
 
-        This is a convenience method that summarizes a single chunk of messages.
-        For full history management, use summarize_history instead.
+        This is a convenience method for summarizing a single chunk of messages.
+        For complete history management, use summarize_history instead.
 
         Args:
-            messages: The messages to summarize
+            messages: The conversation messages to summarize.
 
         Returns:
-            A string containing the summarized conversation
+            A string containing the summarized conversation.
         """
         return await self._summarize_message_chunk(messages)
 
     async def summarize_history(self, messages: list[Message]) -> list[Message]:
         """Summarize conversation history while preserving important context.
 
-        This method attempts to summarize using the LLM first, and if that fails
-        and fallback is enabled, uses the fallback summarizer.
+        Implements a comprehensive summarization strategy:
+        - Attempts LLM-based summarization first
+        - Falls back to alternative summarizer if LLM fails
+        - Preserves recent messages and tool call relationships
+        - Processes older messages in parallel chunks
+        - Maintains chronological order in the final output
 
         Args:
-            messages: The complete list of messages to process
+            messages: The complete list of messages to process.
 
         Returns:
-            A list of Message objects containing summarized history and recent messages
+            A list of Message objects containing:
+            - Summarized older messages (if any)
+            - Preserved recent messages
+            - Complete tool call/result pairs
 
         Raises:
-            TypeError: If LLM responses are not of the expected type
-            ValueError: If summarization fails and fallback is disabled or not available
+            TypeError: If LLM responses are not in the expected format.
+            ValueError: If summarization fails and no fallback is available.
+
+        Example:
+            ```python
+            summarizer = LiteSummarizer()
+
+            # Process complete conversation history
+            summarized = await summarizer.summarize_history(messages)
+
+            # Use summarized messages in next conversation turn
+            agent.process_messages(summarized)
+            ```
         """
         if not messages:
             return []
@@ -371,15 +421,26 @@ class LiteSummarizer:
 class TruncationSummarizer:
     """A simple summarizer that truncates old messages and keeps only recent ones.
 
-    This summarizer is useful when:
-    1. You want to minimize API calls and avoid LLM costs
-    2. Exact history preservation isn't critical
-    3. You need predictable token usage
-    4. You want faster processing
-    5. Recent context is more important than historical context
+    This summarizer provides a lightweight alternative when:
+    - You want to minimize API calls and avoid LLM costs
+    - Exact history preservation isn't critical
+    - You need predictable token usage
+    - You want faster processing
+    - Recent context is more important than historical context
 
-    The summarizer maintains tool call/result relationships within the preserved messages
-    but does not attempt to preserve historical context through summarization.
+    The summarizer maintains tool call/result relationships within the preserved
+    messages but does not attempt to preserve historical context through summarization.
+
+    Example:
+        ```python
+        summarizer = TruncationSummarizer(
+            max_history_length=50,
+            preserve_recent=25
+        )
+
+        # Truncate history while preserving recent messages
+        truncated = await summarizer.summarize_history(messages)
+        ```
     """
 
     def __init__(
@@ -390,8 +451,8 @@ class TruncationSummarizer:
         """Initialize the truncation summarizer.
 
         Args:
-            max_history_length: Maximum number of messages to keep before truncating
-            preserve_recent: Number of recent messages to preserve when truncating
+            max_history_length: Maximum messages to keep before truncating.
+            preserve_recent: Number of recent messages to preserve when truncating.
         """
         self.max_history_length = max_history_length
         self.preserve_recent = preserve_recent
@@ -400,35 +461,48 @@ class TruncationSummarizer:
         """Check if the message history needs truncation.
 
         Args:
-            messages: The messages to check
+            messages: The conversation messages to evaluate.
 
         Returns:
-            True if the number of messages exceeds max_history_length
+            True if the number of messages exceeds max_history_length,
+            False otherwise.
         """
         return len(messages) > self.max_history_length
 
     async def summarize(self, messages: Sequence[Message]) -> str:
         """Direct summarization is not supported by this summarizer.
 
+        Args:
+            messages: The messages that would be summarized.
+
         Raises:
-            NotImplementedError: Always, as this summarizer only supports truncation
+            NotImplementedError: Always, as this summarizer only supports truncation.
         """
         raise NotImplementedError("Truncation summarizer does not support summarization.")
 
     async def summarize_history(self, messages: list[Message]) -> list[Message]:
         """Truncate conversation history to keep only recent messages.
 
-        This method:
-        1. Removes system messages (they should be added by the agent)
-        2. Keeps only the most recent messages up to preserve_recent
-        3. Ensures tool call/result pairs stay together
-        4. Maintains chronological order
+        Implements a simple but effective truncation strategy:
+        - Removes system messages (they should be added by the agent)
+        - Keeps only the most recent messages up to preserve_recent
+        - Ensures tool call/result pairs stay together
+        - Maintains chronological order
 
         Args:
-            messages: The complete list of messages to process
+            messages: The complete list of messages to process.
 
         Returns:
             A list of Message objects containing only the most recent messages
+            with complete tool call/result pairs.
+
+        Example:
+            ```python
+            summarizer = TruncationSummarizer(preserve_recent=25)
+
+            # Keep only the 25 most recent messages
+            recent = await summarizer.summarize_history(messages)
+            ```
         """
         if not messages:
             return []
