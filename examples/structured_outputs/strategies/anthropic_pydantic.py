@@ -4,8 +4,6 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-"""Implementation of structured outputs using Anthropic models."""
-
 import json
 from collections.abc import Callable
 from typing import Literal, TypeAlias, get_args
@@ -37,13 +35,28 @@ DO NOT include the <response_example> tag or any other tags or text outside the 
 
 
 def is_valid_model(model: str) -> bool:
-    """Check if the model is a valid Anthropic model."""
+    """Check if the model is a valid Anthropic model.
+
+    Args:
+        model: Model identifier to validate.
+
+    Returns:
+        True if the model is a valid Anthropic model, False otherwise.
+    """
     models = get_args(ANTHROPIC_MODELS)
     return model in models
 
 
 def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue]:
-    """Create a response parser for Anthropic models."""
+    """Create a response parser for Anthropic models.
+
+    Returns:
+        A callable that parses Anthropic responses into InnerMonologue objects.
+
+    Notes:
+        The parser expects responses to be JSON objects with a single top-level key
+        containing the InnerMonologue data.
+    """
 
     def response_parser(response: str, _: ContextVariables) -> InnerMonologue:
         """Parse the response from Anthropic models."""
@@ -58,7 +71,24 @@ def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue
 
 
 def create_strategy(model: str) -> Strategy[InnerMonologue]:
-    """Create a structured output strategy."""
+    """Create a structured output strategy for Anthropic models.
+
+    Args:
+        model: Anthropic model identifier to use.
+
+    Returns:
+        Strategy configured for the specified Anthropic model.
+
+    Raises:
+        ValueError: If the specified model is not supported.
+
+    Notes:
+        The strategy uses a template that instructs the model to format responses
+        as JSON objects matching the InnerMonologue schema.
+    """
+    if not is_valid_model(model):
+        raise ValueError(f"Invalid model: {model}. Supported models: {get_args(ANTHROPIC_MODELS)}")
+
     response_example = InnerMonologue(
         thoughts="First, I'll analyze the user's query...",
         response=Plan(

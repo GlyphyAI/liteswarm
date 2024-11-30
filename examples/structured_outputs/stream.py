@@ -9,6 +9,14 @@ from liteswarm.types import Agent, Delta
 
 
 class SwarmStreamHandler(LiteSwarmStreamHandler):
+    """Custom stream handler for displaying LLM responses."""
+
     async def on_stream(self, delta: Delta, agent: Agent) -> None:
+        """Handle a stream delta update.
+
+        Args:
+            delta: The delta update containing new content.
+            agent: The agent that generated the content.
+        """
         if delta.content:
             print(f"{delta.content}", end="", flush=True)

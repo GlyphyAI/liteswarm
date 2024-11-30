@@ -4,8 +4,6 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-"""Implementation of structured outputs using LLM JSON objects."""
-
 import json
 from collections.abc import Callable
 
@@ -40,7 +38,15 @@ In the <response_example> tag below is an example of how you should respond.
 
 
 def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue]:
-    """Create a response parser for LLM JSON objects."""
+    """Create a response parser for JSON object responses.
+
+    Returns:
+        A callable that parses JSON responses into InnerMonologue objects.
+
+    Notes:
+        The parser expects responses to be valid JSON objects that match the
+        InnerMonologue schema exactly.
+    """
 
     def response_parser(response: str, _: ContextVariables) -> InnerMonologue:
         return InnerMonologue.model_validate_json(response)
@@ -49,7 +55,19 @@ def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue
 
 
 def create_strategy(model: str) -> Strategy[InnerMonologue]:
-    """Create a structured output strategy."""
+    """Create a structured output strategy using JSON object parsing.
+
+    Args:
+        model: LLM model identifier to use.
+
+    Returns:
+        Strategy configured for JSON object parsing.
+
+    Notes:
+        The strategy provides the full JSON schema to the model and expects
+        responses to match it exactly. This approach works across different
+        LLM providers but may be less reliable than provider-specific methods.
+    """
     response_example = InnerMonologue(
         thoughts="First, I'll analyze the user's query...",
         response=Plan(

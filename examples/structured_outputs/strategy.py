@@ -25,42 +25,42 @@ class Strategy(BaseModel, Generic[T]):
     """Protocol for structured output strategies."""
 
     agent: Agent
-    """Agent for this strategy."""
+    """Agent configuration for the LLM."""
 
     response_parser: Callable[[str, ContextVariables], T]
-    """Response parser for this strategy."""
+    """Function to parse and validate responses."""
 
     model_config = ConfigDict(extra="forbid")
 
 
 class StrategyBuilder(BaseModel, Generic[T]):
-    """Builder for structured output strategies."""
+    """Builder for creating structured output strategies."""
 
     create_strategy: Callable[[str], Strategy[T]]
-    """Create a structured output strategy."""
+    """Factory function to create a strategy instance."""
 
     description: str
-    """Strategy description."""
+    """Human-readable description of the strategy."""
 
     default_model: str
-    """Default model for this strategy."""
+    """Default LLM model for this strategy."""
 
     available_models: list[str]
-    """List of available models for this strategy."""
+    """List of available LLM models for this strategy."""
 
     model_config = ConfigDict(extra="forbid")
 
 
 class StrategyBuilderRegistry(BaseModel, Generic[T]):
-    """Registry for structured output strategy builders."""
+    """Registry for managing multiple strategy builders."""
 
     strategy_builders: dict[StrategyId, StrategyBuilder[T]]
-    """Strategy builders."""
+    """Map of strategy IDs to their builders."""
 
     default_strategy_id: StrategyId
-    """Default strategy identifier."""
+    """ID of the default strategy."""
 
     default_strategy_prompt: str
-    """Default strategy prompt."""
+    """Default prompt for strategies."""
 
     model_config = ConfigDict(extra="forbid")

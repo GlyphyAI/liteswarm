@@ -64,7 +64,17 @@ async def run_example(
     model: str | None = None,
     prompt: str | None = None,
 ) -> None:
-    """Run the structured outputs example with the specified strategy."""
+    """Run a structured outputs example with the specified strategy.
+
+    Args:
+        strategy_id: Identifier for the strategy to use.
+        model: Optional model override. Uses strategy default if not specified.
+        prompt: Optional prompt override. Uses registry default if not specified.
+
+    Raises:
+        ValueError: If the specified strategy ID is invalid.
+        ValidationError: If the response doesn't match expected format.
+    """
     strategy_builder = STRATEGY_REGISTRY.strategy_builders.get(strategy_id)
     if not strategy_builder:
         raise ValueError(f"Invalid strategy: {strategy_id}")

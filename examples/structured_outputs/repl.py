@@ -16,7 +16,10 @@ T = TypeVar("T", bound=BaseModel)
 
 
 def get_model_input(available_models: list[str], default_model: str) -> str:
-    """Get model input with selection or custom entry.
+    """Get model selection from user input.
+
+    Presents available models and allows user to select from list or enter
+    a custom model name.
 
     Args:
         available_models: List of available models to choose from.
@@ -53,7 +56,19 @@ def get_model_input(available_models: list[str], default_model: str) -> str:
 def get_user_input(
     registry: StrategyBuilderRegistry[T],
 ) -> tuple[StrategyId, str, str]:
-    """Get user input for strategy, model, and prompt."""
+    """Get strategy, model and prompt selections from user.
+
+    Presents available strategies and prompts user for selections.
+
+    Args:
+        registry: Registry containing available strategies.
+
+    Returns:
+        Tuple containing:
+            - Selected strategy ID
+            - Selected model name
+            - User prompt or default prompt
+    """
     print("\nAvailable strategies:")
     items = list(registry.strategy_builders.items())
     for i, (id, strategy_builder) in enumerate(items, 1):
@@ -94,7 +109,21 @@ async def start_repl(
     registry: StrategyBuilderRegistry[T],
     run_example: Callable[[StrategyId, str | None, str | None], Awaitable[None]],
 ) -> NoReturn:
-    """Start a REPL loop featuring structured outputs strategies."""
+    """Start interactive REPL for testing structured outputs.
+
+    Continuously prompts user for strategy/model/prompt selections and
+    runs examples until user exits.
+
+    Args:
+        registry: Registry containing available strategies.
+        run_example: Function to run example with selected parameters.
+
+    Returns:
+        Never returns - loops until user exits.
+
+    Raises:
+        SystemExit: When user chooses to exit.
+    """
     print("\nStructured Outputs Example")
     print("=" * 25)
 

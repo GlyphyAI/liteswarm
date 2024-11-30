@@ -4,8 +4,6 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-"""Implementation of structured outputs using LLM JSON tags."""
-
 import json
 import re
 from collections.abc import Callable
@@ -45,13 +43,30 @@ Here is an example of how you should respond:
 
 
 def find_tag(text: str, tag: str) -> str | None:
+    """Find and extract content from a tagged section.
+
+    Args:
+        text: Text containing tagged sections.
+        tag: Name of the tag to find.
+
+    Returns:
+        Content between the specified tags, or None if not found.
+    """
     pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL)
     match = pattern.search(text)
     return match.group(1) if match else None
 
 
 def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue]:
-    """Create a response parser for LLM JSON tags."""
+    """Create a response parser for tagged JSON responses.
+
+    Returns:
+        A callable that parses tagged responses into InnerMonologue objects.
+
+    Notes:
+        The parser expects responses to contain <thoughts> and <response> tags,
+        with the response section containing valid JSON matching the Plan schema.
+    """
 
     def response_parser(response: str, _: ContextVariables) -> InnerMonologue:
         thoughts = find_tag(response, "thoughts")
@@ -68,7 +83,19 @@ def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue
 
 
 def create_strategy(model: str) -> Strategy[InnerMonologue]:
-    """Create a structured output strategy."""
+    """Create a structured output strategy using JSON tags parsing.
+
+    Args:
+        model: LLM model identifier to use.
+
+    Returns:
+        Strategy configured for JSON tags parsing.
+
+    Notes:
+        The strategy instructs the model to format responses using XML-style tags
+        with JSON content. This approach provides clear structure while being
+        more flexible than pure JSON responses.
+    """
     thoughts_example = "First, I'll analyze the user's query..."
     response_example = Plan(
         tasks=[

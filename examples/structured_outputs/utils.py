@@ -25,6 +25,19 @@ def parse_response(
     response_format: ResponseFormat[T],
     context: ContextVariables | None = None,
 ) -> T:
+    """Parse a raw response string into a structured format.
+
+    Args:
+        response: Raw response string from the LLM.
+        response_format: Type or callable for parsing/validating the response.
+        context: Optional context variables for response parsing.
+
+    Returns:
+        Parsed and validated response object.
+
+    Raises:
+        ValidationError: If response doesn't match expected format.
+    """
     if is_callable(response_format):
         return response_format(response, context or ContextVariables())
 
@@ -36,6 +49,20 @@ async def generate_structured_response_typed(
     agent: Agent,
     response_format: ResponseFormat[T],
 ) -> T:
+    """Generate and parse a structured response from an LLM.
+
+    Args:
+        user_prompt: The input prompt for the LLM.
+        agent: The agent configuration for the LLM.
+        response_format: Type or callable for parsing/validating the response.
+
+    Returns:
+        Parsed and validated response object.
+
+    Raises:
+        ValueError: If response content is empty.
+        ValidationError: If response doesn't match expected format.
+    """
     swarm = Swarm(stream_handler=SwarmStreamHandler())
     result = await swarm.execute(agent=agent, prompt=user_prompt)
     if not result.content:
