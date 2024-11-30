@@ -77,3 +77,6 @@ convention = "google"
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+plugins = [
+    "pydantic.mypy",
+]
