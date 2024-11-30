@@ -5,82 +5,87 @@
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import json
 import os
 
-from pydantic import BaseModel
-
-from liteswarm.types import LLM
 from liteswarm.utils import enable_logging
 
-from .types import CodingTask, Plan, Response
-from .utils import generate_structured_response
+from .repl import start_repl
+from .strategies import anthropic_pydantic, llm_json_object, llm_json_tags, openai_pydantic
+from .strategy import StrategyBuilder, StrategyBuilderRegistry, StrategyId
+from .types import InnerMonologue
+from .utils import generate_structured_response_typed
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
-PLANNER_PROMPT = """
-You are a planning assistant AI designed to help users break down their queries into manageable tasks and create execution plans. Your goal is to analyze the user's query, identify the necessary steps to complete it, and generate a structured plan using the provided JSON schema.
-
-When generating your response, you must strictly adhere to the provided schema. Some properties in the schema may contain a union type with a `___UNKNOWN___` constant. For these properties, you must use the "___UNKNOWN___" placeholder. However, for all other properties without this type in their union, you should populate them with appropriate values based on the user's query.
-
-To complete this task, follow these steps:
-
-1. Carefully read and analyze the user's query.
-2. Break down the query into a set of distinct, manageable tasks.
-3. Generate an execution plan that outlines how to complete these tasks.
-4. Ensure that your response strictly follows the provided JSON schema.
-
-Use an inner monologue to think through the process before providing your final answer. This will help you organize your thoughts and ensure a comprehensive response.
-
-Here is a JSON schema for your response format:
-
-<json_schema>
-{RESPONSE_FORMAT}
-</json_schema>
-
-Here's an example of how to structure your response:
-
-<example_response>
-{RESPONSE_EXAMPLE}
-</example_response>
-""".strip()
-
-
-async def main() -> None:
-    response_example = Response(
-        inner_monologue="First, I'll analyze the user's query to understand the main goal and identify the necessary steps to achieve it. Then, I'll break these steps down into distinct tasks and create an execution plan. Finally, I'll format this information according to the provided JSON schema, being careful to use the '___UNKNOWN___' placeholder where required.",
-        response=Plan(
-            tasks=[
-                CodingTask(
-                    task_type="coding",
-                    title="Write a hello world program in Python",
-                    filepath="main.py",
-                    code="print('Hello, world!')",
-                )
+STRATEGY_REGISTRY = StrategyBuilderRegistry[InnerMonologue](
+    strategy_builders={
+        "anthropic_pydantic": StrategyBuilder(
+            create_strategy=anthropic_pydantic.create_strategy,
+            description="Anthropic with Pydantic schema validation",
+            default_model="claude-3-5-sonnet-20241022",
+            available_models=["claude-3-5-sonnet-20241022", "claude-3-5-haiku-20241022"],
+        ),
+        "openai_pydantic": StrategyBuilder(
+            create_strategy=openai_pydantic.create_strategy,
+            description="OpenAI with Pydantic schema validation",
+            default_model="gpt-4o",
+            available_models=["gpt-4o", "gpt-4o-mini"],
+        ),
+        "llm_json_object": StrategyBuilder(
+            create_strategy=llm_json_object.create_strategy,
+            description="Provider-agnostic JSON object parsing",
+            default_model="gpt-4o",
+            available_models=[
+                "gpt-4o",
+                "gpt-4o-mini",
+                "claude-3-5-sonnet-20241022",
+                "claude-3-5-haiku-20241022",
             ],
         ),
+        "llm_json_tags": StrategyBuilder(
+            create_strategy=llm_json_tags.create_strategy,
+            description="Provider-agnostic JSON tags parsing",
+            default_model="gpt-4o",
+            available_models=[
+                "gpt-4o",
+                "gpt-4o-mini",
+                "claude-3-5-sonnet-20241022",
+                "claude-3-5-haiku-20241022",
+            ],
+        ),
+    },
+    default_strategy_id="openai_pydantic",
+    default_strategy_prompt="Create a method to calculate the area of a circle in Python and test it.",
+)
+
+
+async def run_example(
+    strategy_id: StrategyId,
+    model: str | None = None,
+    prompt: str | None = None,
+) -> None:
+    """Run the structured outputs example with the specified strategy."""
+    strategy_builder = STRATEGY_REGISTRY.strategy_builders.get(strategy_id)
+    if not strategy_builder:
+        raise ValueError(f"Invalid strategy: {strategy_id}")
+
+    model = model or strategy_builder.default_model
+    prompt = prompt or STRATEGY_REGISTRY.default_strategy_prompt
+    strategy = strategy_builder.create_strategy(model)
+
+    print(f"\nUsing strategy: {strategy_id} ({strategy_builder.description})")
+    print(f"Model: {model}")
+    print(f"Prompt: {prompt}\n")
+
+    response = await generate_structured_response_typed(
+        user_prompt=prompt,
+        agent=strategy.agent,
+        response_format=strategy.response_parser,
     )
 
-    def agent_instructions_builder(
-        response_format: type[BaseModel],
-        response_example: BaseModel | None,
-    ) -> str:
-        return PLANNER_PROMPT.format(
-            RESPONSE_FORMAT=json.dumps(response_format.model_json_schema()),
-            RESPONSE_EXAMPLE=response_example.model_dump_json() if response_example else "",
-        )
-
-    response = await generate_structured_response(
-        user_prompt="Write a fibonacci calculation function in Python",
-        agent_instructions=agent_instructions_builder,
-        response_format=Response,
-        response_example=response_example,
-        llm=LLM(model="gpt-4o"),
-    )
-
-    print(response.model_dump_json(indent=2))
+    print(f"\nResponse:\n{response.model_dump_json(indent=2)}")
 
 
 if __name__ == "__main__":
     enable_logging()
-    asyncio.run(main())
+    asyncio.run(start_repl(STRATEGY_REGISTRY, run_example))

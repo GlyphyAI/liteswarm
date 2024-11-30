@@ -9,54 +9,36 @@ from typing import TypeAlias, TypeVar
 
 from pydantic import BaseModel
 
-from liteswarm.core import LiteStreamHandler, Swarm
-from liteswarm.types import LLM, Agent, Delta
-from liteswarm.utils.pydantic import (
-    remove_default_values,
-    replace_default_values,
-    restore_default_values,
-)
+from liteswarm.core import Swarm
+from liteswarm.types import Agent, ContextVariables
+from liteswarm.utils.typing import is_callable
+
+from .stream import SwarmStreamHandler
 
 T = TypeVar("T", bound=BaseModel)
 
-AgentInstructions: TypeAlias = Callable[[type[BaseModel], BaseModel | None], str]
+ResponseFormat: TypeAlias = type[T] | Callable[[str, ContextVariables], T]
 
 
-class StreamHandler(LiteStreamHandler):
-    async def on_stream(self, delta: Delta, agent: Agent) -> None:
-        print(f"{delta.content}", end="", flush=True)
-
-
-async def generate_structured_response(
-    user_prompt: str,
-    agent_instructions: AgentInstructions,
-    response_format: type[T],
-    response_example: T | None = None,
-    llm: LLM | None = None,
+def parse_response(
+    response: str,
+    response_format: ResponseFormat[T],
+    context: ContextVariables | None = None,
 ) -> T:
-    response_format_patched: type[BaseModel] = remove_default_values(response_format)
-    response_example_patched: BaseModel | None = None
-    if response_example:
-        response_example_patched = replace_default_values(
-            instance=response_example,
-            target_model_type=response_format_patched,
-        )
+    if is_callable(response_format):
+        return response_format(response, context or ContextVariables())
 
-    llm = llm or LLM(model="gpt-4o")
-    llm.response_format = response_format_patched
+    return response_format.model_validate_json(response)
 
-    agent = Agent(
-        id="structured_output_agent",
-        instructions=agent_instructions(response_format_patched, response_example_patched),
-        llm=llm,
-    )
 
-    swarm = Swarm(stream_handler=StreamHandler())
+async def generate_structured_response_typed(
+    user_prompt: str,
+    agent: Agent,
+    response_format: ResponseFormat[T],
+) -> T:
+    swarm = Swarm(stream_handler=SwarmStreamHandler())
     result = await swarm.execute(agent=agent, prompt=user_prompt)
     if not result.content:
         raise ValueError("No response content")
 
-    validated_result = response_format_patched.model_validate_json(result.content)
-    restored_result = restore_default_values(validated_result, response_format)
-
-    return restored_result
+    return parse_response(result.content, response_format)

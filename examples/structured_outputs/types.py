@@ -24,16 +24,21 @@ class CodingTask(Task):
     state: Literal["pending", "in_progress", "completed", "failed"] = "pending"
 
 
+class TestCase(BaseModel):
+    name: str
+    expected_output: str
+    actual_output: str
+
+
 class TestingTask(Task):
     task_type: Literal["testing"]
-    test_report: str
-    failed_reason: str | None = None
+    test_cases: list[TestCase]
 
 
 class Plan(BaseModel):
     tasks: list[CodingTask | TestingTask]
 
 
-class Response(BaseModel):
-    inner_monologue: str
+class InnerMonologue(BaseModel):
+    thoughts: str
     response: Plan
