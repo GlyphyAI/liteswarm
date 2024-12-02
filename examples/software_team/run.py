@@ -36,8 +36,8 @@ async def main() -> None:
         swarm=swarm,
         members=team_members,
         task_definitions=task_definitions,
-        planning_agent=agent_planner,
-        stream_handler=SoftwareTeamStreamHandler(),
+        agent_planner=agent_planner,
+        stream_handler=SwarmTeamStreamHandler(),
     )
 
     context = ContextVariables(
