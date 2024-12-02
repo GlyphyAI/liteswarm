@@ -78,3 +78,92 @@ class Result(BaseModel, Generic[ResultValue]):
     """Context updates to apply."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    def unwrap(self, error_message: str = "No value in result") -> ResultValue:
+        """Unwrap the result value or raise an error.
+
+        Attempts to extract the value from the Result. If an error is present in the
+        Result, that error is raised. If no value is present and no error is set,
+        raises ValueError with the provided message.
+
+        Args:
+            error_message: Custom error message to use when no value is present.
+                Defaults to "No value in result".
+
+        Returns:
+            ResultValue: The value stored in the Result.
+
+        Raises:
+            ValueError: If no value is present and no error is set.
+            Exception: Whatever error is stored in the Result, if one exists.
+
+        Examples:
+            Successful unwrap:
+                ```python
+                result = Result(value=42)
+                value = result.unwrap()  # Returns 42
+                ```
+
+            Custom error message:
+                ```python
+                result = Result[int]()
+                try:
+                    value = result.unwrap("Missing calculation result")
+                except ValueError as e:
+                    print(e)  # Prints: Missing calculation result
+                ```
+
+            Propagating stored error:
+                ```python
+                result = Result(error=ValueError("Invalid input"))
+                try:
+                    value = result.unwrap()
+                except ValueError as e:
+                    print(e)  # Prints: Invalid input
+                ```
+        """
+        if self.error:
+            raise self.error
+
+        if not self.value:
+            raise ValueError(error_message)
+
+        return self.value
+
+    def unwrap_or(self, default: ResultValue) -> ResultValue:
+        """Unwrap the result value or return a default.
+
+        Similar to unwrap(), but returns a default value instead of raising an error
+        when no value is present. This provides a safe way to handle Results that
+        might not have a value.
+
+        Args:
+            default: The value to return if the Result has no value.
+                Must be of the same type as the Result's value type.
+
+        Returns:
+            ResultValue: Either the value from the Result or the provided default.
+
+        Examples:
+            With value present:
+                ```python
+                result = Result(value=42)
+                value = result.unwrap_or(0)  # Returns 42
+                ```
+
+            With no value:
+                ```python
+                result = Result[int]()
+                value = result.unwrap_or(0)  # Returns 0
+                ```
+
+            With error:
+                ```python
+                result = Result(error=ValueError("Invalid"))
+                value = result.unwrap_or(0)  # Returns 0
+                ```
+        """
+        try:
+            return self.unwrap()
+        except ValueError:
+            return default
