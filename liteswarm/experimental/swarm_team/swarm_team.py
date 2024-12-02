@@ -7,11 +7,16 @@
 from collections import defaultdict
 from datetime import datetime
 
-from pydantic import BaseModel
+import json_repair
+from pydantic import BaseModel, ValidationError
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.planner import AgentPlanner, LiteAgentPlanner
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
+from liteswarm.experimental.swarm_team.response_repair import (
+    LiteResponseRepairAgent,
+    ResponseRepairAgent,
+)
 from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHandler
 from liteswarm.types.result import Result
 from liteswarm.types.swarm import ContextVariables
@@ -73,12 +78,13 @@ class SwarmTeam:
             ```
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         swarm: Swarm,
         members: list[TeamMember],
         task_definitions: list[TaskDefinition],
         agent_planner: AgentPlanner | None = None,
+        response_repair_agent: ResponseRepairAgent | None = None,
         stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
         """Initialize a new team.
@@ -88,6 +94,7 @@ class SwarmTeam:
             members: Team members with their capabilities.
             task_definitions: Task types the team can handle.
             agent_planner: Optional custom planning agent.
+            response_repair_agent: Optional custom response repair agent.
             stream_handler: Optional event stream handler.
         """
         # Public properties
@@ -97,6 +104,9 @@ class SwarmTeam:
         self.agent_planner = agent_planner or LiteAgentPlanner(
             swarm=self.swarm,
             task_definitions=task_definitions,
+        )
+        self.response_repair_agent = response_repair_agent or LiteResponseRepairAgent(
+            swarm=self.swarm,
         )
 
         # Internal state (private)
@@ -197,7 +207,39 @@ class SwarmTeam:
         instructions = task_definition.task_instructions
         return instructions(task, task_context) if callable(instructions) else instructions
 
-    def _process_execution_result(
+    def _parse_response(
+        self,
+        content: str,
+        response_format: TaskResponseFormat,
+        task_context: ContextVariables,
+    ) -> BaseModel:
+        """Parse agent response using schema with error recovery.
+
+        Args:
+            content: Raw content to parse.
+            response_format: Schema or parser function.
+            task_context: Context for parsing.
+
+        Returns:
+            Parsed output model.
+
+        Raises:
+            TypeError: If output doesn't match schema.
+            ValidationError: If content is invalid and cannot be repaired.
+        """
+        if is_callable(response_format):
+            return response_format(content, task_context)
+
+        if not is_subtype(response_format, BaseModel):
+            raise ValueError("Invalid response format")
+
+        decoded_object = json_repair.repair_json(content, return_objects=True)
+        if isinstance(decoded_object, tuple):
+            decoded_object = decoded_object[0]
+
+        return response_format.model_validate(decoded_object)
+
+    async def _process_execution_result(
         self,
         task: Task,
         assignee: TeamMember,
@@ -206,6 +248,10 @@ class SwarmTeam:
         task_context: ContextVariables,
     ) -> Result[ExecutionResult]:
         """Process agent response into execution result.
+
+        Attempts to parse and validate the response according to the task's
+        expected format. If validation fails, tries to recover using the
+        response repair agent.
 
         Args:
             task: Executed task.
@@ -216,35 +262,8 @@ class SwarmTeam:
 
         Returns:
             Result containing either:
-                - Execution details and output for the task.
-                - Error if output parsing fails.
-
-        Examples:
-            Unstructured output:
-                ```python
-                result = team._process_execution_result(
-                    task=task,
-                    assignee=member,
-                    task_definition=task_def,
-                    content="Task completed",
-                    task_context=context
-                )
-                ```
-
-            Structured output:
-                ```python
-                result = team._process_execution_result(
-                    task=task,
-                    assignee=member,
-                    task_definition=TaskDefinition(
-                        task_schema=Task,
-                        task_instructions="Process data",
-                        task_response_format=OutputSchema
-                    ),
-                    content='{"status": "success"}',
-                    task_context=context
-                )
-                ```
+                - Execution details and validated output
+                - Error if parsing fails and cannot be recovered
         """
         response_format = task_definition.task_response_format
 
@@ -273,58 +292,31 @@ class SwarmTeam:
             )
 
             return Result(value=execution_result)
+
+        except ValidationError:
+            repair_result = await self.response_repair_agent.repair_response(
+                agent=assignee.agent,
+                original_content=content,
+                response_format=task_definition.task_response_format,
+                context=task_context,
+            )
+
+            if not repair_result.value:
+                return Result(error=ValueError("No content in repair response"))
+
+            if repair_result.error:
+                return Result(error=repair_result.error)
+
+            return await self._process_execution_result(
+                task=task,
+                assignee=assignee,
+                task_definition=task_definition,
+                content=repair_result.value,
+                task_context=task_context,
+            )
+
         except Exception as e:
             return Result(error=ValueError(f"Invalid task output: {e}"))
-
-    def _parse_response(
-        self,
-        content: str,
-        response_format: TaskResponseFormat,
-        task_context: ContextVariables,
-    ) -> BaseModel:
-        """Parse agent response using schema.
-
-        Args:
-            content: Raw content to parse.
-            response_format: Schema or parser function.
-            task_context: Context for parsing.
-
-        Returns:
-            Parsed output model.
-
-        Raises:
-            TypeError: If output doesn't match schema.
-            ValidationError: If content is invalid.
-
-        Examples:
-            Using model:
-                ```python
-                output = team._parse_response(
-                    content='{"status": "success"}',
-                    response_format=OutputSchema,
-                    task_context=context
-                )
-                ```
-
-            Using parser:
-                ```python
-                def parse_output(content: str, task_context: ContextVariables) -> OutputSchema:
-                    return OutputSchema(status=content["result"])
-
-                output = team._parse_response(
-                    content='{"result": "pass"}',
-                    response_format=parse_output,
-                    task_context=context
-                )
-                ```
-        """
-        if is_subtype(response_format, BaseModel):
-            return response_format.model_validate_json(content)
-
-        if is_callable(response_format):
-            return response_format(content, task_context)
-
-        raise ValueError("Invalid response format")
 
     def _select_matching_member(self, task: Task) -> TeamMember | None:
         """Select best team member for task.
@@ -559,7 +551,7 @@ class SwarmTeam:
             task.status = TaskStatus.FAILED
             return Result(error=ValueError("The agent did not return any content"))
 
-        execution_result = self._process_execution_result(
+        execution_result = await self._process_execution_result(
             task=task,
             assignee=assignee,
             task_definition=task_definition,
