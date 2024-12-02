@@ -55,3 +55,18 @@ def dump_json(data: JSON, indent: bool = False) -> str:
 
 def load_json(data: str) -> JSON:
     return orjson.loads(data)
+
+
+def find_tag(text: str, tag: str) -> str | None:
+    """Find and extract content from a tagged section.
+
+    Args:
+        text: Text containing tagged sections.
+        tag: Name of the tag to find.
+
+    Returns:
+        Content between the specified tags, or None if not found.
+    """
+    pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL)
+    match = pattern.search(text)
+    return match.group(1) if match else None
