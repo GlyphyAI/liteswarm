@@ -149,6 +149,30 @@ class SwarmTeam:
 
         Returns:
             Context with task details and history.
+
+        Examples:
+            Basic context:
+                ```python
+                task = Task(
+                    id="review-1",
+                    type="review",
+                    title="Review PR",
+                    pr_url="github.com/org/repo/123"
+                )
+                context = team._build_task_context(task)
+                # Returns ContextVariables with:
+                # - task details as dict
+                # - execution history
+                # - team capabilities
+                ```
+
+            Access context values:
+                ```python
+                context = team._build_task_context(task)
+                task_data = context.get("task")  # Get task details
+                history = context.get("execution_history")  # Get previous results
+                capabilities = context.get("team_capabilities")  # Get team info
+                ```
         """
         context = ContextVariables(
             task=task.model_dump(),
@@ -226,6 +250,59 @@ class SwarmTeam:
         Raises:
             TypeError: If output doesn't match schema.
             ValidationError: If content is invalid and cannot be repaired.
+
+        Examples:
+            Parse with model schema:
+                ```python
+                class ReviewOutput(BaseModel):
+                    issues: list[str]
+                    approved: bool
+
+                content = '''
+                {
+                    "issues": ["Security risk in auth", "Missing tests"],
+                    "approved": false
+                }
+                '''
+                output = team._parse_response(
+                    content=content,
+                    response_format=ReviewOutput,
+                    task_context=context
+                )
+                # Returns ReviewOutput instance
+                ```
+
+            Parse with custom function:
+                ```python
+                def parse_review(content: str, context: ContextVariables) -> ReviewOutput:
+                    # Custom parsing logic
+                    data = json.loads(content)
+                    return ReviewOutput(**data)
+
+                output = team._parse_response(
+                    content=content,
+                    response_format=parse_review,
+                    task_context=context
+                )
+                # Returns ReviewOutput instance via custom parser
+                ```
+
+            With json_repair:
+                ```python
+                # Even with slightly invalid JSON
+                content = '''
+                {
+                    'issues': ['Missing tests'],  # Single quotes
+                    approved: false  # Missing quotes
+                }
+                '''
+                output = team._parse_response(
+                    content=content,
+                    response_format=ReviewOutput,
+                    task_context=context
+                )
+                # Still returns valid ReviewOutput
+                ```
         """
         if is_callable(response_format):
             return response_format(content, task_context)
@@ -264,6 +341,74 @@ class SwarmTeam:
             Result containing either:
                 - Execution details and validated output
                 - Error if parsing fails and cannot be recovered
+
+        Examples:
+            Successful execution:
+                ```python
+                class ReviewOutput(BaseModel):
+                    issues: list[str]
+                    approved: bool
+
+                task = Task(id="review-1", type="review", title="Review PR")
+                assignee = TeamMember(
+                    id="reviewer-1",
+                    agent=Agent(id="review-gpt"),
+                    task_types=[ReviewTask]
+                )
+                task_def = TaskDefinition(
+                    task_schema=ReviewTask,
+                    task_response_format=ReviewOutput
+                )
+
+                content = '{"issues": [], "approved": true}'
+                result = await team._process_execution_result(
+                    task=task,
+                    assignee=assignee,
+                    task_definition=task_def,
+                    content=content,
+                    task_context=context
+                )
+                # Returns Result with ExecutionResult containing:
+                # - task details
+                # - assignee info
+                # - parsed ReviewOutput
+                ```
+
+            With response repair:
+                ```python
+                # Invalid JSON that needs repair
+                content = '''
+                {
+                    issues: ["Missing tests"]  # Missing quotes
+                    'approved': false,  # Extra comma
+                }
+                '''
+                result = await team._process_execution_result(
+                    task=task,
+                    assignee=assignee,
+                    task_definition=task_def,
+                    content=content,
+                    task_context=context
+                )
+                # Returns repaired and validated ExecutionResult
+                ```
+
+            Without response format:
+                ```python
+                task_def = TaskDefinition(
+                    task_schema=Task,
+                    task_response_format=None  # No format specified
+                )
+                content = "Task completed successfully"
+                result = await team._process_execution_result(
+                    task=task,
+                    assignee=assignee,
+                    task_definition=task_def,
+                    content=content,
+                    task_context=context
+                )
+                # Returns ExecutionResult with raw content
+                ```
         """
         response_format = task_definition.task_response_format
 
