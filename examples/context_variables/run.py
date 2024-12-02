@@ -8,7 +8,7 @@ import asyncio
 import os
 
 from liteswarm.core import Swarm
-from liteswarm.types import Agent, ContextVariables, LLMConfig, Result
+from liteswarm.types import LLM, Agent, ContextVariables, Result
 from liteswarm.utils import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
@@ -22,7 +22,7 @@ async def instructions_example() -> None:
     agent = Agent(
         id="agent",
         instructions=instructions,
-        llm=LLMConfig(
+        llm=LLM(
             model="gpt-4o-mini",
             litellm_kwargs={"drop_params": True},
         ),
@@ -57,7 +57,7 @@ async def tool_call_example() -> None:
     speak_agent = Agent(
         id="speak_agent",
         instructions=speak_instructions,
-        llm=LLMConfig(
+        llm=LLM(
             model="gpt-4o-mini",
             litellm_kwargs={"drop_params": True},
         ),
@@ -71,7 +71,7 @@ async def tool_call_example() -> None:
         id="welcome_agent",
         instructions="You are a welcome agent that greets the user. "
         "Switch to the speak agent after greeting the user.",
-        llm=LLMConfig(
+        llm=LLM(
             model="gpt-4o-mini",
             tools=[greet, switch_to_speak_agent],
             parallel_tool_calls=False,

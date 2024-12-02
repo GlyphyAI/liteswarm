@@ -16,7 +16,42 @@ from liteswarm.utils.usage import combine_response_cost, combine_usage
 
 
 class AgentRepl:
-    """Interactive REPL for agent conversations."""
+    """Interactive REPL for agent conversations.
+
+    Provides a command-line interface for interacting with agents in a
+    Read-Eval-Print Loop (REPL) format. Features include:
+    - Interactive conversation with agents
+    - Command-based control (/help, /exit, etc.)
+    - Conversation history management
+    - Usage and cost tracking
+    - Agent state monitoring
+    - History summarization support
+
+    The REPL maintains conversation state and provides real-time feedback
+    on agent responses, tool usage, and state changes.
+
+    Example:
+        ```python
+        agent = Agent(
+            id="helper",
+            instructions="You are a helpful assistant.",
+            llm=LLM(model="gpt-4o")
+        )
+
+        repl = AgentRepl(
+            agent=agent,
+            include_usage=True,
+            include_cost=True
+        )
+        await repl.run()
+        ```
+
+    Notes:
+        - The REPL runs until explicitly terminated
+        - Supports history summarization for long conversations
+        - Maintains conversation context between queries
+        - Handles interrupts and errors gracefully
+    """
 
     def __init__(
         self,
@@ -29,12 +64,20 @@ class AgentRepl:
         """Initialize the REPL with a starting agent.
 
         Args:
-            agent: The initial agent to start conversations with
-            summarizer: A summarizer to use for summarizing conversation history
-            include_usage: Whether to include usage in the REPL stats
-            include_cost: Whether to include cost statistics in responses
-            cleanup: Whether to clear agent state after completion. If False,
-                    maintains the last active agent for subsequent interactions
+            agent: The initial agent to start conversations with.
+                This agent handles the first interaction and may delegate
+                to other agents as needed.
+            summarizer: Optional summarizer for managing conversation history.
+                If provided, helps maintain context while keeping history manageable.
+            include_usage: Whether to track and display token usage statistics.
+            include_cost: Whether to track and display cost information.
+            cleanup: Whether to clear agent state after completion.
+                If False, maintains the last active agent for subsequent interactions.
+
+        Notes:
+            - The REPL maintains separate full and working histories
+            - Usage and cost tracking are optional features
+            - Agent state can persist between interactions if cleanup is False
         """
         self.agent = agent
         self.cleanup = cleanup
@@ -52,7 +95,17 @@ class AgentRepl:
         self.working_history: list[Message] = []
 
     def _print_welcome(self) -> None:
-        """Print welcome message and usage instructions."""
+        """Print welcome message and usage instructions.
+
+        Displays:
+        - Initial greeting
+        - Starting agent information
+        - Available commands
+        - Basic usage instructions
+
+        Notes:
+            Called automatically when the REPL starts and on /help command.
+        """
         print("\n🤖 Agent REPL")
         print(f"Starting with agent: {self.agent.id}")
         print("\nCommands:")
@@ -65,7 +118,17 @@ class AgentRepl:
         print("\n" + "=" * 50 + "\n")
 
     def _print_history(self) -> None:
-        """Print the conversation history."""
+        """Print the conversation history.
+
+        Displays all non-system messages in chronological order, including:
+        - Message roles (user, assistant, tool)
+        - Message content
+        - Visual separators for readability
+
+        Notes:
+            - System messages are filtered out for clarity
+            - Empty content is shown as [No content]
+        """
         print("\n📝 Conversation History:")
         for msg in self.conversation:
             if msg.role != "system":
@@ -74,7 +137,20 @@ class AgentRepl:
         print("\n" + "=" * 50 + "\n")
 
     def _print_stats(self) -> None:
-        """Print conversation statistics."""
+        """Print conversation statistics.
+
+        Displays comprehensive statistics about the conversation:
+        - Message counts (full and working history)
+        - Token usage details (if enabled)
+        - Cost information (if enabled)
+        - Active agent information
+        - Queue status
+
+        Notes:
+            - Token usage shown only if include_usage=True
+            - Costs shown only if include_cost=True
+            - Detailed breakdowns provided when available
+        """
         print("\n📊 Conversation Statistics:")
         print(f"Full history length: {len(self.conversation)} messages")
         print(f"Working history length: {len(self.working_history)} messages")
@@ -119,11 +195,23 @@ class AgentRepl:
     def _handle_command(self, command: str) -> bool:
         """Handle REPL commands.
 
+        Processes special commands that control REPL behavior:
+        - /exit: Terminate the REPL
+        - /help: Show usage instructions
+        - /clear: Clear conversation history
+        - /history: Show message history
+        - /stats: Show conversation statistics
+
         Args:
-            command: The command to handle
+            command: The command to handle, including the leading slash.
 
         Returns:
-            True if should exit the REPL, False otherwise
+            True if the REPL should exit, False to continue running.
+
+        Notes:
+            - Commands are case-insensitive
+            - Unknown commands show help message
+            - Some commands have immediate effects on REPL state
         """
         match command.lower():
             case "/exit":
@@ -145,8 +233,21 @@ class AgentRepl:
     async def _process_query(self, query: str) -> None:
         """Process a user query through the agent system.
 
+        Handles the complete query processing lifecycle:
+        - Sends query to the swarm
+        - Updates conversation history
+        - Tracks usage and costs
+        - Maintains agent state
+        - Handles errors
+
         Args:
-            query: The user's input query
+            query: The user's input query to process.
+
+        Notes:
+            - Updates multiple aspects of REPL state
+            - Maintains conversation continuity
+            - Preserves error context for user feedback
+            - Automatically updates statistics if enabled
         """
         try:
             result = await self.swarm.execute(
@@ -168,7 +269,25 @@ class AgentRepl:
     async def run(self) -> NoReturn:
         """Run the REPL loop indefinitely.
 
-        This method runs until explicitly exited with /exit command.
+        Provides the main interaction loop:
+        - Displays welcome message
+        - Processes user input
+        - Handles commands
+        - Manages conversation flow
+        - Handles interruptions
+
+        The loop continues until explicitly terminated by:
+        - /exit command
+        - Keyboard interrupt (Ctrl+C)
+        - EOF signal (Ctrl+D)
+
+        Raises:
+            SystemExit: When the REPL is terminated.
+
+        Notes:
+            - Empty inputs are ignored
+            - Errors don't terminate the loop
+            - Graceful shutdown on interrupts
         """
         self._print_welcome()
 
@@ -211,14 +330,42 @@ async def start_repl(  # noqa: PLR0913
 ) -> NoReturn:
     """Start a REPL session with the given agent.
 
+    Convenience function to create and run an AgentRepl instance.
+    Handles initialization and logging setup.
+
     Args:
-        agent: The agent to start the REPL with
-        summarizer: A summarizer to use for summarizing conversation history
-        include_usage: Whether to include usage in the REPL stats
-        include_cost: Whether to include cost statistics in the REPL stats
-        cleanup: Whether to clear agent state after completion. If False,
-                maintains the last active agent for subsequent interactions
-        log_level: The log level to use for the REPL
+        agent: The agent to start the REPL with.
+            This agent handles initial interactions and may delegate to others.
+        summarizer: Optional summarizer for managing conversation history.
+            If provided, helps maintain context while keeping history manageable.
+        include_usage: Whether to track and display token usage statistics.
+        include_cost: Whether to track and display cost information.
+        cleanup: Whether to clear agent state after completion.
+            If False, maintains the last active agent for subsequent interactions.
+
+    Raises:
+        SystemExit: When the REPL is terminated.
+
+    Example:
+        ```python
+        agent = Agent(
+            id="helper",
+            instructions="You are a helpful assistant.",
+            llm=LLM(model="gpt-4")
+        )
+
+        # Start REPL with usage tracking
+        await start_repl(
+            agent=agent,
+            include_usage=True
+        )
+        ```
+
+    Notes:
+        - Enables logging automatically
+        - Creates a new REPL instance
+        - Runs until explicitly terminated
+        - Maintains state based on cleanup setting
     """
     enable_logging()
     repl = AgentRepl(agent, summarizer, include_usage, include_cost, cleanup)

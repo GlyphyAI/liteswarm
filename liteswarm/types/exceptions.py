@@ -6,36 +6,66 @@
 
 
 class SwarmError(Exception):
-    """Base class for Swarm-specific exceptions.
+    """Base exception class for all Swarm-related errors.
 
-    All custom exceptions in the Swarm system inherit from this class
-    to allow for specific error handling of Swarm-related issues.
+    Provides a common ancestor for all custom exceptions in the system,
+    enabling unified error handling and logging of Swarm operations.
 
-    Example:
-    ```python
-    try:
-        result = await swarm.execute(agent, prompt)
-    except SwarmError as e:
-        print(f"Swarm operation failed: {e}")
-    ```
+    Examples:
+        Basic error handling:
+            ```python
+            try:
+                result = await swarm.execute(prompt)
+            except SwarmError as e:
+                logger.error(f"Swarm operation failed: {e}")
+            ```
+
+        Custom exception:
+            ```python
+            class ValidationError(SwarmError):
+                \"\"\"Raised when agent input validation fails.\"\"\"
+                def __init__(self, field: str, value: Any) -> None:
+                    super().__init__(
+                        f"Invalid value {value} for field {field}"
+                    )
+            ```
     """
 
 
 class CompletionError(SwarmError):
-    """Raised when completion fails after all retries.
+    """Exception raised when LLM completion fails permanently.
 
-    This exception indicates that the language model API call failed
-    repeatedly and exhausted all retry attempts. The original error
-    is preserved for debugging.
+    Indicates that the language model API call failed and exhausted
+    all retry attempts. Preserves the original error for debugging
+    and error reporting.
 
-    Example:
-    ```python
-    try:
-        response = await swarm.execute(agent, prompt)
-    except CompletionError as e:
-        print(f"Completion failed: {e}")
-        print(f"Original error: {e.original_error}")
-    ```
+    Examples:
+        Basic handling:
+            ```python
+            try:
+                response = await agent.complete(prompt)
+            except CompletionError as e:
+                logger.error(
+                    f"API call failed: {e}",
+                    extra={
+                        "error_type": type(e.original_error).__name__,
+                        "details": str(e.original_error)
+                    }
+                )
+            ```
+
+        Fallback strategy:
+            ```python
+            try:
+                response = await primary_agent.complete(prompt)
+            except CompletionError:
+                # Switch to backup model
+                backup_agent = Agent(
+                    id="backup",
+                    llm=LLM(model="gpt-3.5-turbo")
+                )
+                response = await backup_agent.complete(prompt)
+            ```
     """
 
     def __init__(
@@ -43,39 +73,58 @@ class CompletionError(SwarmError):
         message: str,
         original_error: Exception,
     ) -> None:
-        """Initialize a CompletionError.
+        """Initialize a new CompletionError.
 
         Args:
-            message: Human-readable error description
-            original_error: The underlying exception that caused the failure
+            message: Human-readable error description.
+            original_error: The underlying exception that caused the failure.
         """
         super().__init__(message)
         self.original_error = original_error
 
 
 class ContextLengthError(SwarmError):
-    """Raised when the context length exceeds the model's limit.
+    """Exception raised when input exceeds model's context limit.
 
-    This exception occurs when the conversation history is too long
-    for the model's context window, even after attempting to reduce
-    it through summarization or trimming.
+    Occurs when the combined length of conversation history and new
+    input exceeds the model's maximum context window, even after
+    attempting context reduction strategies.
 
-    Example:
-    ```python
-    try:
-        response = await swarm.execute(agent, prompt)
-    except ContextLengthError as e:
-        print(f"Context too long: {e}")
-        print(f"Current length: {e.current_length}")
-        print(f"Original error: {e.original_error}")
+    Examples:
+        Basic handling:
+            ```python
+            try:
+                response = await agent.complete(prompt)
+            except ContextLengthError as e:
+                logger.warning(
+                    "Context length exceeded",
+                    extra={
+                        "current_length": e.current_length,
+                        "error": str(e.original_error)
+                    }
+                )
+            ```
 
-        # Maybe switch to a model with larger context
-        new_agent = Agent(
-            id="large-context",
-            instructions=agent.instructions,
-            llm=LLMConfig(model="claude-3-5-sonnet-20241022")
-        )
-    ```
+        Automatic model upgrade:
+            ```python
+            async def complete_with_fallback(
+                prompt: str,
+                agent: Agent
+            ) -> str:
+                try:
+                    return await agent.complete(prompt)
+                except ContextLengthError:
+                    # Switch to larger context model
+                    large_agent = Agent(
+                        id="large-context",
+                        instructions=agent.instructions,
+                        llm=LLM(
+                            model="claude-3-opus",
+                            max_tokens=100000
+                        )
+                    )
+                    return await large_agent.complete(prompt)
+            ```
     """
 
     def __init__(
@@ -84,12 +133,12 @@ class ContextLengthError(SwarmError):
         original_error: Exception,
         current_length: int,
     ) -> None:
-        """Initialize a ContextLengthError.
+        """Initialize a new ContextLengthError.
 
         Args:
-            message: Human-readable error description
-            original_error: The underlying exception that caused the failure
-            current_length: The current context length that exceeded the limit
+            message: Human-readable error description.
+            original_error: The underlying exception that caused the failure.
+            current_length: Current context length that exceeded the limit.
         """
         super().__init__(message)
         self.original_error = original_error

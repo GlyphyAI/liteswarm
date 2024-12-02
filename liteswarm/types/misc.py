@@ -9,93 +9,155 @@ from typing import Any, TypeAlias
 from pydantic import BaseModel, ConfigDict, Field
 
 Number: TypeAlias = int | float
-"""A numeric type that can be either integer or float.
+"""Type alias for JSON-compatible numeric values.
 
-Used for JSON-compatible numeric values in:
-- Function arguments
-- Tool responses
-- Model parameters
+Represents both integer and floating-point numbers for use in:
+- Function parameters
+- API responses
+- Configuration values
 
-Example:
-```python
-def calculate_area(width: Number, height: Number) -> Number:
-    return width * height
+Examples:
+    Basic usage:
+        ```python
+        def calculate_area(width: Number, height: Number) -> Number:
+            return width * height
 
-area = calculate_area(5, 3.5)  # Returns 17.5
-```
+        # Integer inputs
+        area1 = calculate_area(5, 4)  # Returns 20
+
+        # Mixed inputs
+        area2 = calculate_area(3.5, 2)  # Returns 7.0
+        ```
+
+    Type validation:
+        ```python
+        from pydantic import BaseModel
+
+        class Rectangle(BaseModel):
+            width: Number
+            height: Number
+
+        # Both valid
+        rect1 = Rectangle(width=10, height=5)
+        rect2 = Rectangle(width=3.14, height=2.5)
+        ```
 """
 
 JSON: TypeAlias = str | bool | Number | list["JSON"] | dict[str, "JSON"] | None
-"""A JSON-compatible type for structured data.
+"""Type alias for JSON-compatible data structures.
 
-Represents any valid JSON value:
-- Primitive types (str, bool, numbers, null)
-- Arrays (lists) of JSON values
-- Objects (dicts) with string keys and JSON values
+Represents any valid JSON value type:
+- Strings: Unicode text
+- Booleans: true/false
+- Numbers: integers and floats
+- Arrays: ordered lists of JSON values
+- Objects: key-value maps with string keys
+- Null: None/null value
 
-Example:
-```python
-# Valid JSON values
-config: JSON = {
-    "name": "test",
-    "enabled": True,
-    "threshold": 0.5,
-    "tags": ["a", "b", "c"],
-    "metadata": {
-        "version": "1.0",
-        "nested": {
-            "value": None
+Examples:
+    Configuration data:
+        ```python
+        config: JSON = {
+            "name": "api-service",
+            "version": "2.1.0",
+            "settings": {
+                "timeout": 30,
+                "retries": 3,
+                "features": ["auth", "cache"],
+                "debug": True,
+                "optional": None
+            }
         }
-    }
-}
+        ```
 
-def process_json(data: JSON) -> JSON:
-    \"\"\"Process any JSON-compatible data.\"\"\"
-    return {"processed": data}
-```
+    API responses:
+        ```python
+        def fetch_data() -> JSON:
+            \"\"\"Fetch data from external API.\"\"\"
+            return {
+                "status": "success",
+                "data": [
+                    {"id": 1, "value": 42.5},
+                    {"id": 2, "value": 98.1}
+                ],
+                "metadata": {
+                    "count": 2,
+                    "page": 1
+                }
+            }
+        ```
 """
 
 
 class FunctionDocstring(BaseModel):
-    """Parsed documentation for a function tool.
+    """Documentation parser for function tools.
 
-    Extracts and structures Python docstring information for:
-    - Function description
-    - Parameter documentation
-    - Return value documentation
+    Extracts and structures function documentation into a format
+    suitable for tool registration and API schema generation.
 
-    Used to generate JSON schemas and documentation for tools
-    that agents can use.
+    Supports standard docstring sections:
+    - Description: What the function does
+    - Arguments: Parameter descriptions
+    - Returns: Output description
+    - Examples: Usage examples
 
-    Example:
-    ```python
-    def add_numbers(a: float, b: float) -> float:
-        \"\"\"Add two numbers together.
+    Examples:
+        Basic function:
+            ```python
+            def greet(name: str, formal: bool = False) -> str:
+                \"\"\"Generate a greeting message.
 
-        Args:
-            a: First number to add
-            b: Second number to add
+                Args:
+                    name: Person's name to greet.
+                    formal: Whether to use formal greeting.
 
-        Returns:
-            Sum of the two numbers
-        \"\"\"
-        return a + b
+                Returns:
+                    Formatted greeting message.
+                \"\"\"
+                prefix = "Dear" if formal else "Hello"
+                return f"{prefix} {name}"
 
-    docstring = FunctionDocstring(
-        description="Add two numbers together.",
-        parameters={
-            "a": "First number to add",
-            "b": "Second number to add"
-        }
-    )
-    ```
+            docstring = FunctionDocstring(
+                description="Generate a greeting message.",
+                parameters={
+                    "name": "Person's name to greet",
+                    "formal": "Whether to use formal greeting"
+                }
+            )
+            ```
+
+        Complex function:
+            ```python
+            def process_data(
+                data: dict,
+                options: list[str] | None = None
+            ) -> JSON:
+                \"\"\"Process input data with given options.
+
+                Args:
+                    data: Input data to process.
+                    options: Processing options to apply.
+
+                Returns:
+                    Processed data in JSON format.
+                \"\"\"
+                return {"processed": data}
+
+            docstring = FunctionDocstring(
+                description="Process input data with given options.",
+                parameters={
+                    "data": "Input data to process",
+                    "options": "Processing options to apply"
+                }
+            )
+            ```
     """  # noqa: D214
 
     description: str | None = None
-    """Description of what the function does"""
+    """Main description of the function's purpose."""
 
     parameters: dict[str, Any] = Field(default_factory=dict)
-    """Documentation for each parameter"""
+    """Documentation for each function parameter."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,

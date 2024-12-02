@@ -30,32 +30,83 @@ def function_to_json(
     func: Callable[..., Any],
     description: str | None = None,
 ) -> dict[str, Any]:
-    """Convert a Python function to an OpenAI-compatible function description.
+    """Convert Python function to OpenAI function schema.
 
-    The function will automatically exclude the `context_variables` parameter from
-    the generated schema, as it's handled internally by the framework.
+    Automatically generates an OpenAI-compatible function description,
+    excluding internal parameters like 'context_variables'. Handles
+    type hints, docstrings, and parameter validation.
 
     Args:
-        func: The function to convert
-        description: Optional function description
+        func: Function to convert.
+        description: Optional override for function description.
 
     Returns:
-        Dict containing the function schema in OpenAI's format
+        OpenAI function schema as a dictionary.
 
-    Example:
-        ```python
-        def greet(name: str, context_variables: ContextVariables) -> str:
-            \"\"\"Greet someone by name.
+    Raises:
+        ValueError: If function conversion fails.
 
-            Args:
-                name: The name to greet
-                context_variables: Context variables (handled by framework)
-            \"\"\"
-            return f"Hello, {name}!"
+    Examples:
+        Basic function:
+            ```python
+            def calculate_sum(a: int, b: int) -> int:
+                \"\"\"Add two numbers together.
 
-        schema = function_to_json(greet)
-        # Schema will only include the 'name' parameter
-        ```
+                Args:
+                    a: First number.
+                    b: Second number.
+
+                Returns:
+                    Sum of the numbers.
+                \"\"\"
+                return a + b
+
+            schema = function_to_json(calculate_sum)
+            # {
+            #     "type": "function",
+            #     "function": {
+            #         "name": "calculate_sum",
+            #         "description": "Add two numbers together.",
+            #         "parameters": {
+            #             "type": "object",
+            #             "properties": {
+            #                 "a": {
+            #                     "type": "integer",
+            #                     "description": "First number."
+            #                 },
+            #                 "b": {
+            #                     "type": "integer",
+            #                     "description": "Second number."
+            #                 }
+            #             },
+            #             "required": ["a", "b"]
+            #         }
+            #     }
+            # }
+            ```
+
+        Enum parameter:
+            ```python
+            class Color(Enum):
+                RED = "red"
+                BLUE = "blue"
+
+            def paint(color: Color) -> str:
+                \"\"\"Paint in specified color.
+
+                Args:
+                    color: Color to use.
+                \"\"\"
+                return f"Painting in {color.value}"
+
+            schema = function_to_json(paint)
+            # Parameters will include enum values:
+            # "color": {
+            #     "type": "string",
+            #     "enum": ["red", "blue"],
+            #     "description": "Color to use."
+            # }
+            ```
     """  # noqa: D214
     try:
         signature = inspect.signature(func)
@@ -123,14 +174,50 @@ def function_to_json(
 
 
 def parse_docstring_params(docstring: str) -> FunctionDocstring:
-    """Extract parameter descriptions from docstring using Griffe.
+    """Parse function docstring into structured format.
+
+    Uses Griffe to extract description and parameter documentation
+    from docstrings in various styles (Google, Sphinx, NumPy).
 
     Args:
-        docstring: The docstring to parse.
+        docstring: Raw docstring text to parse.
 
     Returns:
-        FunctionDocstring: Parsed docstring information.
-    """
+        Structured docstring information.
+
+    Examples:
+        Google style:
+            ```python
+            def example(name: str) -> str:
+                \"\"\"Greet someone.
+
+                Args:
+                    name: Person to greet.
+
+                Returns:
+                    Greeting message.
+                \"\"\"
+                return f"Hello {name}"
+
+            info = parse_docstring_params(example.__doc__)
+            # info.description = "Greet someone."
+            # info.parameters = {"name": "Person to greet."}
+            ```
+
+        Sphinx style:
+            ```python
+            def example(name: str) -> str:
+                \"\"\"Greet someone.
+
+                :param name: Person to greet.
+                :return: Greeting message.
+                \"\"\"
+                return f"Hello {name}"
+
+            info = parse_docstring_params(example.__doc__)
+            # Same structured output
+            ```
+    """  # noqa: D214
     if not docstring:
         return FunctionDocstring()
 
@@ -173,14 +260,43 @@ def parse_docstring_params(docstring: str) -> FunctionDocstring:
 
 
 def detect_docstring_style(docstring: str) -> Literal["google", "sphinx", "numpy"]:
-    """Detect the style of a docstring using heuristics.
+    """Detect docstring format using pattern matching.
+
+    Analyzes docstring content to determine its style based on
+    common patterns and section markers.
 
     Args:
-        docstring: The docstring to analyze.
+        docstring: Raw docstring text to analyze.
 
     Returns:
-        str: The detected style ("google", "sphinx", or "numpy").
-    """
+        Detected style: "google", "sphinx", or "numpy".
+
+    Examples:
+        Google style detection:
+            ```python
+            style = detect_docstring_style(\"\"\"
+                Do something.
+
+                Args:
+                    x: Input value.
+
+                Returns:
+                    Modified value.
+            \"\"\")
+            assert style == "google"
+            ```
+
+        Sphinx style detection:
+            ```python
+            style = detect_docstring_style(\"\"\"
+                Do something.
+
+                :param x: Input value.
+                :return: Modified value.
+            \"\"\")
+            assert style == "sphinx"
+            ```
+    """  # noqa: D214
     if not docstring:
         return "google"  # default to google style
 
@@ -205,13 +321,74 @@ def detect_docstring_style(docstring: str) -> Literal["google", "sphinx", "numpy
 
 
 def function_has_parameter(func: Callable[..., Any], param: str) -> bool:
-    """Check if a function has a specific parameter.
+    """Check if function accepts specific parameter.
+
+    Inspects function's type hints to determine if it accepts
+    the given parameter name.
 
     Args:
-        func: The function to check
-        param: The parameter to check for
+        func: Function to inspect.
+        param: Parameter name to check.
 
     Returns:
-        True if the function has the parameter, False otherwise
+        True if parameter exists, False otherwise.
+
+    Examples:
+        Parameter check:
+            ```python
+            def greet(name: str) -> str:
+                return f"Hello {name}"
+
+            assert function_has_parameter(greet, "name")
+            assert not function_has_parameter(greet, "age")
+            ```
+
+        Type hints required:
+            ```python
+            def greet(name):  # No type hint
+                return f"Hello {name}"
+
+            # Returns False (no type hints)
+            result = function_has_parameter(greet, "name")
+            ```
     """
     return param in get_type_hints(func)
+
+
+def functions_to_json(functions: list[Callable[..., Any]] | None) -> list[dict[str, Any]] | None:
+    """Convert multiple functions to OpenAI schemas.
+
+    Batch converts Python functions to OpenAI-compatible function
+    descriptions, filtering out None values.
+
+    Args:
+        functions: List of functions to convert.
+
+    Returns:
+        List of function schemas, or None if input is None.
+
+    Examples:
+        Multiple functions:
+            ```python
+            def add(a: int, b: int) -> int:
+                \"\"\"Add numbers.\"\"\"
+                return a + b
+
+            def multiply(a: int, b: int) -> int:
+                \"\"\"Multiply numbers.\"\"\"
+                return a * b
+
+            schemas = functions_to_json([add, multiply])
+            # Returns list of two function schemas
+            ```
+
+        Empty input:
+            ```python
+            assert functions_to_json(None) is None
+            assert functions_to_json([]) is None
+            ```
+    """
+    if not functions:
+        return None
+
+    return [function_to_json(func) for func in functions]

@@ -8,12 +8,12 @@ import sys
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
-from liteswarm.core import StreamHandler
-from liteswarm.experimental import SwarmTeamStreamHandler
+from liteswarm.core import LiteSwarmStreamHandler
+from liteswarm.experimental import LiteSwarmTeamStreamHandler
 from liteswarm.types import Agent, Delta, Message, Plan, Task, ToolCallResult
 
 
-class SwarmStreamHandler(StreamHandler):
+class SwarmStreamHandler(LiteSwarmStreamHandler):
     """Stream handler for software team with real-time progress updates."""
 
     def __init__(self) -> None:
@@ -111,14 +111,14 @@ class SwarmStreamHandler(StreamHandler):
         self._last_agent = None
 
 
-class SoftwareTeamStreamHandler(SwarmTeamStreamHandler):
+class SwarmTeamStreamHandler(LiteSwarmTeamStreamHandler):
     async def on_plan_created(self, plan: Plan) -> None:
         """Print the created development plan."""
         print("\nDevelopment Plan Created:")
         print("-------------------------")
         for task in plan.tasks:
             print(f"\nTask: {task.title}")
-            print(f"Task Type: {task.task_type}")
+            print(f"Task Type: {task.type}")
             print(f"Description: {task.description}")
             if task.dependencies:
                 print(f"Dependencies: {', '.join(task.dependencies)}")

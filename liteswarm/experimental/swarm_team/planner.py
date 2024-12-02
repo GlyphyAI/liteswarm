@@ -4,31 +4,31 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-import operator
 from collections.abc import Callable
-from functools import reduce
 from typing import Protocol, TypeAlias
 
 from liteswarm.core.swarm import Swarm
+from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.types import Result
-from liteswarm.types.llm import LLMConfig
+from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
-from liteswarm.utils.misc import change_field_type, extract_json
+from liteswarm.utils.tasks import create_plan_with_tasks
+from liteswarm.utils.typing import is_callable, is_subtype
 
 AGENT_PLANNER_INSTRUCTIONS = """
 You are a task planning specialist.
 
 Your role is to:
-1. Break down complex requests into clear, actionable tasks
-2. Ensure tasks have appropriate dependencies
-3. Create tasks that match the provided task types
-4. Consider team capabilities when planning
+1. Break down complex requests into clear, actionable tasks.
+2. Ensure tasks have appropriate dependencies.
+3. Create tasks that match the provided task types.
+4. Consider team capabilities when planning.
 
 Each task must include:
-- A clear title and description
-- The appropriate task type
-- Any dependencies on other tasks
+- A clear title and description.
+- The appropriate task type.
+- Any dependencies on other tasks.
 
 Follow the output format specified in the prompt to create your plan.
 """.strip()
@@ -36,251 +36,294 @@ Follow the output format specified in the prompt to create your plan.
 PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
 """Template for formatting prompts with context.
 
-Can be either:
-- A static template string with placeholders
-- A function that dynamically generates prompts
+Can be either a static template string or a function that generates prompts
+dynamically based on context.
 
-Example:
-```python
-# Static template
-template: PromptTemplate = \"\"\"
-Process this request: {prompt}
-Using these tools: {context}
-\"\"\"
+Examples:
+    Static template:
+        ```python
+        template: PromptTemplate = "Process {prompt} using {context.get('tools')}"
+        ```
 
-# Dynamic template
-def generate_prompt(prompt: str, context: ContextVariables) -> str:
-    return dedent_prompt(f\"\"\"
-    Process this request: {prompt}
+    Dynamic template:
+        ```python
+        def generate_prompt(prompt: str, context: ContextVariables) -> str:
+            tools = context.get("tools", [])
+            return f"Process {prompt} using available tools: {', '.join(tools)}"
+        ```
+"""
 
-    Available tools:
-    {format_tools(context.get("tools", []))}
+PlanResponseFormat: TypeAlias = type[Plan] | Callable[[str, ContextVariables], Plan]
+"""Format specification for plan responses.
 
-    Team context:
-    - Project: {context.get("project_name")}
-    - Priority: {context.get("priority")}
-    \"\"\")
+Can be either a Plan subclass or a function that parses responses into Plan objects.
 
-# Usage with static template
-formatted = template.format(
-    prompt="Analyze data",
-    context=ContextVariables(available_tools=["tool1", "tool2"])
-)
+Args:
+    response: Raw response string from the LLM.
+    context: Context variables for response parsing.
 
-# Or with dynamic template
-formatted = generate_prompt(
-    prompt="Analyze data",
-    context=ContextVariables(
-        tools=["tool1", "tool2"],
-        project_name="Analytics",
-        priority="high"
-    )
-)
-```
+Returns:
+    Plan object containing tasks and dependencies.
+
+Examples:
+    Static format using a Plan subclass:
+        ```python
+        class CustomPlan(Plan):
+            tasks: list[ReviewTask | TestTask]
+            metadata: dict[str, str]
+
+        response_format: PlanResponseFormat = CustomPlan
+        ```
+
+    Dynamic format using a parser function:
+        ```python
+        def parse_plan_response(response: str, context: ContextVariables) -> Plan:
+            # Parse response and create plan
+            tasks = extract_tasks(response)
+            return Plan(tasks=tasks)
+
+        response_format: PlanResponseFormat = parse_plan_response
+        ```
+
+Notes:
+    - When using a Plan subclass, the response must be valid JSON matching the schema
+    - When using a parser function, it must handle any necessary validation and conversion
+    - The format should be compatible with the LLM's response capabilities
 """
 
 
-class PlanningAgent(Protocol):
-    """Protocol for planning agents that create task plans.
+class AgentPlanner(Protocol):
+    """Protocol for agents that create task plans.
 
-    Planning agents analyze prompts and create structured plans by:
-    1. Breaking down work into tasks
-    2. Setting appropriate dependencies
-    3. Validating against task definitions
-    4. Considering team capabilities
+    Defines the interface for planning agents that can analyze prompts and create
+    structured plans with tasks and dependencies.
 
-    Example:
-    ```python
-    class CustomPlanner(PlanningAgent):
-        async def create_plan(
-            self,
-            prompt: str,
-            context: ContextVariables,
-            feedback: str | None = None
-        ) -> Result[Plan]:
-            # Build LLM instructions based on prompt and context
-            # Retrieve & parse plan response
-            # Validate plan & dependencies
-            return Result(value=plan)
-    ```
+    Examples:
+        Create a custom planner:
+            ```python
+            class CustomPlanner(AgentPlanner):
+                async def create_plan(
+                    self,
+                    prompt: str,
+                    context: ContextVariables,
+                    feedback: str | None = None
+                ) -> Result[Plan]:
+                    # Analyze prompt and create tasks
+                    tasks = [
+                        Task(id="task-1", title="First step"),
+                        Task(id="task-2", title="Second step", dependencies=["task-1"])
+                    ]
+                    return Result(value=Plan(tasks=tasks))
+            ```
     """
 
     async def create_plan(
         self,
         prompt: str,
-        context: ContextVariables,
+        context: ContextVariables | None = None,
         feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan from the given prompt and context.
 
         Args:
-            prompt: Description of what needs to be done
-            context: Variables providing additional context
-            feedback: Optional feedback on previous plan attempts
+            prompt: Description of work to be done.
+            context: Optional additional context variables.
+            feedback: Optional feedback on previous attempts.
 
         Returns:
-            Result containing either:
-            - Successful Plan instance
-            - Error if plan creation fails
+            Result containing either a valid Plan or an error.
         """
         ...
 
 
-class AgentPlanner(PlanningAgent):
-    """Default implementation of the planning strategy using an LLM agent.
+class LiteAgentPlanner(AgentPlanner):
+    """LLM-based implementation of the planning protocol.
 
-    Creates plans by:
-    1. Using an LLM agent to analyze requirements
-    2. Generating JSON-structured plans
-    3. Validating against task definitions
-    4. Ensuring valid task dependencies
+    Uses an LLM agent to analyze requirements and generate structured plans,
+    validating them against task definitions.
 
-    Example:
-    ```python
-    # Create task definitions
-    review_def = TaskDefinition.create(
-        task_type="code_review",
-        task_schema=CodeReviewTask,
-        task_instructions="Review {task.pr_url}..."
-    )
+    Examples:
+        Create and use a planner:
+            ```python
+            # Define task types
+            class ReviewTask(Task):
+                pr_url: str
+                review_type: str
 
-    test_def = TaskDefinition.create(
-        task_type="testing",
-        task_schema=TestingTask,
-        task_instructions="Test {task.test_path}..."
-    )
+            # Create task definitions
+            review_def = TaskDefinition(
+                task_schema=ReviewTask,
+                task_instructions="Review {task.pr_url}"
+            )
 
-    # Create planner with custom template
-    planner = AgentPlanner(
-        swarm=swarm,
-        agent=Agent(
-            id="planner",
-            instructions="You are a technical project planner...",
-            llm=LLMConfig(model="gpt-4o")
-        ),
-        template=CustomTemplate(),
-        task_definitions=[review_def, test_def]
-    )
+            # Initialize planner
+            planner = LiteAgentPlanner(
+                swarm=swarm,
+                agent=Agent(id="planner", llm=LLM(model="gpt-4o")),
+                task_definitions=[review_def]
+            )
 
-    # Create plan
-    result = await planner.create_plan(
-        prompt="Review and test PR #123",
-        context=ContextVariables(
-            pr_url="https://github.com/org/repo/pull/123"
-        )
-    )
-    ```
+            # Create plan
+            result = await planner.create_plan(
+                prompt="Review PR #123",
+                context=ContextVariables(pr_url="github.com/org/repo/123")
+            )
+            ```
     """
 
     def __init__(
         self,
         swarm: Swarm,
         agent: Agent | None = None,
-        template: PromptTemplate | None = None,
+        prompt_template: PromptTemplate | None = None,
         task_definitions: list[TaskDefinition] | None = None,
+        response_format: PlanResponseFormat | None = None,
     ) -> None:
-        """Initialize a new AgentPlanner instance.
+        """Initialize a new planner instance.
 
         Args:
-            swarm: Swarm instance for agent interactions
-            agent: Optional custom planning agent
-            template: Optional custom prompt template
-            task_definitions: List of available task types
+            swarm: Swarm client for agent interactions.
+            agent: Optional custom planning agent.
+            prompt_template: Optional custom prompt template.
+            task_definitions: Available task types.
+            response_format: Optional plan response format.
         """
+        # Public properties
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
-        self.template = template or self._default_planning_prompt_template()
-        self.task_definitions = {td.task_type: td for td in task_definitions or []}
+        self.prompt_template = prompt_template or self._default_planning_prompt_template()
+        self.response_format = response_format or self._default_planning_response_format()
+
+        # Internal state (private)
+        self._task_registry = TaskRegistry(task_definitions)
 
     def _default_planning_agent(self) -> Agent:
-        """Create a default agent if none is provided.
+        """Create the default planning agent.
 
         Returns:
-            Agent configured for planning tasks
-
-        The default agent:
-        - Uses gpt-4o for complex planning
-        - Has specialized planning instructions
-        - Focuses on task breakdown and dependencies
+            Agent configured with GPT-4o and planning instructions.
         """
         return Agent(
             id="agent-planner",
             instructions=AGENT_PLANNER_INSTRUCTIONS,
-            llm=LLMConfig(model="gpt-4o"),
+            llm=LLM(model="gpt-4o"),
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
-        """Create a default prompt template.
+        """Create the default prompt template.
 
         Returns:
-            Simple template that uses raw prompt
+            Simple template that uses raw prompt.
         """
-        return "{prompt}"
+        return lambda prompt, _: prompt
+
+    def _default_planning_response_format(self) -> PlanResponseFormat:
+        """Create the default plan response format.
+
+        Returns:
+            Plan schema with task types from registered task definitions.
+        """
+        task_definitions = self._task_registry.get_task_definitions()
+        task_types = [td.task_schema for td in task_definitions]
+        return create_plan_with_tasks(task_types)
+
+    def _parse_response(
+        self,
+        response: str,
+        response_format: PlanResponseFormat,
+        context: ContextVariables,
+    ) -> Plan:
+        """Parse agent response using schema.
+
+        Args:
+            response: Raw content to parse.
+            response_format: Schema or parser function.
+            context: Context for parsing.
+
+        Returns:
+            Parsed Plan model.
+
+        Raises:
+            TypeError: If response doesn't match schema.
+            ValidationError: If response is invalid.
+
+        Examples:
+            Using model:
+                ```python
+                plan = self._parse_response(
+                    response='{"tasks": [{"task_type": "coding", "id": "1", "title": "Write a hello world program in Python"}]}',
+                    response_format=Plan,
+                    context=ContextVariables()
+                )
+                ```
+
+            Using parser:
+                ```python
+                def parse_plan_response(response: str, context: ContextVariables) -> Plan:
+                    return Plan.model_validate_json(response)
+
+                plan = self._parse_response(
+                    response='{"tasks": [{"task_type": "coding", "id": "1", "title": "Write a hello world program in Python"}]}',
+                    response_format=parse_plan_response,
+                    context=ContextVariables()
+                )
+                ```
+        """
+        if is_subtype(response_format, Plan):
+            return response_format.model_validate_json(response)
+
+        if is_callable(response_format):
+            return response_format(response, context)
+
+        raise ValueError("Invalid response format")
 
     async def create_plan(
         self,
         prompt: str,
-        context: ContextVariables,
+        context: ContextVariables | None = None,
         feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan using the configured agent.
 
         Args:
-            prompt: Description of what needs to be done
-            context: Context variables for planning
-            feedback: Optional feedback on previous attempts
+            prompt: Description of work to be done.
+            context: Optional context variables for planning.
+            feedback: Optional feedback on previous attempts.
 
         Returns:
             Result containing either:
-            - Successful Plan instance
-            - Error if validation fails
+                - Valid Plan with tasks and dependencies.
+                - Error if plan creation or validation fails.
 
-        Example:
-        ```python
-        result = await planner.create_plan(
-            prompt='''
-            Review PR #123 which updates authentication:
-            1. Security review of auth changes
-            2. Test the new auth flow
-            ''',
-            context=ContextVariables(
-                pr_url="https://github.com/org/repo/pull/123",
-                team_capabilities={
-                    "security_review": ["security-bot"],
-                    "testing": ["test-bot"]
-                }
-            ),
-            feedback="Please add input validation tests"
-        )
-        ```
+        Examples:
+            Create a plan:
+                ```python
+                result = await planner.create_plan(
+                    prompt="Review and test PR #123",
+                    context=ContextVariables(
+                        pr_url="github.com/org/repo/123",
+                        focus_areas=["security", "performance"]
+                    )
+                )
+
+                if result.value:
+                    plan = result.value
+                    print(f"Created plan with {len(plan.tasks)} tasks")
+                    for task in plan.tasks:
+                        print(f"- {task.title}")
+                ```
         """
+        context = ContextVariables(context or ContextVariables())
+
         if feedback:
-            full_prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
-        else:
-            full_prompt = prompt
+            prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
 
-        task_definitions = list(self.task_definitions.values())
-        task_schemas = reduce(operator.or_, [td.task_schema for td in task_definitions])
-        plan_schema_name = Plan.__name__
-        plan_schema = change_field_type(
-            model_type=Plan,
-            field_name="tasks",
-            new_type=list[task_schemas],  # type: ignore [valid-type]
-            new_model_name=plan_schema_name,
-        )
-
-        output_format = plan_schema.model_json_schema()
-        context = ContextVariables(**context)
-        context.set_reserved("output_format", output_format)
-
-        if callable(self.template):
-            formatted_prompt = self.template(full_prompt, context)
-        else:
-            formatted_prompt = self.template.format(prompt=full_prompt, context=context)
+        if is_callable(self.prompt_template):
+            prompt = self.prompt_template(prompt, context)
 
         result = await self.swarm.execute(
             agent=self.agent,
-            prompt=formatted_prompt,
+            prompt=prompt,
             context_variables=context,
         )
 
@@ -288,15 +331,11 @@ class AgentPlanner(PlanningAgent):
             return Result(error=ValueError("Failed to create plan"))
 
         try:
-            json_plan = extract_json(result.content)
-            if not isinstance(json_plan, dict):
-                raise TypeError("Invalid plan format")
-
-            plan = plan_schema.model_validate(json_plan)
+            plan = self._parse_response(result.content, self.response_format, context)
 
             for task in plan.tasks:
-                if task.task_type not in self.task_definitions:
-                    return Result(error=ValueError(f"Unknown task type: {task.task_type}"))
+                if not self._task_registry.contains_task_type(task.type):
+                    return Result(error=ValueError(f"Unknown task type: {task.type}"))
 
             if errors := plan.validate_dependencies():
                 return Result(error=ValueError("\n".join(errors)))

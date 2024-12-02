@@ -8,8 +8,7 @@ import asyncio
 import random
 
 from liteswarm.repl import start_repl
-from liteswarm.types import Agent
-from liteswarm.types.llm import LLMConfig
+from liteswarm.types import LLM, Agent
 
 MATH_AGENT_INSTRUCTIONS = """
 You are a math calculation agent. You must ALWAYS use the provided calculation tools and NEVER perform calculations yourself.
@@ -48,7 +47,7 @@ async def run() -> None:
     math_agent = Agent(
         id="math_agent",
         instructions=MATH_AGENT_INSTRUCTIONS,
-        llm=LLMConfig(
+        llm=LLM(
             model="claude-3-5-haiku-20241022",
             tools=[calculate_sum, calculate_product, calculate_difference],
             tool_choice="auto",
@@ -66,7 +65,7 @@ async def run() -> None:
     sales_agent = Agent(
         id="sales_agent",
         instructions=SALES_AGENT_INSTRUCTIONS,
-        llm=LLMConfig(
+        llm=LLM(
             model="gpt-4o-mini",
             tools=[switch_to_math_agent],
             tool_choice="auto",

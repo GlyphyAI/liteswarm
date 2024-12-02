@@ -18,22 +18,52 @@ def combine_dicts(
     left: dict[str, Any] | None,
     right: dict[str, Any] | None,
 ) -> dict[str, Any] | None:
-    """Combine two dictionaries by adding their numeric values and preserving non-numeric ones.
+    """Merge dictionaries with special handling for numbers.
+
+    Creates a new dictionary by combining two input dictionaries:
+    - Adds numeric values when keys overlap
+    - Preserves non-numeric values from left dictionary
+    - Includes unique keys from both dictionaries
 
     Args:
-        left: First dictionary (or None)
-        right: Second dictionary (or None)
+        left: First dictionary to merge.
+        right: Second dictionary to merge.
 
     Returns:
-        Combined dictionary where:
-        - Numeric values are added together
-        - Non-numeric values from left dict are preserved
-        - Keys unique to right dict are included
-        Returns None if both inputs are None
+        Combined dictionary or None if both inputs are None.
 
-    Example:
-        >>> combine_dicts({"a": 1, "b": "text"}, {"a": 2, "c": 3.5})
-        {"a": 3, "b": "text", "c": 3.5}
+    Examples:
+        Basic merge:
+            ```python
+            result = combine_dicts(
+                {"a": 1, "b": "text"},
+                {"a": 2, "c": 3}
+            )
+            assert result == {
+                "a": 3,        # Numbers added
+                "b": "text",   # Non-numeric preserved
+                "c": 3         # Unique key included
+            }
+            ```
+
+        None handling:
+            ```python
+            assert combine_dicts(None, None) is None
+            assert combine_dicts({"a": 1}, None) == {"a": 1}
+            assert combine_dicts(None, {"b": 2}) == {"b": 2}
+            ```
+
+        Mixed types:
+            ```python
+            result = combine_dicts(
+                {"count": 1, "name": "test"},
+                {"count": 2, "name": "other"}
+            )
+            assert result == {
+                "count": 3,     # Numbers added
+                "name": "test"  # Left value preserved
+            }
+            ```
     """
     if left is None:
         return right
@@ -60,23 +90,63 @@ def combine_dicts(
 
 
 def combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
-    """Combine two Usage objects by adding their token counts.
+    """Merge two LiteLLM usage statistics.
 
-    This function handles:
-    1. Cases where either usage is None
-    2. Addition of all token counts
-    3. Preservation of token details if present
+    Combines token counts and details from two Usage objects:
+    - Adds all token counts (prompt, completion, total)
+    - Merges token details dictionaries
+    - Handles optional fields and None values
 
     Args:
-        left: First Usage object (or None)
-        right: Second Usage object (or None)
+        left: First Usage object to merge.
+        right: Second Usage object to merge.
 
     Returns:
-        Combined Usage object, or None if both inputs are None
+        Combined Usage object or None if both inputs are None.
 
-    Example:
-        >>> total = combine_usage(response1.usage, response2.usage)
-        >>> print(f"Total tokens: {total.total_tokens if total else 0}")
+    Examples:
+        Basic merge:
+            ```python
+            usage1 = Usage(
+                prompt_tokens=10,
+                completion_tokens=5,
+                total_tokens=15
+            )
+            usage2 = Usage(
+                prompt_tokens=20,
+                completion_tokens=10,
+                total_tokens=30
+            )
+            total = combine_usage(usage1, usage2)
+            assert total.prompt_tokens == 30
+            assert total.completion_tokens == 15
+            assert total.total_tokens == 45
+            ```
+
+        With details:
+            ```python
+            usage1 = Usage(
+                prompt_tokens=10,
+                completion_tokens=5,
+                prompt_tokens_details={
+                    "system": 3,
+                    "user": 7
+                }
+            )
+            usage2 = Usage(
+                prompt_tokens=15,
+                completion_tokens=8,
+                prompt_tokens_details={
+                    "system": 5,
+                    "user": 10
+                }
+            )
+            total = combine_usage(usage1, usage2)
+            assert total.prompt_tokens_details == {
+                "system": 8,
+                "user": 17
+            }
+            ```
     """
     if left is None:
         return right
@@ -120,14 +190,45 @@ def combine_response_cost(
     left: ResponseCost | None,
     right: ResponseCost | None,
 ) -> ResponseCost | None:
-    """Combine two ResponseCost objects by adding their costs.
+    """Merge cost information from two responses.
+
+    Combines prompt and completion token costs from two
+    ResponseCost objects, handling None values appropriately.
 
     Args:
-        left: First ResponseCost object (or None)
-        right: Second ResponseCost object (or None)
+        left: First ResponseCost to merge.
+        right: Second ResponseCost to merge.
 
     Returns:
-        Combined ResponseCost object, or None if both inputs are None
+        Combined ResponseCost or None if both inputs are None.
+
+    Examples:
+        Basic merge:
+            ```python
+            cost1 = ResponseCost(
+                prompt_tokens_cost=0.001,
+                completion_tokens_cost=0.002
+            )
+            cost2 = ResponseCost(
+                prompt_tokens_cost=0.003,
+                completion_tokens_cost=0.004
+            )
+            total = combine_response_cost(cost1, cost2)
+            assert total.prompt_tokens_cost == 0.004
+            assert total.completion_tokens_cost == 0.006
+            ```
+
+        None handling:
+            ```python
+            assert combine_response_cost(None, None) is None
+
+            cost = ResponseCost(
+                prompt_tokens_cost=0.001,
+                completion_tokens_cost=0.002
+            )
+            assert combine_response_cost(cost, None) == cost
+            assert combine_response_cost(None, cost) == cost
+            ```
     """
     if left is None:
         return right
@@ -142,14 +243,51 @@ def combine_response_cost(
 
 
 def calculate_response_cost(model: str, usage: Usage) -> ResponseCost:
-    """Calculate the cost of a response based on the usage object.
+    """Calculate API cost for model usage.
+
+    Computes the cost of API usage based on the model type
+    and token counts, using LiteLLM's pricing data.
 
     Args:
-        model: The model used for the response
-        usage: The usage object for the response
+        model: Model identifier (e.g., "gpt-4o").
+        usage: Token usage statistics.
 
     Returns:
-        The cost of the response
+        Cost breakdown for prompt and completion tokens.
+
+    Examples:
+        GPT-4o cost:
+            ```python
+            usage = Usage(
+                prompt_tokens=100,
+                completion_tokens=50,
+                total_tokens=150
+            )
+            cost = calculate_response_cost("gpt-4o", usage)
+            # Costs based on current pricing:
+            # prompt: $2.50/1M tokens
+            # completion: $10.00/1M tokens
+            assert cost.prompt_tokens_cost == 0.00025
+            assert cost.completion_tokens_cost == 0.0005
+            ```
+
+        GPT-4o-mini cost:
+            ```python
+            usage = Usage(
+                prompt_tokens=1000,
+                completion_tokens=500,
+                total_tokens=1500
+            )
+            cost = calculate_response_cost(
+                "gpt-4o-mini",
+                usage
+            )
+            # Costs based on current pricing:
+            # prompt: $0.150/1M tokens
+            # completion: $0.600/1M tokens
+            assert cost.prompt_tokens_cost == 0.00015
+            assert cost.completion_tokens_cost == 0.0003
+            ```
     """
     prompt_tokens_cost, completion_tokens_cost = cost_per_token(
         model=model,

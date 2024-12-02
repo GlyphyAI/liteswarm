@@ -12,11 +12,22 @@ from liteswarm.experimental import SwarmTeam
 from liteswarm.types import ContextVariables
 from liteswarm.utils import dedent_prompt, enable_logging
 
-from .agents import create_agent_planner, create_team_members
-from .stream import SoftwareTeamStreamHandler, SwarmStreamHandler
+from .planner import create_agent_planner
+from .stream import SwarmStreamHandler, SwarmTeamStreamHandler
 from .tasks import create_task_definitions
+from .team import create_team_members
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
+
+
+USER_PROMPT = """
+Create a Flutter TODO list app with the following features:
+
+1. Add/edit/delete tasks
+2. Mark tasks as complete
+3. Local storage for persistence
+4. Clean, modern UI design
+""".strip()
 
 
 async def main() -> None:
@@ -35,13 +46,16 @@ async def main() -> None:
         swarm=swarm,
         members=team_members,
         task_definitions=task_definitions,
-        planning_agent=agent_planner,
-        stream_handler=SoftwareTeamStreamHandler(),
+        agent_planner=agent_planner,
+        stream_handler=SwarmTeamStreamHandler(),
     )
 
     context = ContextVariables(
-        platform="mobile",
-        framework="flutter",
+        tech_stack={
+            "platform": "mobile",
+            "languages": ["Dart"],
+            "frameworks": ["Flutter"],
+        },
         project={
             "directories": [
                 "lib/main.dart",
@@ -55,14 +69,7 @@ async def main() -> None:
         },
     )
 
-    prompt = dedent_prompt("""
-    Create a Flutter TODO list app with the following features:
-
-    1. Add/edit/delete tasks
-    2. Mark tasks as complete
-    3. Local storage for persistence
-    4. Clean, modern UI design
-    """)
+    prompt = USER_PROMPT
 
     while True:
         plan_result = await team.create_plan(prompt, context)

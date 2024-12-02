@@ -16,44 +16,65 @@ ResultValue = TypeVar("ResultValue")
 
 
 class Result(BaseModel, Generic[ResultValue]):
-    """A generic wrapper for operation results in the agentic system.
+    """Generic wrapper for operation results in the agentic system.
 
-    This class provides a standardized way to return results from any operation
-    (agents, functions, tools, etc.) with support for:
-    - Success values of any type
-    - Error information
-    - Agent switching
-    - Context variable updates
+    Provides a standardized way to handle results from any operation (agents,
+    functions, tools) with support for success values, errors, agent switching,
+    and context updates.
 
-    Args:
-        ResultValue: The type of the value field.
+    Examples:
+        Simple success result:
+            ```python
+            # Return calculation result
+            def calculate_average(numbers: list[float]) -> Result[float]:
+                try:
+                    avg = sum(numbers) / len(numbers)
+                    return Result(value=avg)
+                except ZeroDivisionError as e:
+                    return Result(error=e)
+            ```
 
-    Example:
-        ```python
-        # Simple value result
-        Result[float](value=42.0)
+        Error handling:
+            ```python
+            # Handle validation error
+            def validate_input(data: dict) -> Result[dict]:
+                if "required_field" not in data:
+                    return Result(
+                        error=ValueError("Missing required_field")
+                    )
+                return Result(value=data)
+            ```
 
-        # Error result
-        Result[str](error=ValueError("Invalid input"))
-
-        # Agent switch with context
-        Result[None](
-            agent=new_agent,
-            context_variables={"user": "Alice"}
-        )
-        ```
+        Agent switching:
+            ```python
+            # Switch to specialized agent
+            def handle_complex_query(query: str) -> Result[str]:
+                if "math" in query.lower():
+                    return Result(
+                        agent=Agent(
+                            id="math-expert",
+                            instructions="You are a math expert.",
+                            llm=LLM(model="gpt-4o")
+                        ),
+                        context_variables=ContextVariables(
+                            domain="mathematics",
+                            complexity="advanced"
+                        )
+                    )
+                return Result(value="I can help with that.")
+            ```
     """
 
     value: ResultValue | None = None
-    """The operation's result value, if any."""
+    """Operation's success value, if available."""
 
     error: Exception | None = None
-    """Any error that occurred during the operation."""
+    """Error that occurred during operation, if any."""
 
     agent: Agent | None = None
-    """Optional new agent to switch to."""
+    """New agent to switch to, if needed."""
 
     context_variables: ContextVariables | None = None
-    """Optional context variables to update."""
+    """Context updates to apply."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
