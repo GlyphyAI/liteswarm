@@ -13,7 +13,6 @@ from liteswarm.types import Result
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, TaskDefinition
-from liteswarm.utils.misc import extract_json
 from liteswarm.utils.tasks import create_plan_with_tasks
 from liteswarm.utils.typing import is_callable, is_subtype
 
@@ -54,14 +53,20 @@ Examples:
         ```
 """
 
-PlanResponseFormat: TypeAlias = type[Plan] | Callable[[ContextVariables], type[Plan]]
+PlanResponseFormat: TypeAlias = type[Plan] | Callable[[str, ContextVariables], Plan]
 """Format specification for plan responses.
 
-Can be either a Plan subclass or a function that generates a Plan subclass
-based on context.
+Can be either a Plan subclass or a function that parses responses into Plan objects.
+
+Args:
+    response: Raw response string from the LLM.
+    context: Context variables for response parsing.
+
+Returns:
+    Plan object containing tasks and dependencies.
 
 Examples:
-    Static format:
+    Static format using a Plan subclass:
         ```python
         class CustomPlan(Plan):
             tasks: list[ReviewTask | TestTask]
@@ -70,12 +75,20 @@ Examples:
         response_format: PlanResponseFormat = CustomPlan
         ```
 
-    Dynamic format:
+    Dynamic format using a parser function:
         ```python
-        def create_plan_schema(context: ContextVariables) -> type[Plan]:
-            task_types = context.get("task_types", [])
-            return create_plan_with_tasks(task_types)
+        def parse_plan_response(response: str, context: ContextVariables) -> Plan:
+            # Parse response and create plan
+            tasks = extract_tasks(response)
+            return Plan(tasks=tasks)
+
+        response_format: PlanResponseFormat = parse_plan_response
         ```
+
+Notes:
+    - When using a Plan subclass, the response must be valid JSON matching the schema
+    - When using a parser function, it must handle any necessary validation and conversion
+    - The format should be compatible with the LLM's response capabilities
 """
 
 
@@ -214,28 +227,53 @@ class LiteAgentPlanner(AgentPlanner):
         task_types = [td.task_schema for td in task_definitions]
         return create_plan_with_tasks(task_types)
 
-    def _unwrap_response_format(
+    def _parse_response(
         self,
+        response: str,
         response_format: PlanResponseFormat,
-        context: ContextVariables | None = None,
-    ) -> type[Plan]:
-        """Unwrap the response format into a Plan type.
+        context: ContextVariables,
+    ) -> Plan:
+        """Parse agent response using schema.
 
         Args:
-            response_format: Format to unwrap.
-            context: Optional context for dynamic formats.
+            response: Raw content to parse.
+            response_format: Schema or parser function.
+            context: Context for parsing.
 
         Returns:
-            Concrete Plan type.
+            Parsed Plan model.
 
         Raises:
-            ValueError: If format is invalid.
+            TypeError: If response doesn't match schema.
+            ValidationError: If response is invalid.
+
+        Examples:
+            Using model:
+                ```python
+                plan = self._parse_response(
+                    response='{"tasks": [{"task_type": "coding", "id": "1", "title": "Write a hello world program in Python"}]}',
+                    response_format=Plan,
+                    context=ContextVariables()
+                )
+                ```
+
+            Using parser:
+                ```python
+                def parse_plan_response(response: str, context: ContextVariables) -> Plan:
+                    return Plan.model_validate_json(response)
+
+                plan = self._parse_response(
+                    response='{"tasks": [{"task_type": "coding", "id": "1", "title": "Write a hello world program in Python"}]}',
+                    response_format=parse_plan_response,
+                    context=ContextVariables()
+                )
+                ```
         """
         if is_subtype(response_format, Plan):
-            return response_format
+            return response_format.model_validate_json(response)
 
         if is_callable(response_format):
-            return response_format(context or ContextVariables())
+            return response_format(response, context)
 
         raise ValueError("Invalid response format")
 
@@ -293,12 +331,7 @@ class LiteAgentPlanner(AgentPlanner):
             return Result(error=ValueError("Failed to create plan"))
 
         try:
-            json_plan = extract_json(result.content)
-            if not isinstance(json_plan, dict):
-                raise TypeError("Unable to extract plan from response")
-
-            plan_schema = self._unwrap_response_format(self.response_format, context)
-            plan = plan_schema.model_validate(json_plan)
+            plan = self._parse_response(result.content, self.response_format, context)
 
             for task in plan.tasks:
                 if not self._task_registry.contains_task_type(task.type):
