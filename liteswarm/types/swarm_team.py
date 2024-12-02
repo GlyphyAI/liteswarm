@@ -14,6 +14,9 @@ from pydantic import BaseModel, ConfigDict, Field
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
 
+PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
+"""Type variable representing a Pydantic model or its subclass."""
+
 TaskType = TypeVar("TaskType", bound="Task")
 """Type variable representing a Task or its subclass."""
 
@@ -44,7 +47,37 @@ Examples:
         ```
 """
 
-TaskResponseFormat: TypeAlias = type[BaseModel] | Callable[[str, ContextVariables], BaseModel]
+PydanticResponseFormat: TypeAlias = (
+    type[PydanticModel]  # Pydantic model class
+    | Callable[[str, ContextVariables], PydanticModel]  # Callable parser
+)
+"""Generic format specification for Pydantic model responses.
+
+Can be either a Pydantic model for direct validation or a function that parses
+output with context. This format is used anywhere a Pydantic model is expected
+as a response format.
+
+Examples:
+    Static format using a Pydantic model:
+        ```python
+        class ReviewOutput(BaseModel):
+            issues: list[str]
+            approved: bool
+
+        response_format: PydanticResponseFormat = ReviewOutput
+        ```
+
+    Dynamic format using a parser function:
+        ```python
+        def parse_review(content: str, context: ContextVariables) -> ReviewOutput:
+            data = json.loads(content)
+            return ReviewOutput(**data)
+
+        response_format: PydanticResponseFormat = parse_review
+        ```
+"""
+
+TaskResponseFormat: TypeAlias = PydanticResponseFormat["Task"]
 """Format specification for task responses.
 
 Can be either a Pydantic model for direct validation or a function that parses
@@ -70,6 +103,52 @@ Examples:
                 success_rate=data['success'] * 100,
                 errors=data.get('errors', [])
             )
+        ```
+"""
+
+PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
+"""Template for formatting prompts with context.
+
+Can be either a static template string or a function that generates prompts
+dynamically based on context.
+
+Examples:
+    Static template:
+        ```python
+        template: PromptTemplate = "Process {prompt} using {context.get('tools')}"
+        ```
+
+    Dynamic template:
+        ```python
+        def generate_prompt(prompt: str, context: ContextVariables) -> str:
+            tools = context.get("tools", [])
+            return f"Process {prompt} using available tools: {', '.join(tools)}"
+        ```
+"""
+
+PlanResponseFormat: TypeAlias = PydanticResponseFormat["Plan"]
+"""Format specification for plan responses.
+
+Can be either a Plan subclass or a function that parses responses into Plan objects.
+
+Examples:
+    Static format using a Plan subclass:
+        ```python
+        class CustomPlan(Plan):
+            tasks: list[ReviewTask | TestTask]
+            metadata: dict[str, str]
+
+        response_format: PlanResponseFormat = CustomPlan
+        ```
+
+    Dynamic format using a parser function:
+        ```python
+        def parse_plan_response(response: str, context: ContextVariables) -> Plan:
+            # Parse response and create plan
+            tasks = extract_tasks(response)
+            return Plan(tasks=tasks)
+
+        response_format: PlanResponseFormat = parse_plan_response
         ```
 """
 

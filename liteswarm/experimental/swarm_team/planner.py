@@ -12,7 +12,7 @@ from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.types import Result
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
-from liteswarm.types.swarm_team import Plan, TaskDefinition
+from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PromptTemplate, TaskDefinition
 from liteswarm.utils.tasks import create_plan_with_tasks
 from liteswarm.utils.typing import is_callable, is_subtype
 
@@ -32,64 +32,6 @@ Each task must include:
 
 Follow the output format specified in the prompt to create your plan.
 """.strip()
-
-PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
-"""Template for formatting prompts with context.
-
-Can be either a static template string or a function that generates prompts
-dynamically based on context.
-
-Examples:
-    Static template:
-        ```python
-        template: PromptTemplate = "Process {prompt} using {context.get('tools')}"
-        ```
-
-    Dynamic template:
-        ```python
-        def generate_prompt(prompt: str, context: ContextVariables) -> str:
-            tools = context.get("tools", [])
-            return f"Process {prompt} using available tools: {', '.join(tools)}"
-        ```
-"""
-
-PlanResponseFormat: TypeAlias = type[Plan] | Callable[[str, ContextVariables], Plan]
-"""Format specification for plan responses.
-
-Can be either a Plan subclass or a function that parses responses into Plan objects.
-
-Args:
-    response: Raw response string from the LLM.
-    context: Context variables for response parsing.
-
-Returns:
-    Plan object containing tasks and dependencies.
-
-Examples:
-    Static format using a Plan subclass:
-        ```python
-        class CustomPlan(Plan):
-            tasks: list[ReviewTask | TestTask]
-            metadata: dict[str, str]
-
-        response_format: PlanResponseFormat = CustomPlan
-        ```
-
-    Dynamic format using a parser function:
-        ```python
-        def parse_plan_response(response: str, context: ContextVariables) -> Plan:
-            # Parse response and create plan
-            tasks = extract_tasks(response)
-            return Plan(tasks=tasks)
-
-        response_format: PlanResponseFormat = parse_plan_response
-        ```
-
-Notes:
-    - When using a Plan subclass, the response must be valid JSON matching the schema
-    - When using a parser function, it must handle any necessary validation and conversion
-    - The format should be compatible with the LLM's response capabilities
-"""
 
 
 class AgentPlanner(Protocol):
