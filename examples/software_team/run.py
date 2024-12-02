@@ -20,6 +20,16 @@ from .team import create_team_members
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 
+USER_PROMPT = """
+Create a Flutter TODO list app with the following features:
+
+1. Add/edit/delete tasks
+2. Mark tasks as complete
+3. Local storage for persistence
+4. Clean, modern UI design
+""".strip()
+
+
 async def main() -> None:
     """Run the software team example."""
     swarm = Swarm(
@@ -41,8 +51,11 @@ async def main() -> None:
     )
 
     context = ContextVariables(
-        platform="mobile",
-        framework="flutter",
+        tech_stack={
+            "platform": "mobile",
+            "languages": ["Dart"],
+            "frameworks": ["Flutter"],
+        },
         project={
             "directories": [
                 "lib/main.dart",
@@ -56,14 +69,7 @@ async def main() -> None:
         },
     )
 
-    prompt = dedent_prompt("""
-    Create a Flutter TODO list app with the following features:
-
-    1. Add/edit/delete tasks
-    2. Mark tasks as complete
-    3. Local storage for persistence
-    4. Clean, modern UI design
-    """)
+    prompt = USER_PROMPT
 
     while True:
         plan_result = await team.create_plan(prompt, context)
