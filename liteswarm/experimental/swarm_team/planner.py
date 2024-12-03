@@ -155,6 +155,24 @@ class LiteAgentPlanner(AgentPlanner):
 
         Returns:
             Agent configured with GPT-4o and planning instructions.
+
+        Examples:
+            Create default agent:
+                ```python
+                agent = planner._default_planning_agent()
+                # Returns Agent with:
+                # - id: "agent-planner"
+                # - model: "gpt-4o"
+                # - planning-specific instructions
+                ```
+
+            Use in planner:
+                ```python
+                planner = LiteAgentPlanner(swarm=swarm)
+                # Automatically creates default agent if none provided
+                assert planner.agent.id == "agent-planner"
+                assert planner.agent.llm.model == "gpt-4o"
+                ```
         """
         return Agent(
             id="agent-planner",
@@ -167,6 +185,26 @@ class LiteAgentPlanner(AgentPlanner):
 
         Returns:
             Simple template that uses raw prompt.
+
+        Examples:
+            Default template:
+                ```python
+                template = planner._default_planning_prompt_template()
+                prompt = template("Create a plan", context={})
+                assert prompt == "Create a plan"  # Returns raw prompt
+                ```
+
+            Custom template:
+                ```python
+                def custom_template(prompt: str, context: ContextVariables) -> str:
+                    return f"{prompt} for {context.get('project_name')}"
+
+                planner = LiteAgentPlanner(
+                    swarm=swarm,
+                    prompt_template=custom_template
+                )
+                # Will format prompts with project name
+                ```
         """
         return lambda prompt, _: prompt
 
@@ -175,6 +213,33 @@ class LiteAgentPlanner(AgentPlanner):
 
         Returns:
             Plan schema with task types from registered task definitions.
+
+        Examples:
+            Default format:
+                ```python
+                # With review and test task types
+                planner = LiteAgentPlanner(
+                    swarm=swarm,
+                    task_definitions=[review_def, test_def]
+                )
+                format = planner._default_planning_response_format()
+                # Returns Plan schema that accepts:
+                # - ReviewTask
+                # - TestTask
+                ```
+
+            Custom format:
+                ```python
+                def parse_plan(content: str, context: ContextVariables) -> Plan:
+                    # Custom parsing logic
+                    return Plan(tasks=[...])
+
+                planner = LiteAgentPlanner(
+                    swarm=swarm,
+                    response_format=parse_plan
+                )
+                # Will use custom parser instead of schema
+                ```
         """
         task_definitions = self._task_registry.get_task_definitions()
         task_types = [td.task_schema for td in task_definitions]
@@ -454,34 +519,114 @@ class LiteAgentPlanner(AgentPlanner):
         context: ContextVariables | None = None,
         feedback: str | None = None,
     ) -> Result[Plan]:
-        """Create a plan using the configured agent.
+        """Create a plan from the given prompt and context.
 
         Args:
             prompt: Description of work to be done.
-            context: Optional context variables for planning.
+            context: Optional additional context variables.
             feedback: Optional feedback on previous attempts.
 
         Returns:
-            Result containing either:
-                - Valid Plan with tasks and dependencies.
-                - Error if plan creation or validation fails.
+            Result containing either a valid Plan or an error.
 
         Examples:
-            Create a plan:
+            Basic planning:
                 ```python
                 result = await planner.create_plan(
-                    prompt="Review and test PR #123",
-                    context=ContextVariables(
-                        pr_url="github.com/org/repo/123",
-                        focus_areas=["security", "performance"]
-                    )
+                    prompt="Review and test the authentication changes in PR #123"
                 )
-
                 if result.value:
                     plan = result.value
                     print(f"Created plan with {len(plan.tasks)} tasks")
                     for task in plan.tasks:
-                        print(f"- {task.title}")
+                        print(f"- {task.title} ({task.type})")
+                ```
+
+            With context:
+                ```python
+                result = await planner.create_plan(
+                    prompt="Review the security changes",
+                    context=ContextVariables(
+                        pr_url="github.com/org/repo/123",
+                        focus_areas=["authentication", "authorization"],
+                        security_checklist=["SQL injection", "XSS", "CSRF"]
+                    )
+                )
+                # Plan tasks will incorporate context information
+                ```
+
+            With feedback:
+                ```python
+                # First attempt
+                result = await planner.create_plan(
+                    prompt="Review the API changes"
+                )
+                if result.error:
+                    # Try again with feedback
+                    result = await planner.create_plan(
+                        prompt="Review the API changes",
+                        feedback="Please add performance testing tasks"
+                    )
+                ```
+
+            Complex workflow:
+                ```python
+                result = await planner.create_plan(
+                    prompt=\"\"\"
+                    Review and deploy the new payment integration:
+                    1. Review code changes
+                    2. Run security tests
+                    3. Test payment flows
+                    4. Deploy to staging
+                    5. Monitor for issues
+                    \"\"\",
+                    context=ContextVariables(
+                        pr_url="github.com/org/repo/456",
+                        deployment_env="staging",
+                        test_cases=["visa", "mastercard", "paypal"],
+                        monitoring_metrics=["latency", "error_rate"]
+                    )
+                )
+                if result.value:
+                    plan = result.value
+                    # Plan will have tasks for each step with proper dependencies
+                    # - Code review task
+                    # - Security testing task (depends on review)
+                    # - Payment testing tasks (depend on security)
+                    # - Deployment task (depends on tests)
+                    # - Monitoring task (depends on deployment)
+                ```
+
+            Error handling:
+                ```python
+                result = await planner.create_plan(
+                    prompt="Review the changes"
+                )
+                if result.error:
+                    if "Unknown task type" in str(result.error):
+                        print("Plan contains unsupported task types")
+                    elif "Cyclic dependencies" in str(result.error):
+                        print("Plan has invalid task dependencies")
+                    else:
+                        print(f"Planning failed: {result.error}")
+                else:
+                    plan = result.value
+                    # Use the plan
+                ```
+
+            Custom template:
+                ```python
+                # With custom prompt template
+                planner = LiteAgentPlanner(
+                    swarm=swarm,
+                    prompt_template=lambda p, c: f"{p} for {c.get('project')}",
+                    task_definitions=[review_def, test_def]
+                )
+                result = await planner.create_plan(
+                    prompt="Review the changes",
+                    context=ContextVariables(project="Payment API")
+                )
+                # Template will format prompt as "Review the changes for Payment API"
                 ```
         """
         context = ContextVariables(context or {})
