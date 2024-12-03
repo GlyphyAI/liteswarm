@@ -76,7 +76,7 @@ Examples:
         ```
 """
 
-TaskResponseFormat: TypeAlias = PydanticResponseFormat["Task"]
+TaskResponseFormat: TypeAlias = PydanticResponseFormat[BaseModel]
 """Format specification for task responses.
 
 Can be either a Pydantic model for direct validation or a function that parses
