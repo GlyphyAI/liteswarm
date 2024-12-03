@@ -4,11 +4,17 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from collections.abc import Callable
-from typing import Protocol, TypeAlias
+from typing import Protocol
+
+import json_repair
+from pydantic import ValidationError
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
+from liteswarm.experimental.swarm_team.response_repair import (
+    LiteResponseRepairAgent,
+    ResponseRepairAgent,
+)
 from liteswarm.types import Result
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
@@ -113,13 +119,14 @@ class LiteAgentPlanner(AgentPlanner):
             ```
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         swarm: Swarm,
         agent: Agent | None = None,
         prompt_template: PromptTemplate | None = None,
         task_definitions: list[TaskDefinition] | None = None,
         response_format: PlanResponseFormat | None = None,
+        response_repair_agent: ResponseRepairAgent | None = None,
     ) -> None:
         """Initialize a new planner instance.
 
@@ -129,12 +136,16 @@ class LiteAgentPlanner(AgentPlanner):
             prompt_template: Optional custom prompt template.
             task_definitions: Available task types.
             response_format: Optional plan response format.
+            response_repair_agent: Optional custom response repair agent.
         """
         # Public properties
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
         self.prompt_template = prompt_template or self._default_planning_prompt_template()
         self.response_format = response_format or self._default_planning_response_format()
+        self.response_repair_agent = response_repair_agent or LiteResponseRepairAgent(
+            swarm=self.swarm
+        )
 
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
@@ -169,55 +180,273 @@ class LiteAgentPlanner(AgentPlanner):
         task_types = [td.task_schema for td in task_definitions]
         return create_plan_with_tasks(task_types)
 
-    def _parse_response(
+    def _validate_plan(self, plan: Plan) -> Result[Plan]:
+        """Validate a plan against task registry and dependency rules.
+
+        Checks that all tasks are registered and that the dependency graph is
+        a valid DAG without cycles.
+
+        Args:
+            plan: Plan to validate.
+
+        Returns:
+            Result containing either:
+                - Valid Plan if all checks pass
+                - Error with validation failure details
+
+        Examples:
+            Valid plan:
+                ```python
+                plan = Plan(tasks=[
+                    Task(id="1", type="review", title="Review code"),
+                    Task(id="2", type="test", title="Run tests", dependencies=["1"])
+                ])
+                result = planner._validate_plan(plan)
+                assert result.value == plan  # Plan is valid
+                ```
+
+            Unknown task type:
+                ```python
+                plan = Plan(tasks=[
+                    Task(id="1", type="unknown", title="Invalid task")
+                ])
+                result = planner._validate_plan(plan)
+                assert result.error  # ValueError: Unknown task type
+                ```
+
+            Invalid dependencies:
+                ```python
+                plan = Plan(tasks=[
+                    Task(id="1", type="review", title="Task 1", dependencies=["2"]),
+                    Task(id="2", type="test", title="Task 2", dependencies=["1"])
+                ])
+                result = planner._validate_plan(plan)
+                assert result.error  # ValueError: Cyclic dependencies
+                ```
+        """
+        for task in plan.tasks:
+            if not self._task_registry.contains_task_type(task.type):
+                return Result(error=ValueError(f"Unknown task type: {task.type}"))
+
+        if errors := plan.validate_dependencies():
+            return Result(error=ValueError("\n".join(errors)))
+
+        return Result(value=plan)
+
+    async def _parse_response(
         self,
         response: str,
         response_format: PlanResponseFormat,
         context: ContextVariables,
     ) -> Plan:
-        """Parse agent response using schema.
+        """Parse agent response into a Plan object.
+
+        Handles both direct Plan schemas and callable parsers.
+        Uses json_repair to attempt basic JSON repair before validation.
 
         Args:
-            response: Raw content to parse.
+            response: Raw response string from agent.
             response_format: Schema or parser function.
             context: Context for parsing.
 
         Returns:
-            Parsed Plan model.
+            Parsed Plan object.
 
         Raises:
-            TypeError: If response doesn't match schema.
-            ValidationError: If response is invalid.
+            ValueError: If response format is invalid.
+            ValidationError: If response cannot be parsed into Plan.
 
         Examples:
-            Using model:
+            Parse with schema:
                 ```python
-                plan = self._parse_response(
-                    response='{"tasks": [{"task_type": "coding", "id": "1", "title": "Write a hello world program in Python"}]}',
+                response = '''
+                {
+                    "tasks": [
+                        {
+                            "id": "1",
+                            "type": "review",
+                            "title": "Review PR",
+                            "dependencies": []
+                        }
+                    ]
+                }
+                '''
+                plan = await planner._parse_response(
+                    response=response,
                     response_format=Plan,
-                    context=ContextVariables()
+                    context=context
                 )
+                # Returns Plan instance
                 ```
 
-            Using parser:
+            Parse with custom function:
                 ```python
-                def parse_plan_response(response: str, context: ContextVariables) -> Plan:
-                    return Plan.model_validate_json(response)
+                def parse_plan(content: str, context: ContextVariables) -> Plan:
+                    # Custom parsing logic
+                    data = json.loads(content)
+                    return Plan(tasks=[...])
 
-                plan = self._parse_response(
-                    response='{"tasks": [{"task_type": "coding", "id": "1", "title": "Write a hello world program in Python"}]}',
-                    response_format=parse_plan_response,
-                    context=ContextVariables()
+                plan = await planner._parse_response(
+                    response=response,
+                    response_format=parse_plan,
+                    context=context
                 )
+                # Returns Plan via custom parser
+                ```
+
+            With json_repair:
+                ```python
+                response = '''
+                {
+                    'tasks': [  # Single quotes
+                        {
+                            id: "1",  # Missing quotes
+                            type: "review",
+                            title: "Review PR",
+                            dependencies: []
+                        }
+                    ]
+                }
+                '''
+                plan = await planner._parse_response(
+                    response=response,
+                    response_format=Plan,
+                    context=context
+                )
+                # Still returns valid Plan
                 ```
         """
-        if is_subtype(response_format, Plan):
-            return response_format.model_validate_json(response)
-
         if is_callable(response_format):
             return response_format(response, context)
 
-        raise ValueError("Invalid response format")
+        if not is_subtype(response_format, Plan):
+            raise ValueError("Invalid response format")
+
+        decoded_object = json_repair.repair_json(response, return_objects=True)
+        if isinstance(decoded_object, tuple):
+            decoded_object = decoded_object[0]
+
+        return response_format.model_validate(decoded_object)
+
+    async def _process_planning_result(
+        self,
+        agent: Agent,
+        response: str,
+        context: ContextVariables,
+    ) -> Result[Plan]:
+        """Process and validate a planning response.
+
+        Attempts to parse and validate the response according to the response
+        format. If validation fails, tries to recover using the response repair
+        agent.
+
+        Args:
+            agent: Agent that produced the response.
+            response: Raw response string.
+            context: Context for parsing and repair.
+
+        Returns:
+            Result containing either:
+                - Valid Plan if parsing and validation succeed
+                - Error if response cannot be parsed or repaired
+
+        Examples:
+            Successful processing:
+                ```python
+                response = '''
+                {
+                    "tasks": [
+                        {
+                            "id": "1",
+                            "type": "review",
+                            "title": "Review PR",
+                            "dependencies": []
+                        }
+                    ]
+                }
+                '''
+                result = await planner._process_planning_result(
+                    agent=agent,
+                    response=response,
+                    context=context
+                )
+                # Returns Result with valid Plan
+                ```
+
+            With response repair:
+                ```python
+                response = '''
+                {
+                    tasks: [  # Invalid JSON
+                        {
+                            id: "1",
+                            type: "review",
+                            title: "Review PR"
+                        }
+                    ]
+                }
+                '''
+                result = await planner._process_planning_result(
+                    agent=agent,
+                    response=response,
+                    context=context
+                )
+                # Returns repaired and validated Plan
+                ```
+
+            Invalid task type:
+                ```python
+                response = '''
+                {
+                    "tasks": [
+                        {
+                            "id": "1",
+                            "type": "unknown",  # Unknown type
+                            "title": "Invalid task"
+                        }
+                    ]
+                }
+                '''
+                result = await planner._process_planning_result(
+                    agent=agent,
+                    response=response,
+                    context=context
+                )
+                assert result.error  # ValueError: Unknown task type
+                ```
+        """
+        response_format = self.response_format
+        if not response_format:
+            return Result(value=response)
+
+        try:
+            plan_response = await self._parse_response(
+                response=response,
+                response_format=response_format,
+                context=context,
+            )
+
+            return self._validate_plan(plan_response)
+
+        except ValidationError:
+            repair_result = await self.response_repair_agent.repair_response(
+                agent=agent,
+                original_content=response,
+                response_format=response_format,
+                context=context,
+            )
+
+            if not repair_result.value:
+                return Result(error=ValueError("No content in repair response"))
+
+            if repair_result.error:
+                return Result(error=repair_result.error)
+
+            return await self._process_planning_result(
+                agent=agent,
+                response=repair_result.value,
+                context=context,
+            )
 
     async def create_plan(
         self,
@@ -255,7 +484,7 @@ class LiteAgentPlanner(AgentPlanner):
                         print(f"- {task.title}")
                 ```
         """
-        context = ContextVariables(context or ContextVariables())
+        context = ContextVariables(context or {})
 
         if feedback:
             prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
@@ -272,17 +501,8 @@ class LiteAgentPlanner(AgentPlanner):
         if not result.content:
             return Result(error=ValueError("Failed to create plan"))
 
-        try:
-            plan = self._parse_response(result.content, self.response_format, context)
-
-            for task in plan.tasks:
-                if not self._task_registry.contains_task_type(task.type):
-                    return Result(error=ValueError(f"Unknown task type: {task.type}"))
-
-            if errors := plan.validate_dependencies():
-                return Result(error=ValueError("\n".join(errors)))
-
-            return Result(value=plan)
-
-        except Exception as e:
-            return Result(error=e)
+        return await self._process_planning_result(
+            agent=self.agent,
+            response=result.content,
+            context=context,
+        )
