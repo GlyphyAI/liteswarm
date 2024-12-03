@@ -4,311 +4,343 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-import json
-from typing import Protocol, get_type_hints
+from typing import Protocol
 
-from pydantic import BaseModel
+from pydantic import ValidationError
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types.result import Result
 from liteswarm.types.swarm import Agent, ContextVariables
-from liteswarm.types.swarm_team import (
-    PydanticResponseFormat,
-)
-from liteswarm.utils.typing import is_callable, is_subtype
-
-REPAIR_PROMPT_TEMPLATE = """
-Your previous response had invalid format. {urgency}fix the response to match this schema exactly:
-{schema}
-
-Your previous response was:
-{original_content}
-
-Provide a corrected JSON response that matches the schema exactly. Do not include any additional text or explanations.
-""".strip()
+from liteswarm.types.swarm_team import PydanticModel, PydanticResponseFormat
+from liteswarm.utils.logging import log_verbose
+from liteswarm.utils.typing import is_callable
 
 
 class ResponseRepairAgent(Protocol):
     """Protocol for agents that handle response validation and repair.
 
-    Provides an interface for agents that can attempt to fix invalid responses
-    from team members, ensuring they match the expected schema. This allows
-    for different repair strategies while maintaining a consistent interface.
+    This protocol defines the interface for agents that can repair invalid responses
+    by regenerating them with proper validation. It allows for different repair
+    strategies while maintaining a consistent interface.
     """
 
     async def repair_response(
         self,
         agent: Agent,
-        original_content: str,
-        response_format: PydanticResponseFormat | None,
+        response: str,
+        response_format: PydanticResponseFormat[PydanticModel] | None,
+        validation_error: ValidationError,
         context: ContextVariables,
-    ) -> Result[str]: ...
+    ) -> Result[PydanticModel]:
+        """Repair an invalid response to match the expected format.
+
+        The repair process should attempt to fix the invalid response while maintaining
+        its semantic meaning. The implementation can use various strategies such as
+        regeneration, modification, or transformation. The process should be guided
+        by the validation error to understand what needs to be fixed. The repaired
+        response must conform to the provided response format if one is specified.
+
+        Args:
+            agent: The agent that produced the invalid response. Can be used to
+                regenerate or modify the response.
+            response: The original invalid response content that needs repair.
+            response_format: Expected format for the response. Can be either a
+                Pydantic model class or a callable that returns one. If None,
+                no format validation is performed.
+            validation_error: The error from attempting to validate the original
+                response. Contains details about what made the response invalid.
+            context: Execution context containing variables that may be needed
+                for response generation or validation.
+
+        Returns:
+            Result containing either the repaired response that matches the format,
+            or an error if repair was not possible. The success case will contain
+            a properly validated instance of the response format model.
+
+        Example:
+            ```python
+            class ReviewOutput(BaseModel):
+                issues: list[str]
+                approved: bool
+
+            class SimpleRepairAgent(ResponseRepairAgent):
+                async def repair_response(
+                    self,
+                    agent: Agent,
+                    response: str,
+                    response_format: PydanticResponseFormat[ReviewOutput],
+                    validation_error: ValidationError,
+                    context: ContextVariables,
+                ) -> Result[ReviewOutput]:
+                    try:
+                        # Simple repair strategy: add quotes to values
+                        fixed = response.replace("true", '"true"')
+                        return Result(
+                            value=response_format.model_validate_json(fixed)
+                        )
+                    except Exception as e:
+                        return Result(error=e)
+            ```
+        """
+        ...
 
 
 class LiteResponseRepairAgent:
-    """Default implementation of ResponseRepairAgent.
+    """Agent that repairs invalid responses by regenerating them.
 
-    Provides basic response repair functionality by:
-    1. Extracting schema information from task definition
-    2. Prompting the original agent with schema and previous response
-    3. Retrying with increasing urgency up to max attempts
+    This agent attempts to fix invalid responses by removing the failed response,
+    retrieving the last user message, and asking the original agent to try again.
+    It will make multiple attempts to generate a valid response before giving up.
+
+    Example:
+        ```python
+        class ReviewOutput(BaseModel):
+            issues: list[str]
+            approved: bool
+
+        swarm = Swarm()
+        repair_agent = LiteResponseRepairAgent(swarm)
+
+        # Invalid response missing quotes
+        response = "{issues: [Missing tests], approved: false}"
+        result = await repair_agent.repair_response(
+            agent=review_agent,
+            response=response,
+            response_format=ReviewOutput,
+            validation_error=error,
+            context=context,
+        )
+        if result.success():
+            print(result.value.model_dump())  # Fixed response
+        ```
     """
 
     def __init__(
         self,
         swarm: Swarm,
-        max_attempts: int = 3,
+        max_attempts: int = 5,
     ) -> None:
         """Initialize the response repair agent.
 
         Args:
             swarm: Swarm instance for agent interactions.
-            max_attempts: Maximum number of repair attempts before giving up.
+            max_attempts: Maximum number of repair attempts before giving up (default: 5).
+
+        Example:
+            ```python
+            swarm = Swarm()
+            repair_agent = LiteResponseRepairAgent(
+                swarm=swarm,
+                max_attempts=5,
+            )
+            ```
         """
         self.swarm = swarm
         self.max_attempts = max_attempts
-        self._current_attempt = 0
 
-    def _get_json_schema(self, response_format: PydanticResponseFormat | None) -> dict:
-        """Extract and validate JSON schema from response format.
+    def _parse_response(
+        self,
+        response: str,
+        response_format: PydanticResponseFormat[PydanticModel] | None,
+        context: ContextVariables,
+    ) -> Result[PydanticModel]:
+        """Parse and validate a response string against the expected format.
 
-        Handles multiple response format types:
-        1. Direct BaseModel schemas - extracts schema directly
-        2. Callable formats returning BaseModel - extracts schema from return type
-        3. Other formats - raises ValueError
-
-        The schema is used to guide response repair by showing the agent
-        the exact structure required for a valid response.
+        Attempts to parse the response string using the provided format. If the
+        format is a callable, it's called with the response and context. If it's
+        a BaseModel, the response is validated against it.
 
         Args:
-            response_format: Response format specification, can be:
-                - A BaseModel class (for schema extraction)
-                - A callable returning BaseModel (for return type schema)
-                - None (raises error)
+            response: Response string to parse.
+            response_format: Expected response format.
+            context: Context variables for dynamic resolution.
 
         Returns:
-            JSON schema dictionary describing the expected response format.
+            Result containing either the parsed response or an error.
 
-        Raises:
-            ValueError: If response format is:
-                - Not provided (None)
-                - Not a BaseModel or callable
-                - A callable that doesn't return a BaseModel
-                - Missing required schema information
+        Example:
+            ```python
+            # With BaseModel format
+            format = ReviewOutput
+            result = agent._parse_response(
+                '{"issues": [], "approved": true}',
+                format,
+                context,
+            )
+            assert result.success()
+            assert isinstance(result.value, ReviewOutput)
 
-        Examples:
-            Direct schema:
-                ```python
-                class ReviewOutput(BaseModel):
-                    issues: list[str]
-                    approved: bool
+            # With callable format
+            def parse(content: str, ctx: dict) -> ReviewOutput:
+                data = json.loads(content)
+                return ReviewOutput(
+                    issues=data["issues"],
+                    approved=data["approved"],
+                )
 
-                schema = agent._get_json_schema(ReviewOutput)
-                # Returns ReviewOutput's JSON schema
-                ```
-
-            Callable format:
-                ```python
-                def parse_review(content: str, context: dict) -> ReviewOutput:
-                    # Parse content into ReviewOutput
-                    pass
-
-                schema = agent._get_json_schema(parse_review)
-                # Returns ReviewOutput's JSON schema from return type
-                ```
+            result = agent._parse_response(
+                '{"issues": [], "approved": true}',
+                parse,
+                context,
+            )
+            assert result.success()
+            assert isinstance(result.value, ReviewOutput)
+            ```
         """
         if not response_format:
-            raise ValueError("Response format is not defined")
+            return Result(value=response)
 
-        if is_subtype(response_format, BaseModel):
-            return response_format.model_json_schema()
+        try:
+            if is_callable(response_format):
+                return Result(value=response_format(response, context))
+            return Result(value=response_format.model_validate_json(response))
+        except Exception as e:
+            log_verbose(f"Error parsing response: {e}", level="ERROR")
+            return Result(error=e)
 
-        if is_callable(response_format):
-            type_hints = get_type_hints(response_format)
-            return_type = type_hints.get("return")
-            if not is_subtype(return_type, BaseModel):
-                raise ValueError("Response format must return a BaseModel explicitly")
-
-            return return_type.model_json_schema()
-
-        raise ValueError("Response format must be BaseModel or callable returning BaseModel")
-
-    def _build_repair_prompt(
+    async def _regenerate_last_user_message(
         self,
-        schema_example: dict,
-        original_content: str,
-        attempt: int,
-    ) -> str:
-        """Build prompt for response repair attempt.
+        agent: Agent,
+        context: ContextVariables,
+    ) -> Result[str]:
+        """Regenerate a response for the last user message in history.
 
-        Creates increasingly urgent prompts for each retry attempt to
-        encourage the agent to fix the response format.
+        Removes the failed response, gets the last user message, and tries again.
+        If anything goes wrong, we put the original messages back to keep history intact.
 
         Args:
-            schema_example: JSON schema for expected format.
-            original_content: Previous invalid response.
-            attempt: Current attempt number (1-based).
+            agent: The agent to use for regeneration.
+            context: Execution context.
 
         Returns:
-            Formatted prompt string.
+            Result containing either the new response content or an error.
 
-        Examples:
-            First attempt:
-                ```python
-                schema = {
-                    "type": "object",
-                    "properties": {
-                        "issues": {"type": "array", "items": {"type": "string"}},
-                        "approved": {"type": "boolean"}
-                    }
-                }
-                content = '{"issues": "Missing tests", approved: false}'  # Invalid
-                prompt = agent._build_repair_prompt(schema, content, attempt=1)
-                # Returns prompt with "Please try again and fix..."
-                ```
+        Example:
+            ```python
+            # Initial conversation
+            swarm.append_message(Message(role="user", content="Review this code"))
+            swarm.append_message(Message(role="assistant", content="Invalid JSON"))
 
-            Second attempt:
-                ```python
-                prompt = agent._build_repair_prompt(schema, content, attempt=2)
-                # Returns prompt with "This is urgent. You must fix..."
-                ```
-
-            With complex schema:
-                ```python
-                schema = ReviewOutput.model_json_schema()  # Complex nested schema
-                content = '{"issues": null, "approved": "yes"}'  # Wrong types
-                prompt = agent._build_repair_prompt(schema, content, attempt=1)
-                # Returns detailed prompt with full schema
-                ```
+            # Regenerate response
+            result = await agent._regenerate_last_user_message(
+                review_agent,
+                context,
+            )
+            if result.success():
+                print(result.value)  # New valid response
+            else:
+                print(f"Failed: {result.error}")
+            ```
         """
-        urgency = "Please try again and " if attempt == 1 else "This is urgent. You must "
+        last_assistant_message = self.swarm.pop_last_message()
+        if not last_assistant_message:
+            return Result(error=ValueError("No message to regenerate"))
 
-        return REPAIR_PROMPT_TEMPLATE.format(
-            urgency=urgency,
-            schema=json.dumps(schema_example),
-            original_content=original_content,
-        )
+        last_user_message = self.swarm.pop_last_message()
+        if not last_user_message or last_user_message.role != "user":
+            self.swarm.append_message(last_assistant_message)
+            return Result(error=ValueError("No user message found to regenerate"))
+
+        try:
+            result = await self.swarm.execute(
+                agent=agent,
+                prompt=last_user_message.content or "",
+                context_variables=context,
+            )
+            return Result(value=result.content)
+        except Exception as e:
+            self.swarm.append_message(last_user_message)
+            self.swarm.append_message(last_assistant_message)
+            return Result(error=e)
 
     async def repair_response(
         self,
         agent: Agent,
-        original_content: str,
-        response_format: PydanticResponseFormat | None,
+        response: str,
+        response_format: PydanticResponseFormat[PydanticModel] | None,
+        validation_error: ValidationError,
         context: ContextVariables,
-    ) -> Result[str]:
-        """Attempt to repair an invalid response.
+    ) -> Result[PydanticModel]:
+        """Attempt to repair an invalid response by regenerating it.
 
-        Makes up to max_attempts tries to get a valid response from the agent,
-        with increasingly urgent prompting on each retry.
+        If a response is invalid, we remove it and ask the agent to try again
+        with the same user message. This repeats until we get a valid response
+        or run out of attempts.
 
         Args:
             agent: The agent that produced the response.
-            original_content: The failed response content.
+            response: The failed response content.
             response_format: Expected response schema.
+            validation_error: Validation error from the original response.
             context: Execution context.
 
         Returns:
-            Result containing either:
-                - Repaired response string that matches schema
-                - Error if repair failed after max attempts
+            Result containing either a repaired response or an error.
 
-        Examples:
-            Simple repair:
-                ```python
-                class ReviewOutput(BaseModel):
-                    issues: list[str]
-                    approved: bool
+        Example:
+            ```python
+            class ReviewOutput(BaseModel):
+                issues: list[str]
+                approved: bool
 
-                # Invalid JSON with missing quotes
-                content = '''
-                {
-                    issues: ["Missing tests"],
-                    approved: false
-                }
-                '''
-
-                result = await agent.repair_response(
+            # Invalid response
+            response = "{issues: [], approved: invalid}"
+            try:
+                ReviewOutput.model_validate_json(response)
+            except ValidationError as e:
+                result = await repair_agent.repair_response(
                     agent=review_agent,
-                    original_content=content,
+                    response=response,
                     response_format=ReviewOutput,
-                    context=context
+                    validation_error=e,
+                    context=context,
                 )
-                # Returns Result with valid JSON string
-                ```
-
-            Multiple attempts:
-                ```python
-                # Very invalid JSON
-                content = "Found issues: missing tests, approved: no"
-
-                result = await agent.repair_response(
-                    agent=review_agent,
-                    original_content=content,
-                    response_format=ReviewOutput,
-                    context=context
-                )
-                # May take multiple attempts to fix
-                # Returns Result with valid JSON or error after max attempts
-                ```
-
-            With custom format:
-                ```python
-                def parse_review(content: str, context: dict) -> ReviewOutput:
-                    # Custom parsing logic
-                    return ReviewOutput.model_validate_json(content)
-
-                result = await agent.repair_response(
-                    agent=review_agent,
-                    original_content=content,
-                    response_format=parse_review,  # Callable format
-                    context=context
-                )
-                # Uses return type schema for repair
-                ```
-
-            Error handling:
-                ```python
-                # After max attempts
-                result = await agent.repair_response(...)
-                if result.error:
-                    print(f"Failed to repair: {result.error}")
-                    # Handle invalid response
+                if result.success():
+                    output = result.value
+                    assert isinstance(output, ReviewOutput)
+                    print(f"Fixed: {output.model_dump()}")
                 else:
-                    output = ReviewOutput.model_validate_json(result.value)
-                    # Use repaired output
-                ```
+                    print(f"Failed to repair: {result.error}")
+            ```
         """
-        self._current_attempt += 1
-        if self._current_attempt > self.max_attempts:
-            self._current_attempt = 0
-            return Result(
-                error=ValueError(f"Failed to get valid response after {self.max_attempts} attempts")
-            )
-
         try:
-            schema_example = self._get_json_schema(response_format)
-            repair_prompt = self._build_repair_prompt(
-                schema_example=schema_example,
-                original_content=original_content,
-                attempt=self._current_attempt,
-            )
+            for attempt in range(1, self.max_attempts + 1):
+                log_verbose(f"Repair attempt {attempt}/{self.max_attempts}")
 
-            result = await self.swarm.execute(
-                agent=agent,
-                prompt=repair_prompt,
-                context_variables=context,
-            )
+                regeneration_result = await self._regenerate_last_user_message(
+                    agent=agent,
+                    context=context,
+                )
 
-            repair_result: Result[str]
-            if not result.content:
-                repair_result = Result(error=ValueError("No content in repair response"))
-            else:
-                repair_result = Result(value=result.content)
+                if regeneration_result.failure():
+                    log_verbose(f"Regeneration failed: {regeneration_result.error}", level="ERROR")
+                    continue
 
-            return repair_result
+                regenerated_response = regeneration_result.value
+                if not regenerated_response:
+                    continue
+
+                if response_format:
+                    log_verbose(f"Parsing response: {regenerated_response}")
+                    parsed_response = self._parse_response(
+                        response=regenerated_response,
+                        response_format=response_format,
+                        context=context,
+                    )
+
+                    if parsed_response.failure():
+                        log_verbose(f"Parsing failed: {parsed_response.error}", level="ERROR")
+                        continue
+
+                    log_verbose(f"Parsed response: {parsed_response.model_dump_json()}")
+                    return parsed_response
+                else:
+                    return Result(value=regenerated_response)
 
         except Exception as e:
+            log_verbose(f"Repair failed with error: {e}", level="ERROR")
             return Result(error=e)
 
-        finally:
-            self._current_attempt = 0
+        return Result(
+            error=ValueError(f"Failed to get valid response after {self.max_attempts} attempts")
+        )
