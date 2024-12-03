@@ -1053,6 +1053,87 @@ class Swarm:
     # MARK: Public Interface
     # ================================================
 
+    def get_history(self) -> list[Message]:
+        """Get the complete conversation history.
+
+        Returns a copy of the full conversation history, including all messages
+        from all agents and tools. This history represents the complete state
+        of the conversation from start to finish.
+
+        Returns:
+            List of all messages in chronological order.
+
+        Notes:
+            - Returns a deep copy to prevent external modifications
+            - Includes system messages, user inputs, and agent responses
+            - Contains tool calls and their results
+            - Preserves message order and relationships
+        """
+        return copy.deepcopy(self._full_history)
+
+    def set_history(self, messages: list[Message]) -> None:
+        """Set the conversation history.
+
+        Replaces the current conversation history with the provided messages.
+        This method is useful for restoring a previous conversation state or
+        initializing a new conversation with existing context.
+
+        Args:
+            messages: List of messages to set as the conversation history.
+
+        Notes:
+            - Replaces both full and working history
+            - Creates a deep copy of provided messages
+            - Clears any existing history
+            - Should be called before starting a new conversation
+        """
+        self._full_history = copy.deepcopy(messages)
+        self._working_history = copy.deepcopy(messages)
+
+    def pop_last_message(self) -> Message | None:
+        """Remove and return the last message from the history.
+
+        Removes the most recent message from both the full and working history.
+        This is useful for undoing the last interaction or removing unwanted
+        messages.
+
+        Returns:
+            The last message if history is not empty, None otherwise.
+
+        Notes:
+            - Modifies both full and working history
+            - Returns None if history is empty
+            - Does not affect agent messages or state
+        """
+        if not self._full_history:
+            return None
+
+        last_message = self._full_history.pop()
+        if self._working_history and self._working_history[-1] == last_message:
+            self._working_history.pop()
+
+        return last_message
+
+    def append_message(self, message: Message) -> None:
+        """Append a new message to the conversation history.
+
+        Adds a new message to both the full and working history. This method
+        is useful for manually adding messages to the conversation, such as
+        system announcements or external events.
+
+        Args:
+            message: Message to append to the history.
+
+        Notes:
+            - Adds to both full and working history
+            - Creates a deep copy of the message
+            - Does not trigger history management
+            - Does not affect agent state
+        """
+        message_copy = copy.deepcopy(message)
+        self._full_history.append(message_copy)
+        self._working_history.append(message_copy)
+
     async def stream(
         self,
         agent: Agent,
