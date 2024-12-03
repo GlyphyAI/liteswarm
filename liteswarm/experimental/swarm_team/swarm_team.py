@@ -321,7 +321,7 @@ class SwarmTeam:
         task: Task,
         assignee: TeamMember,
         task_definition: TaskDefinition,
-        content: str,
+        task_response: str,
         task_context: ContextVariables,
     ) -> Result[ExecutionResult]:
         """Process agent response into execution result.
@@ -334,7 +334,7 @@ class SwarmTeam:
             task: Executed task.
             assignee: Team member who executed.
             task_definition: Task type definition.
-            content: Raw agent response.
+            task_response: Raw agent response.
             task_context: Execution context.
 
         Returns:
@@ -415,7 +415,7 @@ class SwarmTeam:
         if not response_format:
             execution_result = ExecutionResult(
                 task=task,
-                content=content,
+                content=task_response,
                 assignee=assignee,
                 timestamp=datetime.now(),
             )
@@ -424,41 +424,43 @@ class SwarmTeam:
 
         try:
             output = self._parse_response(
-                content=content,
+                content=task_response,
                 response_format=response_format,
                 task_context=task_context,
             )
 
             execution_result = ExecutionResult(
                 task=task,
-                content=content,
+                content=task_response,
                 output=output,
                 assignee=assignee,
             )
 
             return Result(value=execution_result)
 
-        except ValidationError:
+        except ValidationError as validation_error:
             repair_result = await self.response_repair_agent.repair_response(
                 agent=assignee.agent,
-                original_content=content,
+                response=task_response,
                 response_format=task_definition.task_response_format,
+                validation_error=validation_error,
                 context=task_context,
             )
-
-            if not repair_result.value:
-                return Result(error=ValueError("No content in repair response"))
 
             if repair_result.error:
                 return Result(error=repair_result.error)
 
-            return await self._process_execution_result(
+            if not repair_result.value:
+                return Result(error=ValueError("No content in repair response"))
+
+            execution_result = ExecutionResult(
                 task=task,
+                content=task_response,
+                output=repair_result.value,
                 assignee=assignee,
-                task_definition=task_definition,
-                content=repair_result.value,
-                task_context=task_context,
             )
+
+            return Result(value=execution_result)
 
         except Exception as e:
             return Result(error=ValueError(f"Invalid task output: {e}"))
@@ -700,7 +702,7 @@ class SwarmTeam:
             task=task,
             assignee=assignee,
             task_definition=task_definition,
-            content=result.content,
+            task_response=result.content,
             task_context=task_context,
         )
 
