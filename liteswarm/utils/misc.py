@@ -213,3 +213,48 @@ def dedent_prompt(prompt: str) -> str:
             ```
     """
     return dedent(prompt).strip()
+
+
+def find_tag_content(text: str, tag: str) -> str | None:
+    """Find and extract content from XML-style tagged sections in text.
+
+    Searches for content enclosed between opening and closing tags of the specified name
+    using regex pattern matching. The search is case-sensitive and supports multiline content.
+
+    Args:
+        text: The source text containing tagged sections to search through.
+        tag: The name of the tag to find (without angle brackets).
+
+    Returns:
+        The content between the opening and closing tags if found,
+        or `None` if no matching tags are found in the text.
+
+    Examples:
+        Basic usage:
+            ```python
+            text = "<data>Important content</data>"
+            content = find_tag_content(text, "data")
+            print(content)  # Output: "Important content"
+
+            # No matching tags
+            result = find_tag_content(text, "missing")
+            print(result)  # Output: None
+            ```
+
+        Multiline content:
+            ```python
+            text = \"\"\"
+            <config>
+                setting1: value1
+                setting2: value2
+            </config>
+            \"\"\"
+            content = find_tag_content(text, "config")
+            print(content)
+            # setting1: value1
+            # setting2: value2
+            ```
+    """
+    pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL)
+    match = pattern.search(text)
+    return match.group(1) if match else None
