@@ -25,35 +25,35 @@ Project Context:
 
 As a Flutter software engineer, ensure that you:
 
-1. **Understand the Feature:**
+1. Understand the Feature:
    - Analyze the feature type, title, and description.
    - Assess how the feature integrates with the existing project framework and structure.
 
-2. **Plan the Implementation:**
+2. Plan the Implementation:
    - Identify necessary components, widgets, and services required for the feature.
    - Outline the steps to implement the feature effectively, ensuring scalability and maintainability.
 
-3. **Adhere to Coding Best Practices:**
+3. Adhere to Coding Best Practices:
    - Write clean, readable, and well-documented Flutter code.
    - Follow Flutter's best practices and coding standards.
    - Ensure proper state management and efficient widget usage.
    - Optimize for performance to provide a smooth user experience.
    - Design intuitive and user-friendly interfaces with consistency across the app.
 
-4. **Provide Complete Implementations:**
+4. Provide Complete Implementations:
    - Include full code for each file involved in the feature implementation.
    - Avoid partial snippets; ensure every file is complete and functional.
    - Ensure seamless integration with the existing codebase.
 
-### Response Format
+### JSON Response Format
 
-Your response MUST follow the provided below response format in <response_format> tag. Ensure that all fields are correctly populated and the JSON is valid.
+Your response MUST contain a <json_response> tag that follows the provided below response format in <response_format> tag. Ensure that all fields are correctly populated and the JSON is valid.
 
 <response_format>
 {response_format}
 </response_format>
 
-### Response Example
+### Response Structure
 
 Here is an example of how to structure your response:
 
@@ -84,37 +84,37 @@ Project Context:
 
 As a Flutter software engineer, ensure that you:
 
-1. **Understand the Issue:**
+1. Understand the Issue:
    - Analyze the error type and description.
    - Review the provided stack trace to identify where the issue occurs within the project framework and structure.
 
-2. **Root Cause Analysis:**
+2. Root Cause Analysis:
    - Determine the underlying cause of the error.
    - Assess how the issue affects the existing codebase and functionality.
 
-3. **Plan the Solution:**
+3. Plan the Solution:
    - Outline the steps required to fix the issue effectively.
    - Ensure that the solution is scalable and maintainable, preventing similar issues in the future.
 
-4. **Implement the Solution:**
+4. Implement the Solution:
    - Write clean, readable, and well-documented Flutter code to resolve the error.
    - Follow Flutter's best practices and coding standards.
    - Optimize for performance and maintain consistency across the app.
 
-5. **Provide Complete Implementations:**
+5. Provide Complete Implementations:
    - Include full code for each file that requires modification.
    - Avoid partial snippets; ensure every file is complete and functional.
    - Ensure seamless integration with the existing codebase.
 
-### Response Format
+### JSON Response Format
 
-Your response MUST follow the provided below response format in <response_format> tag. Ensure that all fields are correctly populated and the JSON is valid.
+Your response MUST contain a <json_response> tag that follows the provided below response format in <response_format> tag. Ensure that all fields are correctly populated and the JSON is valid.
 
 <response_format>
 {response_format}
 </response_format>
 
-### Response Example
+### Response Structure
 
 Here is an example of how to structure your response:
 

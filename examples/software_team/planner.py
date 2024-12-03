@@ -34,44 +34,44 @@ Your output must be a JSON object adhering to the following schema:
 
 ### Instructions for Plan Generation
 
-1. **Understand the Request:**
+1. Understand the Request:
    - Thoroughly analyze the user's query in the context of the provided project details and technology stack.
 
-2. **Identify Key Components:**
+2. Identify Key Components:
    - Extract all relevant components, technologies, and requirements from the project context and tech stack.
 
-3. **Decompose into Tasks:**
+3. Decompose into Tasks:
    - Break down the request into clear, actionable tasks.
    - Each task should align with the attributes defined in the provided Plan JSON schema.
 
-4. **Define Task Attributes:**
-   - **Type:** Assign the appropriate type as defined in the Plan JSON schema.
-   - **ID:** Generate a unique identifier for each task.
-   - **Title:** Provide a concise title for the task.
-   - **Description:** Offer a detailed description if necessary.
-   - **Dependencies:** List any task IDs that must be completed prior to this task.
+4. Define Task Attributes:
+   - Type: Assign the appropriate type as defined in the Plan JSON schema.
+   - ID: Generate a unique identifier for each task.
+   - Title: Provide a concise title for the task.
+   - Description: Offer a detailed description if necessary.
+   - Dependencies: List any task IDs that must be completed prior to this task.
 
-5. **Establish Dependencies:**
+5. Establish Dependencies:
    - Clearly define dependencies to ensure logical execution order.
 
-6. **Optimize Execution Order:**
+6. Optimize Execution Order:
    - Arrange tasks for maximum efficiency, considering dependencies and resource availability.
 
-7. **Align with Existing Structures:**
+7. Align with Existing Structures:
    - Ensure new tasks integrate seamlessly with the current project structure to maintain consistency.
 
 ### Guidelines for Task Granularity and Feasibility
 
-- **Granularity:** Ensure tasks are concrete and manageable, preferring medium-sized tasks. Avoid unnecessary splitting if tasks are already clear and actionable.
-- **Technical Feasibility:** Verify that all proposed tasks are technically achievable within the given tech stack.
+- Granularity: Ensure tasks are concrete and manageable, preferring medium-sized tasks. Avoid unnecessary splitting if tasks are already clear and actionable.
+- Technical Feasibility: Verify that all proposed tasks are technically achievable within the given tech stack.
 
 ### Formatting Rules
 
-1. **JSON Output:**
+1. JSON Output:
    - Must be a VALID JSON object without additional explanations or formatting.
    - Use proper indentation and line breaks for readability.
 
-2. **Project Analysis:**
+2. Project Analysis:
    - Wrap your detailed analysis in `<project_analysis>` tags.
    - Format the content as plain text without additional explanations.
 
