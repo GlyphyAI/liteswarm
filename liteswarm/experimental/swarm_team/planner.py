@@ -143,12 +143,45 @@ class LiteAgentPlanner(AgentPlanner):
         self.agent = agent or self._default_planning_agent()
         self.prompt_template = prompt_template or self._default_planning_prompt_template()
         self.response_format = response_format or self._default_planning_response_format()
-        self.response_repair_agent = response_repair_agent or LiteResponseRepairAgent(
-            swarm=self.swarm
-        )
+        self.response_repair_agent = response_repair_agent or self._default_response_repair_agent()
 
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
+
+    def _default_response_repair_agent(self) -> ResponseRepairAgent:
+        """Create the default response repair agent for handling invalid planning responses.
+
+        Creates and configures a LiteResponseRepairAgent instance using the current swarm.
+        The repair agent helps recover from validation errors in planning responses by
+        attempting to fix common issues like JSON formatting and schema violations.
+
+        Returns:
+            ResponseRepairAgent: A configured repair agent instance using LiteResponseRepairAgent
+                implementation with the current swarm.
+
+        Examples:
+            Basic usage:
+                ```python
+                planner = LiteAgentPlanner(swarm=swarm)
+                repair_agent = planner._default_response_repair_agent()
+                assert isinstance(repair_agent, LiteResponseRepairAgent)
+                ```
+
+            Custom repair agent:
+                ```python
+                class CustomRepairAgent(ResponseRepairAgent):
+                    async def repair_response(self, ...) -> Result[Plan]:
+                        # Custom repair logic
+                        pass
+
+                planner = LiteAgentPlanner(
+                    swarm=swarm,
+                    response_repair_agent=CustomRepairAgent()
+                )
+                # Will use custom agent instead of default
+                ```
+        """
+        return LiteResponseRepairAgent(swarm=self.swarm)
 
     def _default_planning_agent(self) -> Agent:
         """Create the default planning agent.
