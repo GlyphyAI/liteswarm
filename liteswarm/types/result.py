@@ -167,3 +167,74 @@ class Result(BaseModel, Generic[ResultValue]):
             return self.unwrap()
         except ValueError:
             return default
+
+    def success(self) -> bool:
+        """Check if the result represents a successful operation.
+
+        A result is considered successful if it contains a value and no error.
+        This is useful for conditional logic and error handling flows.
+
+        Returns:
+            bool: True if the result has a value and no error, False otherwise.
+
+        Examples:
+            Success cases:
+                ```python
+                # With value, no error
+                result = Result(value=42)
+                assert result.success() == True
+
+                # With value and context (still success)
+                result = Result(
+                    value="data",
+                    context_variables=ContextVariables(domain="test")
+                )
+                assert result.success() == True
+                ```
+
+            Failure cases:
+                ```python
+                # No value
+                result = Result[str]()
+                assert result.success() == False
+
+                # Has error
+                result = Result(error=ValueError("Failed"))
+                assert result.success() == False
+                ```
+        """
+        return self.error is None and self.value is not None
+
+    def failure(self) -> bool:
+        """Check if the result represents a failed operation.
+
+        A result is considered a failure if it either contains an error
+        or lacks a value. This is the logical opposite of success().
+
+        Returns:
+            bool: True if the result has an error or no value, False otherwise.
+
+        Examples:
+            Failure cases:
+                ```python
+                # With error
+                result = Result(error=ValueError("Invalid input"))
+                assert result.failure() == True
+
+                # No value or error
+                result = Result[int]()
+                assert result.failure() == True
+                ```
+
+            Success case:
+                ```python
+                # With value, no error
+                result = Result(value="success")
+                assert result.failure() == False
+                ```
+
+        Notes:
+            - A result with neither error nor value is considered a failure.
+            - This method is equivalent to `not result.success()`.
+        """
+        return self.error is not None or self.value is None
