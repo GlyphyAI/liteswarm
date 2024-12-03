@@ -485,33 +485,33 @@ class LiteAgentPlanner(AgentPlanner):
             return Result(value=response)
 
         try:
-            plan_response = await self._parse_response(
+            plan = await self._parse_response(
                 response=response,
                 response_format=response_format,
                 context=context,
             )
 
-            return self._validate_plan(plan_response)
+            return self._validate_plan(plan)
 
-        except ValidationError:
+        except ValidationError as validation_error:
             repair_result = await self.response_repair_agent.repair_response(
                 agent=agent,
-                original_content=response,
+                response=response,
                 response_format=response_format,
+                validation_error=validation_error,
                 context=context,
             )
+
+            if repair_result.error:
+                return repair_result
 
             if not repair_result.value:
                 return Result(error=ValueError("No content in repair response"))
 
-            if repair_result.error:
-                return Result(error=repair_result.error)
+            return self._validate_plan(repair_result.value)
 
-            return await self._process_planning_result(
-                agent=agent,
-                response=repair_result.value,
-                context=context,
-            )
+        except Exception as e:
+            return Result(error=e)
 
     async def create_plan(
         self,
