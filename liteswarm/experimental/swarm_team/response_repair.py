@@ -151,6 +151,35 @@ class LiteResponseRepairAgent:
 
         Returns:
             Formatted prompt string.
+
+        Examples:
+            First attempt:
+                ```python
+                schema = {
+                    "type": "object",
+                    "properties": {
+                        "issues": {"type": "array", "items": {"type": "string"}},
+                        "approved": {"type": "boolean"}
+                    }
+                }
+                content = '{"issues": "Missing tests", approved: false}'  # Invalid
+                prompt = agent._build_repair_prompt(schema, content, attempt=1)
+                # Returns prompt with "Please try again and fix..."
+                ```
+
+            Second attempt:
+                ```python
+                prompt = agent._build_repair_prompt(schema, content, attempt=2)
+                # Returns prompt with "This is urgent. You must fix..."
+                ```
+
+            With complex schema:
+                ```python
+                schema = ReviewOutput.model_json_schema()  # Complex nested schema
+                content = '{"issues": null, "approved": "yes"}'  # Wrong types
+                prompt = agent._build_repair_prompt(schema, content, attempt=1)
+                # Returns detailed prompt with full schema
+                ```
         """
         urgency = "Please try again and " if attempt == 1 else "This is urgent. You must "
 
@@ -182,6 +211,72 @@ class LiteResponseRepairAgent:
             Result containing either:
                 - Repaired response string that matches schema
                 - Error if repair failed after max attempts
+
+        Examples:
+            Simple repair:
+                ```python
+                class ReviewOutput(BaseModel):
+                    issues: list[str]
+                    approved: bool
+
+                # Invalid JSON with missing quotes
+                content = '''
+                {
+                    issues: ["Missing tests"],
+                    approved: false
+                }
+                '''
+
+                result = await agent.repair_response(
+                    agent=review_agent,
+                    original_content=content,
+                    response_format=ReviewOutput,
+                    context=context
+                )
+                # Returns Result with valid JSON string
+                ```
+
+            Multiple attempts:
+                ```python
+                # Very invalid JSON
+                content = "Found issues: missing tests, approved: no"
+
+                result = await agent.repair_response(
+                    agent=review_agent,
+                    original_content=content,
+                    response_format=ReviewOutput,
+                    context=context
+                )
+                # May take multiple attempts to fix
+                # Returns Result with valid JSON or error after max attempts
+                ```
+
+            With custom format:
+                ```python
+                def parse_review(content: str, context: dict) -> ReviewOutput:
+                    # Custom parsing logic
+                    return ReviewOutput.model_validate_json(content)
+
+                result = await agent.repair_response(
+                    agent=review_agent,
+                    original_content=content,
+                    response_format=parse_review,  # Callable format
+                    context=context
+                )
+                # Uses return type schema for repair
+                ```
+
+            Error handling:
+                ```python
+                # After max attempts
+                result = await agent.repair_response(...)
+                if result.error:
+                    print(f"Failed to repair: {result.error}")
+                    # Handle invalid response
+                else:
+                    output = ReviewOutput.model_validate_json(result.value)
+                    # Use repaired output
+                ```
         """
         self._current_attempt += 1
         if self._current_attempt > self.max_attempts:
