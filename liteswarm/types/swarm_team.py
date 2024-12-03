@@ -48,8 +48,7 @@ Examples:
 """
 
 PydanticResponseFormat: TypeAlias = (
-    type[PydanticModel]  # Pydantic model class
-    | Callable[[str, ContextVariables], PydanticModel]  # Callable parser
+    type[PydanticModel] | Callable[[str, ContextVariables], PydanticModel]
 )
 """Generic format specification for Pydantic model responses.
 
