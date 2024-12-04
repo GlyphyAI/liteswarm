@@ -49,23 +49,6 @@ Examples:
 """
 
 
-class AgentState(str, Enum):
-    """State of an agent in the conversation lifecycle.
-
-    Tracks whether an agent is ready for tasks, actively processing,
-    or needs replacement.
-    """
-
-    IDLE = "idle"
-    """Agent is ready to handle new tasks."""
-
-    ACTIVE = "active"
-    """Agent is currently processing a task."""
-
-    STALE = "stale"
-    """Agent needs to be replaced or refreshed."""
-
-
 class Message(BaseModel):
     """Message in a conversation between users, assistants, and tools.
 
@@ -281,6 +264,23 @@ class ResponseCost(BaseModel):
 
     completion_tokens_cost: float
     """Cost of tokens in the completion."""
+
+
+class AgentState(str, Enum):
+    """State of an agent in the conversation lifecycle.
+
+    Tracks whether an agent is ready for tasks, actively processing,
+    or needs replacement.
+    """
+
+    IDLE = "idle"
+    """Agent is ready to handle new tasks."""
+
+    ACTIVE = "active"
+    """Agent is currently processing a task."""
+
+    STALE = "stale"
+    """Agent needs to be replaced or refreshed."""
 
 
 class Agent(BaseModel):
