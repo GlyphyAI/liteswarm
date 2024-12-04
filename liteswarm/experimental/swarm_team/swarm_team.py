@@ -21,6 +21,8 @@ from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHand
 from liteswarm.types.result import Result
 from liteswarm.types.swarm import ContextVariables
 from liteswarm.types.swarm_team import (
+    Artifact,
+    ArtifactStatus,
     Plan,
     PlanStatus,
     Task,
@@ -111,7 +113,7 @@ class SwarmTeam:
 
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
-        self._execution_history: list[TaskResult] = []
+        self._artifacts: list[Artifact] = []
         self._team_capabilities = self._get_team_capabilities()
         self._context: ContextVariables = ContextVariables(
             team_capabilities=self._team_capabilities,
@@ -170,13 +172,13 @@ class SwarmTeam:
                 ```python
                 context = team._build_task_context(task)
                 task_data = context.get("task")  # Get task details
-                history = context.get("execution_history")  # Get previous results
+                artifacts = context.get("artifacts")  # Get previous results
                 capabilities = context.get("team_capabilities")  # Get team info
                 ```
         """
         context = ContextVariables(
             task=task.model_dump(),
-            execution_history=self._execution_history,
+            artifacts=self._artifacts,
             **self._context,
         )
 
@@ -565,20 +567,21 @@ class SwarmTeam:
 
         return result
 
-    async def execute_plan(self, plan: Plan) -> Result[list[TaskResult]]:
+    async def execute_plan(self, plan: Plan) -> Result[Artifact]:
         """Execute a plan by running all its tasks in dependency order.
 
         Manages the complete execution lifecycle:
             1. Executes tasks when their dependencies are met.
             2. Tracks execution results and updates plan status.
             3. Handles failures and notifies via stream handler.
+            4. Creates and returns an execution artifact.
 
         Args:
             plan: Plan with tasks to execute.
 
         Returns:
             Result containing either:
-                - List of all executed task results.
+                - Execution artifact with plan results and task outputs.
                 - Error if any task fails or dependencies are invalid.
 
         Examples:
@@ -591,38 +594,52 @@ class SwarmTeam:
 
                 result = await team.execute_plan(plan_result.value)
                 if result.value:
-                    for task_result in result.value:
-                        print(f"Task: {task_result.task.title}")
-                        print(f"Status: {task_result.task.status}")
-                        if task_result.output:
-                            print(f"Output: {task_result.output.model_dump()}")
+                    artifact = result.value
+                    print(f"Execution {artifact.id}:")
+                    print(f"Status: {artifact.status}")
+                    if artifact.error:
+                        print(f"Failed: {artifact.error}")
+                    else:
+                        for task_result in artifact.task_results:
+                            print(f"Task: {task_result.task.title}")
                 ```
         """
+        artifact_id = f"artifact_{len(self._artifacts) + 1}"
+        artifact = Artifact(id=artifact_id, plan=plan, status=ArtifactStatus.EXECUTING)
+        self._artifacts.append(artifact)
+
         plan.status = PlanStatus.IN_PROGRESS
-        results: list[TaskResult] = []
 
         try:
             while next_tasks := plan.get_next_tasks():
                 for task in next_tasks:
                     result = await self.execute_task(task)
                     if result.error:
+                        artifact.status = ArtifactStatus.FAILED
+                        artifact.error = result.error
                         return Result(error=result.error)
 
                     if result.value:
-                        results.append(result.value)
+                        artifact.task_results.append(result.value)
                     else:
-                        return Result(error=ValueError(f"Failed to execute task {task.id}"))
+                        artifact.status = ArtifactStatus.FAILED
+                        error = ValueError(f"Failed to execute task {task.id}")
+                        artifact.error = error
+                        return Result(error=error)
 
             plan.status = PlanStatus.COMPLETED
+            artifact.status = ArtifactStatus.COMPLETED
 
             if self.stream_handler:
                 await self.stream_handler.on_plan_completed(plan)
 
-            return Result(value=results)
+            return Result(value=artifact)
 
-        except Exception as e:
+        except Exception as error:
             plan.status = PlanStatus.FAILED
-            return Result(error=e)
+            artifact.status = ArtifactStatus.FAILED
+            artifact.error = error
+            return Result(error=error)
 
     async def execute_task(self, task: Task) -> Result[TaskResult]:
         """Execute a single task using an appropriate team member.
@@ -710,3 +727,46 @@ class SwarmTeam:
             await self.stream_handler.on_task_completed(task)
 
         return task_result
+
+    def get_artifacts(self) -> list[Artifact]:
+        """Get all execution artifacts.
+
+        Returns:
+            List of all execution artifacts in chronological order.
+
+        Examples:
+            Analyze execution history:
+                ```python
+                artifacts = team.get_artifacts()
+                for artifact in artifacts:
+                    print(f"Execution {artifact.id}:")
+                    print(f"Status: {artifact.status}")
+                    if artifact.error:
+                        print(f"Failed: {artifact.error}")
+                    else:
+                        print(f"Completed {len(artifact.task_results)} tasks")
+                ```
+        """
+        return self._artifacts
+
+    def get_latest_artifact(self) -> Artifact | None:
+        """Get the most recent execution artifact.
+
+        Returns:
+            The most recent artifact or None if no artifacts exist.
+
+        Examples:
+            Check latest execution:
+                ```python
+                if artifact := team.get_latest_artifact():
+                    print(f"Latest execution {artifact.id}:")
+                    print(f"Status: {artifact.status}")
+                    if artifact.error:
+                        print(f"Failed: {artifact.error}")
+                    else:
+                        print(f"Completed {len(artifact.task_results)} tasks")
+                else:
+                    print("No executions yet")
+                ```
+        """
+        return self._artifacts[-1] if self._artifacts else None
