@@ -21,12 +21,7 @@ os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 
 USER_PROMPT = """
-Create a Flutter TODO list app with the following features:
-
-1. Add/edit/delete tasks
-2. Mark tasks as complete
-3. Local storage for persistence
-4. Clean, modern UI design
+Create a simple todo list app
 """.strip()
 
 
