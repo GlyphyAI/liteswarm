@@ -154,7 +154,7 @@ def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -
     agent = Agent(
         id="planner",
         instructions=build_planner_system_prompt,
-        llm=LLM(model="gpt-4o"),
+        llm=LLM(model="claude-3-5-sonnet-20241022"),
     )
 
     return LiteAgentPlanner(

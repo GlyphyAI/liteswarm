@@ -100,7 +100,7 @@ def create_flutter_engineer_agent() -> Agent:
     return Agent(
         id="flutter_engineer",
         instructions=AGENT_FLUTTER_ENGINEER_SYSTEM_PROMPT,
-        llm=LLM(model="gpt-3.5-turbo"),
+        llm=LLM(model="claude-3-5-sonnet-20241022"),
     )
 
 
