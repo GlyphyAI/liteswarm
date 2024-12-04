@@ -479,16 +479,16 @@ class TeamMember(BaseModel):
     )
 
 
-class ExecutionResult(BaseModel):
-    """Result of a task execution.
+class TaskResult(BaseModel):
+    """Result of executing a task.
 
     Captures all outputs and metadata from a task execution, including
     raw content, structured output, and execution details.
 
     Examples:
-        Process execution result:
+        Process task result:
             ```python
-            result = ExecutionResult(
+            result = TaskResult(
                 task=review_task,
                 content="Code review completed.",
                 output=ReviewOutput(
