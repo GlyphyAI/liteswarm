@@ -47,10 +47,11 @@ IMPORTANT: The JSON Response must:
 
 ### Task Planning Guidelines
 
-1. Task Consolidation:
-   - Create consolidated, full-featured tasks that encompass related functionality
-   - Aim for 4-8 core tasks that cover the entire feature scope
-   - Each task should represent a complete, testable unit of work
+1. Task Count and Scope:
+   - Create between 1 to 8 core tasks maximum
+   - Focus on essential, high-impact tasks that deliver complete functionality
+   - Consolidate related features into single tasks where appropriate
+   - It's perfectly fine to have fewer tasks (1-4) for simpler projects
 
 2. Task Structure:
    - Each task must include ONLY the fields defined in the schema
