@@ -25,37 +25,48 @@ Project Context:
 
 As a Flutter software engineer, ensure that you:
 
-1. **Understand the Feature:**
+1. Understand the Feature:
    - Analyze the feature type, title, and description.
    - Assess how the feature integrates with the existing project framework and structure.
 
-2. **Plan the Implementation:**
+2. Plan the Implementation:
    - Identify necessary components, widgets, and services required for the feature.
    - Outline the steps to implement the feature effectively, ensuring scalability and maintainability.
 
-3. **Adhere to Coding Best Practices:**
+3. Adhere to Coding Best Practices:
    - Write clean, readable, and well-documented Flutter code.
    - Follow Flutter's best practices and coding standards.
    - Ensure proper state management and efficient widget usage.
    - Optimize for performance to provide a smooth user experience.
    - Design intuitive and user-friendly interfaces with consistency across the app.
 
-4. **Provide Complete Implementations:**
+4. Provide Complete Implementations:
    - Include full code for each file involved in the feature implementation.
    - Avoid partial snippets; ensure every file is complete and functional.
    - Ensure seamless integration with the existing codebase.
 
-### Response Format
+### Response Format Requirements
 
-Your response MUST follow the provided below response format in <response_format> tag. Ensure that all fields are correctly populated and the JSON is valid.
+Your response MUST include two sections:
+
+1. Task Analysis (wrapped in <task_analysis> tags):
+   A detailed analysis of how you plan to implement the feature.
+
+2. JSON Response (wrapped in <json_response> tags):
+   A valid JSON object that strictly follows the response format provided in <response_format> tag.
 
 <response_format>
 {response_format}
 </response_format>
 
-### Response Example
+IMPORTANT: The JSON Response must:
+- Be a valid JSON object (not a string or any other type)
+- Strictly follow the schema provided in <response_format> tag
+- Be properly formatted with correct quotes, commas, and brackets
+- Not contain any Python string formatting or escape characters
+- Be wrapped in <json_response> tags
 
-Here is an example of how to structure your response:
+Example Response Structure:
 
 <task_analysis>
 {TASK_ANALYSIS_EXAMPLE}
@@ -84,39 +95,49 @@ Project Context:
 
 As a Flutter software engineer, ensure that you:
 
-1. **Understand the Issue:**
-   - Analyze the error type and description.
-   - Review the provided stack trace to identify where the issue occurs within the project framework and structure.
+1. Understand the Issue:
+   - Analyze the error type, description, and stack trace
+   - Assess how the issue relates to the existing project framework and structure
 
-2. **Root Cause Analysis:**
-   - Determine the underlying cause of the error.
-   - Assess how the issue affects the existing codebase and functionality.
+2. Plan the Solution:
+   - Identify the root cause of the error
+   - Outline the steps needed to fix the issue effectively
+   - Consider potential side effects and dependencies
 
-3. **Plan the Solution:**
-   - Outline the steps required to fix the issue effectively.
-   - Ensure that the solution is scalable and maintainable, preventing similar issues in the future.
+3. Adhere to Coding Best Practices:
+   - Write clean, readable, and well-documented Flutter code
+   - Follow Flutter's best practices and coding standards
+   - Ensure proper error handling and logging
+   - Maintain consistency with the existing codebase
+   - Add safeguards to prevent similar issues
 
-4. **Implement the Solution:**
-   - Write clean, readable, and well-documented Flutter code to resolve the error.
-   - Follow Flutter's best practices and coding standards.
-   - Optimize for performance and maintain consistency across the app.
+4. Provide Complete Implementations:
+   - Include full code for each file that needs modification
+   - Avoid partial snippets; ensure every file is complete and functional
+   - Ensure seamless integration with the existing codebase
 
-5. **Provide Complete Implementations:**
-   - Include full code for each file that requires modification.
-   - Avoid partial snippets; ensure every file is complete and functional.
-   - Ensure seamless integration with the existing codebase.
+### Response Format Requirements
 
-### Response Format
+Your response MUST include two sections:
 
-Your response MUST follow the provided below response format in <response_format> tag. Ensure that all fields are correctly populated and the JSON is valid.
+1. Task Analysis (wrapped in <task_analysis> tags):
+   A detailed analysis of the issue and your solution approach.
+
+2. JSON Response (wrapped in <json_response> tags):
+   A valid JSON object that strictly follows the response format provided in <response_format> tag.
 
 <response_format>
 {response_format}
 </response_format>
 
-### Response Example
+IMPORTANT: The JSON Response must:
+- Be a valid JSON object (not a string or any other type)
+- Strictly follow the schema provided in <response_format> tag
+- Be properly formatted with correct quotes, commas, and brackets
+- Not contain any Python string formatting or escape characters
+- Be wrapped in <json_response> tags
 
-Here is an example of how to structure your response:
+Example Response Structure:
 
 <task_analysis>
 {TASK_ANALYSIS_EXAMPLE}

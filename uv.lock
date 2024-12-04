@@ -428,6 +428,15 @@ wheels = [
 ]
 
 [[package]]
+name = "json-repair"
+version = "0.30.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/17/9d/e5149a3699b56fd2556c84ad4d265f8f88cda2da6eaa4c4c8a1b2db34e91/json_repair-0.30.2.tar.gz", hash = "sha256:aa244f0d91e81c9587b2b6981a5657a7d4fadb20051f74bc6110f1ca6a963fb9", size = 27731 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ed/e0/6eb79e8b0379df19d0567adbe4c4cde4a328423bf0452a4dcd77aa00f901/json_repair-0.30.2-py3-none-any.whl", hash = "sha256:824d7ab208f5daadf7925e362979870ba91f9a5e6242d59f7073c7171abe27b5", size = 18871 },
+]
+
+[[package]]
 name = "jsonschema"
 version = "4.23.0"
 source = { registry = "https://pypi.org/simple" }
@@ -482,6 +491,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "griffe" },
+    { name = "json-repair" },
     { name = "litellm" },
     { name = "orjson" },
     { name = "partial-json-parser" },
@@ -498,6 +508,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "griffe", specifier = ">=1.5.1" },
+    { name = "json-repair", specifier = ">=0.30.2" },
     { name = "litellm", specifier = ">=1.52.2" },
     { name = "orjson", specifier = ">=3.10.11" },
     { name = "partial-json-parser", specifier = ">=0.2.1.1.post4" },

@@ -7,11 +7,16 @@
 from collections import defaultdict
 from datetime import datetime
 
-from pydantic import BaseModel
+import json_repair
+from pydantic import BaseModel, ValidationError
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.planner import AgentPlanner, LiteAgentPlanner
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
+from liteswarm.experimental.swarm_team.response_repair import (
+    LiteResponseRepairAgent,
+    ResponseRepairAgent,
+)
 from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHandler
 from liteswarm.types.result import Result
 from liteswarm.types.swarm import ContextVariables
@@ -73,12 +78,13 @@ class SwarmTeam:
             ```
     """
 
-    def __init__(
+    def __init__(  # noqa: PLR0913
         self,
         swarm: Swarm,
         members: list[TeamMember],
         task_definitions: list[TaskDefinition],
         agent_planner: AgentPlanner | None = None,
+        response_repair_agent: ResponseRepairAgent | None = None,
         stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
         """Initialize a new team.
@@ -88,6 +94,7 @@ class SwarmTeam:
             members: Team members with their capabilities.
             task_definitions: Task types the team can handle.
             agent_planner: Optional custom planning agent.
+            response_repair_agent: Optional custom response repair agent.
             stream_handler: Optional event stream handler.
         """
         # Public properties
@@ -97,6 +104,9 @@ class SwarmTeam:
         self.agent_planner = agent_planner or LiteAgentPlanner(
             swarm=self.swarm,
             task_definitions=task_definitions,
+        )
+        self.response_repair_agent = response_repair_agent or LiteResponseRepairAgent(
+            swarm=self.swarm,
         )
 
         # Internal state (private)
@@ -139,6 +149,30 @@ class SwarmTeam:
 
         Returns:
             Context with task details and history.
+
+        Examples:
+            Basic context:
+                ```python
+                task = Task(
+                    id="review-1",
+                    type="review",
+                    title="Review PR",
+                    pr_url="github.com/org/repo/123"
+                )
+                context = team._build_task_context(task)
+                # Returns ContextVariables with:
+                # - task details as dict
+                # - execution history
+                # - team capabilities
+                ```
+
+            Access context values:
+                ```python
+                context = team._build_task_context(task)
+                task_data = context.get("task")  # Get task details
+                history = context.get("execution_history")  # Get previous results
+                capabilities = context.get("team_capabilities")  # Get team info
+                ```
         """
         context = ContextVariables(
             task=task.model_dump(),
@@ -197,92 +231,13 @@ class SwarmTeam:
         instructions = task_definition.task_instructions
         return instructions(task, task_context) if callable(instructions) else instructions
 
-    def _process_execution_result(
-        self,
-        task: Task,
-        assignee: TeamMember,
-        task_definition: TaskDefinition,
-        content: str,
-        task_context: ContextVariables,
-    ) -> Result[ExecutionResult]:
-        """Process agent response into execution result.
-
-        Args:
-            task: Executed task.
-            assignee: Team member who executed.
-            task_definition: Task type definition.
-            content: Raw agent response.
-            task_context: Execution context.
-
-        Returns:
-            Result containing either:
-                - Execution details and output for the task.
-                - Error if output parsing fails.
-
-        Examples:
-            Unstructured output:
-                ```python
-                result = team._process_execution_result(
-                    task=task,
-                    assignee=member,
-                    task_definition=task_def,
-                    content="Task completed",
-                    task_context=context
-                )
-                ```
-
-            Structured output:
-                ```python
-                result = team._process_execution_result(
-                    task=task,
-                    assignee=member,
-                    task_definition=TaskDefinition(
-                        task_schema=Task,
-                        task_instructions="Process data",
-                        task_response_format=OutputSchema
-                    ),
-                    content='{"status": "success"}',
-                    task_context=context
-                )
-                ```
-        """
-        response_format = task_definition.task_response_format
-
-        if not response_format:
-            execution_result = ExecutionResult(
-                task=task,
-                content=content,
-                assignee=assignee,
-                timestamp=datetime.now(),
-            )
-
-            return Result(value=execution_result)
-
-        try:
-            output = self._parse_response(
-                content=content,
-                response_format=response_format,
-                task_context=task_context,
-            )
-
-            execution_result = ExecutionResult(
-                task=task,
-                content=content,
-                output=output,
-                assignee=assignee,
-            )
-
-            return Result(value=execution_result)
-        except Exception as e:
-            return Result(error=ValueError(f"Invalid task output: {e}"))
-
     def _parse_response(
         self,
         content: str,
         response_format: TaskResponseFormat,
         task_context: ContextVariables,
     ) -> BaseModel:
-        """Parse agent response using schema.
+        """Parse agent response using schema with error recovery.
 
         Args:
             content: Raw content to parse.
@@ -294,37 +249,221 @@ class SwarmTeam:
 
         Raises:
             TypeError: If output doesn't match schema.
-            ValidationError: If content is invalid.
+            ValidationError: If content is invalid and cannot be repaired.
 
         Examples:
-            Using model:
+            Parse with model schema:
                 ```python
+                class ReviewOutput(BaseModel):
+                    issues: list[str]
+                    approved: bool
+
+                content = '''
+                {
+                    "issues": ["Security risk in auth", "Missing tests"],
+                    "approved": false
+                }
+                '''
                 output = team._parse_response(
-                    content='{"status": "success"}',
-                    response_format=OutputSchema,
+                    content=content,
+                    response_format=ReviewOutput,
                     task_context=context
                 )
+                # Returns ReviewOutput instance
                 ```
 
-            Using parser:
+            Parse with custom function:
                 ```python
-                def parse_output(content: str, task_context: ContextVariables) -> OutputSchema:
-                    return OutputSchema(status=content["result"])
+                def parse_review(content: str, context: ContextVariables) -> ReviewOutput:
+                    # Custom parsing logic
+                    data = json.loads(content)
+                    return ReviewOutput(**data)
 
                 output = team._parse_response(
-                    content='{"result": "pass"}',
-                    response_format=parse_output,
+                    content=content,
+                    response_format=parse_review,
                     task_context=context
                 )
+                # Returns ReviewOutput instance via custom parser
+                ```
+
+            With json_repair:
+                ```python
+                # Even with slightly invalid JSON
+                content = '''
+                {
+                    'issues': ['Missing tests'],  # Single quotes
+                    approved: false  # Missing quotes
+                }
+                '''
+                output = team._parse_response(
+                    content=content,
+                    response_format=ReviewOutput,
+                    task_context=context
+                )
+                # Still returns valid ReviewOutput
                 ```
         """
-        if is_subtype(response_format, BaseModel):
-            return response_format.model_validate_json(content)
-
         if is_callable(response_format):
             return response_format(content, task_context)
 
-        raise ValueError("Invalid response format")
+        if not is_subtype(response_format, BaseModel):
+            raise ValueError("Invalid response format")
+
+        decoded_object = json_repair.repair_json(content, return_objects=True)
+        if isinstance(decoded_object, tuple):
+            decoded_object = decoded_object[0]
+
+        return response_format.model_validate(decoded_object)
+
+    async def _process_execution_result(
+        self,
+        task: Task,
+        assignee: TeamMember,
+        task_definition: TaskDefinition,
+        task_response: str,
+        task_context: ContextVariables,
+    ) -> Result[ExecutionResult]:
+        """Process agent response into execution result.
+
+        Attempts to parse and validate the response according to the task's
+        expected format. If validation fails, tries to recover using the
+        response repair agent.
+
+        Args:
+            task: Executed task.
+            assignee: Team member who executed.
+            task_definition: Task type definition.
+            task_response: Raw agent response.
+            task_context: Execution context.
+
+        Returns:
+            Result containing either:
+                - Execution details and validated output
+                - Error if parsing fails and cannot be recovered
+
+        Examples:
+            Successful execution:
+                ```python
+                class ReviewOutput(BaseModel):
+                    issues: list[str]
+                    approved: bool
+
+                task = Task(id="review-1", type="review", title="Review PR")
+                assignee = TeamMember(
+                    id="reviewer-1",
+                    agent=Agent(id="review-gpt"),
+                    task_types=[ReviewTask]
+                )
+                task_def = TaskDefinition(
+                    task_schema=ReviewTask,
+                    task_response_format=ReviewOutput
+                )
+
+                content = '{"issues": [], "approved": true}'
+                result = await team._process_execution_result(
+                    task=task,
+                    assignee=assignee,
+                    task_definition=task_def,
+                    content=content,
+                    task_context=context
+                )
+                # Returns Result with ExecutionResult containing:
+                # - task details
+                # - assignee info
+                # - parsed ReviewOutput
+                ```
+
+            With response repair:
+                ```python
+                # Invalid JSON that needs repair
+                content = '''
+                {
+                    issues: ["Missing tests"]  # Missing quotes
+                    'approved': false,  # Extra comma
+                }
+                '''
+                result = await team._process_execution_result(
+                    task=task,
+                    assignee=assignee,
+                    task_definition=task_def,
+                    content=content,
+                    task_context=context
+                )
+                # Returns repaired and validated ExecutionResult
+                ```
+
+            Without response format:
+                ```python
+                task_def = TaskDefinition(
+                    task_schema=Task,
+                    task_response_format=None  # No format specified
+                )
+                content = "Task completed successfully"
+                result = await team._process_execution_result(
+                    task=task,
+                    assignee=assignee,
+                    task_definition=task_def,
+                    content=content,
+                    task_context=context
+                )
+                # Returns ExecutionResult with raw content
+                ```
+        """
+        response_format = task_definition.task_response_format
+
+        if not response_format:
+            execution_result = ExecutionResult(
+                task=task,
+                content=task_response,
+                assignee=assignee,
+                timestamp=datetime.now(),
+            )
+
+            return Result(value=execution_result)
+
+        try:
+            output = self._parse_response(
+                content=task_response,
+                response_format=response_format,
+                task_context=task_context,
+            )
+
+            execution_result = ExecutionResult(
+                task=task,
+                content=task_response,
+                output=output,
+                assignee=assignee,
+            )
+
+            return Result(value=execution_result)
+
+        except ValidationError as validation_error:
+            repair_result = await self.response_repair_agent.repair_response(
+                agent=assignee.agent,
+                response=task_response,
+                response_format=task_definition.task_response_format,
+                validation_error=validation_error,
+                context=task_context,
+            )
+
+            if repair_result.error:
+                return Result(error=repair_result.error)
+
+            if not repair_result.value:
+                return Result(error=ValueError("No content in repair response"))
+
+            execution_result = ExecutionResult(
+                task=task,
+                content=task_response,
+                output=repair_result.value,
+                assignee=assignee,
+            )
+
+            return Result(value=execution_result)
+
+        except Exception as e:
+            return Result(error=ValueError(f"Invalid task output: {e}"))
 
     def _select_matching_member(self, task: Task) -> TeamMember | None:
         """Select best team member for task.
@@ -559,11 +698,11 @@ class SwarmTeam:
             task.status = TaskStatus.FAILED
             return Result(error=ValueError("The agent did not return any content"))
 
-        execution_result = self._process_execution_result(
+        execution_result = await self._process_execution_result(
             task=task,
             assignee=assignee,
             task_definition=task_definition,
-            content=result.content,
+            task_response=result.content,
             task_context=task_context,
         )
 
