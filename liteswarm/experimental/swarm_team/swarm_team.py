@@ -21,12 +21,12 @@ from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHand
 from liteswarm.types.result import Result
 from liteswarm.types.swarm import ContextVariables
 from liteswarm.types.swarm_team import (
-    ExecutionResult,
     Plan,
     PlanStatus,
     Task,
     TaskDefinition,
     TaskResponseFormat,
+    TaskResult,
     TaskStatus,
     TeamMember,
 )
@@ -111,7 +111,7 @@ class SwarmTeam:
 
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
-        self._execution_history: list[ExecutionResult] = []
+        self._execution_history: list[TaskResult] = []
         self._team_capabilities = self._get_team_capabilities()
         self._context: ContextVariables = ContextVariables(
             team_capabilities=self._team_capabilities,
@@ -316,30 +316,30 @@ class SwarmTeam:
 
         return response_format.model_validate(decoded_object)
 
-    async def _process_execution_result(
+    async def _process_agent_response(
         self,
-        task: Task,
         assignee: TeamMember,
+        response: str,
+        task: Task,
         task_definition: TaskDefinition,
-        task_response: str,
         task_context: ContextVariables,
-    ) -> Result[ExecutionResult]:
-        """Process agent response into execution result.
+    ) -> Result[TaskResult]:
+        """Process agent response into task result.
 
         Attempts to parse and validate the response according to the task's
         expected format. If validation fails, tries to recover using the
         response repair agent.
 
         Args:
+            assignee: Team member who executed the task.
+            response: Raw agent response after task execution.
             task: Executed task.
-            assignee: Team member who executed.
             task_definition: Task type definition.
-            task_response: Raw agent response.
             task_context: Execution context.
 
         Returns:
             Result containing either:
-                - Execution details and validated output
+                - Task result with validated output
                 - Error if parsing fails and cannot be recovered
 
         Examples:
@@ -360,15 +360,15 @@ class SwarmTeam:
                     task_response_format=ReviewOutput
                 )
 
-                content = '{"issues": [], "approved": true}'
-                result = await team._process_execution_result(
-                    task=task,
+                response = '{"issues": [], "approved": true}'
+                result = await team._process_agent_response(
                     assignee=assignee,
+                    response=response,
+                    task=task,
                     task_definition=task_def,
-                    content=content,
                     task_context=context
                 )
-                # Returns Result with ExecutionResult containing:
+                # Returns Result with TaskResult containing:
                 # - task details
                 # - assignee info
                 # - parsed ReviewOutput
@@ -377,20 +377,20 @@ class SwarmTeam:
             With response repair:
                 ```python
                 # Invalid JSON that needs repair
-                content = '''
+                response = '''
                 {
                     issues: ["Missing tests"]  # Missing quotes
                     'approved': false,  # Extra comma
                 }
                 '''
-                result = await team._process_execution_result(
-                    task=task,
+                result = await team._process_agent_response(
                     assignee=assignee,
+                    response=response,
+                    task=task,
                     task_definition=task_def,
-                    content=content,
                     task_context=context
                 )
-                # Returns repaired and validated ExecutionResult
+                # Returns repaired and validated TaskResult
                 ```
 
             Without response format:
@@ -399,49 +399,49 @@ class SwarmTeam:
                     task_schema=Task,
                     task_response_format=None  # No format specified
                 )
-                content = "Task completed successfully"
-                result = await team._process_execution_result(
-                    task=task,
+                response = "Task completed successfully"
+                result = await team._process_agent_response(
                     assignee=assignee,
+                    response=response,
+                    task=task,
                     task_definition=task_def,
-                    content=content,
                     task_context=context
                 )
-                # Returns ExecutionResult with raw content
+                # Returns TaskResult with raw content
                 ```
         """
         response_format = task_definition.task_response_format
 
         if not response_format:
-            execution_result = ExecutionResult(
+            task_result = TaskResult(
                 task=task,
-                content=task_response,
+                content=response,
                 assignee=assignee,
                 timestamp=datetime.now(),
             )
 
-            return Result(value=execution_result)
+            return Result(value=task_result)
 
         try:
             output = self._parse_response(
-                content=task_response,
+                content=response,
                 response_format=response_format,
                 task_context=task_context,
             )
 
-            execution_result = ExecutionResult(
+            task_result = TaskResult(
                 task=task,
-                content=task_response,
+                content=response,
                 output=output,
                 assignee=assignee,
             )
 
-            return Result(value=execution_result)
+            return Result(value=task_result)
 
         except ValidationError as validation_error:
             repair_result = await self.response_repair_agent.repair_response(
                 agent=assignee.agent,
-                response=task_response,
+                response=response,
                 response_format=task_definition.task_response_format,
                 validation_error=validation_error,
                 context=task_context,
@@ -453,14 +453,14 @@ class SwarmTeam:
             if not repair_result.value:
                 return Result(error=ValueError("No content in repair response"))
 
-            execution_result = ExecutionResult(
+            task_result = TaskResult(
                 task=task,
-                content=task_response,
+                content=response,
                 output=repair_result.value,
                 assignee=assignee,
             )
 
-            return Result(value=execution_result)
+            return Result(value=task_result)
 
         except Exception as e:
             return Result(error=ValueError(f"Invalid task output: {e}"))
@@ -560,17 +560,12 @@ class SwarmTeam:
             context=self._context,
         )
 
-        if not result.value:
-            return result
+        if self.stream_handler and result.value:
+            await self.stream_handler.on_plan_created(result.value)
 
-        plan = result.value
+        return result
 
-        if self.stream_handler:
-            await self.stream_handler.on_plan_created(plan)
-
-        return Result(value=plan)
-
-    async def execute_plan(self, plan: Plan) -> Result[list[ExecutionResult]]:
+    async def execute_plan(self, plan: Plan) -> Result[list[TaskResult]]:
         """Execute a plan by running all its tasks in dependency order.
 
         Manages the complete execution lifecycle:
@@ -583,7 +578,7 @@ class SwarmTeam:
 
         Returns:
             Result containing either:
-                - List of execution results from all tasks.
+                - List of all executed task results.
                 - Error if any task fails or dependencies are invalid.
 
         Examples:
@@ -596,15 +591,15 @@ class SwarmTeam:
 
                 result = await team.execute_plan(plan_result.value)
                 if result.value:
-                    for execution in result.value:
-                        print(f"Task: {execution.task.title}")
-                        print(f"Status: {execution.task.status}")
-                        if execution.output:
-                            print(f"Output: {execution.output.model_dump()}")
+                    for task_result in result.value:
+                        print(f"Task: {task_result.task.title}")
+                        print(f"Status: {task_result.task.status}")
+                        if task_result.output:
+                            print(f"Output: {task_result.output.model_dump()}")
                 ```
         """
         plan.status = PlanStatus.IN_PROGRESS
-        results: list[ExecutionResult] = []
+        results: list[TaskResult] = []
 
         try:
             while next_tasks := plan.get_next_tasks():
@@ -629,7 +624,7 @@ class SwarmTeam:
             plan.status = PlanStatus.FAILED
             return Result(error=e)
 
-    async def execute_task(self, task: Task) -> Result[ExecutionResult]:
+    async def execute_task(self, task: Task) -> Result[TaskResult]:
         """Execute a single task using an appropriate team member.
 
         Handles the complete task lifecycle:
@@ -643,7 +638,7 @@ class SwarmTeam:
 
         Returns:
             Result containing either:
-                - Execution details and output for the task.
+                - Task execution result with outputs.
                 - Error if execution fails or no capable member found.
 
         Examples:
@@ -659,11 +654,11 @@ class SwarmTeam:
                 )
 
                 if result.value:
-                    execution = result.value
-                    print(f"Reviewer: {execution.assignee.id}")
-                    print(f"Status: {execution.task.status}")
-                    if execution.output:
-                        print(f"Findings: {execution.output.issues}")
+                    task_result = result.value
+                    print(f"Reviewer: {task_result.assignee.id}")
+                    print(f"Status: {task_result.task.status}")
+                    if task_result.output:
+                        print(f"Findings: {task_result.output.issues}")
                 ```
         """
         assignee = self._select_matching_member(task)
@@ -698,21 +693,20 @@ class SwarmTeam:
             task.status = TaskStatus.FAILED
             return Result(error=ValueError("The agent did not return any content"))
 
-        execution_result = await self._process_execution_result(
-            task=task,
+        task_result = await self._process_agent_response(
             assignee=assignee,
+            response=result.content,
+            task=task,
             task_definition=task_definition,
-            task_response=result.content,
             task_context=task_context,
         )
 
-        if execution_result.value:
-            self._execution_history.append(execution_result.value)
+        if task_result.success():
             task.status = TaskStatus.COMPLETED
-        elif execution_result.error:
+        else:
             task.status = TaskStatus.FAILED
 
         if self.stream_handler:
             await self.stream_handler.on_task_completed(task)
 
-        return execution_result
+        return task_result

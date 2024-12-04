@@ -172,29 +172,6 @@ class TaskStatus(str, Enum):
     """Task execution has failed."""
 
 
-class PlanStatus(str, Enum):
-    """Status of a plan in its lifecycle.
-
-    Tracks the progression of a plan from creation through approval
-    to execution and completion.
-    """
-
-    DRAFT = "draft"
-    """Plan is created but not yet approved."""
-
-    APPROVED = "approved"
-    """Plan is approved and ready for execution."""
-
-    IN_PROGRESS = "in_progress"
-    """Plan is currently being executed."""
-
-    COMPLETED = "completed"
-    """All tasks in plan have completed successfully."""
-
-    FAILED = "failed"
-    """Plan execution has failed."""
-
-
 class Task(BaseModel):
     """Base class for defining task schemas in a SwarmTeam workflow.
 
@@ -331,6 +308,29 @@ class TaskDefinition(BaseModel):
         use_attribute_docstrings=True,
         extra="forbid",
     )
+
+
+class PlanStatus(str, Enum):
+    """Status of a plan in its lifecycle.
+
+    Tracks the progression of a plan from creation through approval
+    to execution and completion.
+    """
+
+    DRAFT = "draft"
+    """Plan is created but not yet approved."""
+
+    APPROVED = "approved"
+    """Plan is approved and ready for execution."""
+
+    IN_PROGRESS = "in_progress"
+    """Plan is currently being executed."""
+
+    COMPLETED = "completed"
+    """All tasks in plan have completed successfully."""
+
+    FAILED = "failed"
+    """Plan execution has failed."""
 
 
 class Plan(BaseModel):
@@ -479,16 +479,16 @@ class TeamMember(BaseModel):
     )
 
 
-class ExecutionResult(BaseModel):
-    """Result of a task execution.
+class TaskResult(BaseModel):
+    """Result of executing a task.
 
     Captures all outputs and metadata from a task execution, including
     raw content, structured output, and execution details.
 
     Examples:
-        Process execution result:
+        Process task result:
             ```python
-            result = ExecutionResult(
+            result = TaskResult(
                 task=review_task,
                 content="Code review completed.",
                 output=ReviewOutput(
