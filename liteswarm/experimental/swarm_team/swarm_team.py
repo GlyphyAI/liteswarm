@@ -111,7 +111,7 @@ class SwarmTeam:
 
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
-        self._execution_history: list[ExecutionResult] = []
+        self._execution_history: list[TaskResult] = []
         self._team_capabilities = self._get_team_capabilities()
         self._context: ContextVariables = ContextVariables(
             team_capabilities=self._team_capabilities,
