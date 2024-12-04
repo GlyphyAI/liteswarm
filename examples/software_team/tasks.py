@@ -9,7 +9,7 @@ from typing import Any
 from liteswarm.types import ContextVariables, TaskDefinition
 
 from .types import DebugOutput, DebugTask, FileContent, FlutterOutput, FlutterTask
-from .utils import dump_json, find_tag
+from .utils import dump_json, find_json_tag
 
 FLUTTER_TASK_PROMPT = """
 Implement the following Flutter feature:
@@ -207,20 +207,20 @@ def build_debug_task_prompt(task: DebugTask, context: ContextVariables) -> str:
 
 def parse_flutter_task_response(content: str, context: ContextVariables) -> FlutterOutput:
     """Parse the output of a Flutter task."""
-    json_response = find_tag(content, "json_response")
+    json_response = find_json_tag(content, "json_response")
     if not json_response:
         raise ValueError("No JSON response found")
 
-    return FlutterOutput.model_validate_json(json_response)
+    return FlutterOutput.model_validate(json_response)
 
 
 def parse_debug_task_response(content: str, context: ContextVariables) -> DebugOutput:
     """Parse the output of a Debug task."""
-    json_response = find_tag(content, "json_response")
+    json_response = find_json_tag(content, "json_response")
     if not json_response:
         raise ValueError("No JSON response found")
 
-    return DebugOutput.model_validate_json(json_response)
+    return DebugOutput.model_validate(json_response)
 
 
 def create_flutter_task_definition() -> TaskDefinition:
