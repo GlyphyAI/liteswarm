@@ -7,7 +7,10 @@
 import re
 
 import orjson
-from partial_json_parser.core.api import JSON, parse_json
+from json_repair import repair_json
+
+from liteswarm.types.misc import JSON
+from liteswarm.utils.misc import find_tag_content
 
 from .types import CodeBlock
 
@@ -40,14 +43,6 @@ def extract_code_block(content: str) -> CodeBlock:
     )
 
 
-def load_partial_json(content: str) -> JSON:
-    return parse_json(content, parser=orjson.loads)
-
-
-def dump_partial_json(data: JSON) -> str:
-    return orjson.dumps(data).decode()
-
-
 def dump_json(data: JSON, indent: bool = False) -> str:
     option = orjson.OPT_INDENT_2 if indent else None
     return orjson.dumps(data, option=option).decode()
@@ -57,16 +52,9 @@ def load_json(data: str) -> JSON:
     return orjson.loads(data)
 
 
-def find_tag(text: str, tag: str) -> str | None:
-    """Find and extract content from a tagged section.
+def find_json_tag(text: str, tag: str) -> JSON:
+    tag_content = find_tag_content(text, tag)
+    if not tag_content:
+        return None
 
-    Args:
-        text: Text containing tagged sections.
-        tag: Name of the tag to find.
-
-    Returns:
-        Content between the specified tags, or None if not found.
-    """
-    pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL)
-    match = pattern.search(text)
-    return match.group(1) if match else None
+    return repair_json(tag_content, return_objects=True)  # type: ignore
