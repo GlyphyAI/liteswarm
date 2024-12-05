@@ -5,13 +5,13 @@
 # https://opensource.org/licenses/MIT.
 
 from .core import Swarm
-from .experimental import AgentPlanner, LiteAgentPlanner, SwarmTeam
+from .experimental import LitePlanningAgent, PlanningAgent, SwarmTeam
 from .repl import AgentRepl, start_repl
 
 __all__ = [
-    "AgentPlanner",
     "AgentRepl",
-    "LiteAgentPlanner",
+    "LitePlanningAgent",
+    "PlanningAgent",
     "Swarm",
     "SwarmTeam",
     "start_repl",

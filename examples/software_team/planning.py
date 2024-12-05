@@ -5,13 +5,13 @@
 # https://opensource.org/licenses/MIT.
 
 from liteswarm.core import Swarm
-from liteswarm.experimental import AgentPlanner, LiteAgentPlanner
+from liteswarm.experimental import LitePlanningAgent, PlanningAgent
 from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition
 
 from .types import FlutterTask, SoftwarePlan
 from .utils import dump_json, find_json_tag
 
-AGENT_PLANNER_SYSTEM_PROMPT = """
+PLANNING_AGENT_SYSTEM_PROMPT = """
 You are an advanced AI Software Planning Agent designed to assist software engineering teams in project planning and task management. Your primary function is to analyze user queries, decompose them into actionable tasks, and generate a structured plan that can be executed by development teams across various technologies and frameworks.
 
 ### Project Context
@@ -85,7 +85,7 @@ Example Response Structure:
 </example_response>
 """.strip()
 
-AGENT_PLANNER_USER_PROMPT = """
+PLANNING_AGENT_USER_PROMPT = """
 Please create a development plan for this request:
 
 <user_request>
@@ -102,8 +102,8 @@ Now proceed to create a development plan for the user's request.
 """.strip()
 
 
-def build_planner_system_prompt(context: ContextVariables) -> str:
-    """Build system prompt for the plan agent."""
+def build_planning_agent_system_prompt(context: ContextVariables) -> str:
+    """Build system prompt for the planning agent."""
     project_directories: JSON = context.get("directories", [])
     project_files: JSON = context.get("files", [])
     tech_stack: JSON = context.get("tech_stack", {})
@@ -120,7 +120,7 @@ def build_planner_system_prompt(context: ContextVariables) -> str:
         ]
     )
 
-    return AGENT_PLANNER_SYSTEM_PROMPT.format(
+    return PLANNING_AGENT_SYSTEM_PROMPT.format(
         PROJECT_DIRECTORIES=dump_json(project_directories),
         PROJECT_FILES=dump_json(project_files),
         TECH_STACK=dump_json(tech_stack),
@@ -130,18 +130,18 @@ def build_planner_system_prompt(context: ContextVariables) -> str:
     )
 
 
-def build_planner_user_prompt(prompt: str, context: ContextVariables) -> str:
-    """Build user prompt for the plan agent."""
+def build_planning_agent_user_prompt(prompt: str, context: ContextVariables) -> str:
+    """Build user prompt for the planning agent."""
     project_context: JSON = context.get("project", {})
 
-    return AGENT_PLANNER_USER_PROMPT.format(
+    return PLANNING_AGENT_USER_PROMPT.format(
         USER_PROMPT=prompt,
         CONTEXT=dump_json(project_context),
     )
 
 
-def parse_planner_response(response: str, context: ContextVariables) -> SoftwarePlan:
-    """Parse the response from the planner agent."""
+def parse_planning_agent_response(response: str, context: ContextVariables) -> SoftwarePlan:
+    """Parse the response from the planning agent."""
     json_response = find_json_tag(response, "json_response")
     if not json_response:
         raise ValueError("No JSON response found")
@@ -149,18 +149,18 @@ def parse_planner_response(response: str, context: ContextVariables) -> Software
     return SoftwarePlan.model_validate(json_response)
 
 
-def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -> AgentPlanner:
+def create_planning_agent(swarm: Swarm, task_definitions: list[TaskDefinition]) -> PlanningAgent:
     """Create a software planning agent."""
     agent = Agent(
         id="planner",
-        instructions=build_planner_system_prompt,
+        instructions=build_planning_agent_system_prompt,
         llm=LLM(model="claude-3-5-sonnet-20241022"),
     )
 
-    return LiteAgentPlanner(
+    return LitePlanningAgent(
         swarm=swarm,
         agent=agent,
-        prompt_template=build_planner_user_prompt,
-        response_format=parse_planner_response,
+        prompt_template=build_planning_agent_user_prompt,
+        response_format=parse_planning_agent_response,
         task_definitions=task_definitions,
     )

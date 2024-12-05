@@ -5,18 +5,18 @@
 # https://opensource.org/licenses/MIT.
 
 from .swarm_team import (
-    AgentPlanner,
-    LiteAgentPlanner,
+    LitePlanningAgent,
     LiteSwarmTeamStreamHandler,
+    PlanningAgent,
     PromptTemplate,
     SwarmTeam,
     SwarmTeamStreamHandler,
 )
 
 __all__ = [
-    "AgentPlanner",
-    "LiteAgentPlanner",
+    "LitePlanningAgent",
     "LiteSwarmTeamStreamHandler",
+    "PlanningAgent",
     "PromptTemplate",
     "SwarmTeam",
     "SwarmTeamStreamHandler",

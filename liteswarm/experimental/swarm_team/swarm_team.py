@@ -11,7 +11,7 @@ import json_repair
 from pydantic import BaseModel, ValidationError
 
 from liteswarm.core.swarm import Swarm
-from liteswarm.experimental.swarm_team.planner import AgentPlanner, LiteAgentPlanner
+from liteswarm.experimental.swarm_team.planning import LitePlanningAgent, PlanningAgent
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.experimental.swarm_team.response_repair import (
     LiteResponseRepairAgent,
@@ -87,7 +87,7 @@ class SwarmTeam:
         swarm: Swarm,
         members: list[TeamMember],
         task_definitions: list[TaskDefinition],
-        agent_planner: AgentPlanner | None = None,
+        planning_agent: PlanningAgent | None = None,
         response_repair_agent: ResponseRepairAgent | None = None,
         stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
@@ -97,7 +97,7 @@ class SwarmTeam:
             swarm: Swarm client for agent interactions.
             members: Team members with their capabilities.
             task_definitions: Task types the team can handle.
-            agent_planner: Optional custom planning agent.
+            planning_agent: Optional custom planning agent.
             response_repair_agent: Optional custom response repair agent.
             stream_handler: Optional event stream handler.
         """
@@ -105,7 +105,7 @@ class SwarmTeam:
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
         self.stream_handler = stream_handler
-        self.agent_planner = agent_planner or LiteAgentPlanner(
+        self.planning_agent = planning_agent or LitePlanningAgent(
             swarm=self.swarm,
             task_definitions=task_definitions,
         )
@@ -559,7 +559,7 @@ class SwarmTeam:
         if context:
             self._context.update(context)
 
-        result = await self.agent_planner.create_plan(
+        result = await self.planning_agent.create_plan(
             prompt=prompt,
             context=self._context,
         )
