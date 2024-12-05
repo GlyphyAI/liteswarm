@@ -710,9 +710,9 @@ class SwarmTeam:
             task.status = TaskStatus.FAILED
             return Result(error=ValueError("The agent did not return any content"))
 
-        task_result = await self._process_agent_response(
-            assignee=assignee,
+        task_result = await self._process_response(
             response=result.content,
+            assignee=assignee,
             task=task,
             task_definition=task_definition,
             task_context=task_context,
