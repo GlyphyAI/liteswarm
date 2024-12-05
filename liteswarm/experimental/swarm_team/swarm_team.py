@@ -319,10 +319,10 @@ class SwarmTeam:
 
         return response_format.model_validate(decoded_object)
 
-    async def _process_agent_response(
+    async def _process_response(
         self,
-        assignee: TeamMember,
         response: str,
+        assignee: TeamMember,
         task: Task,
         task_definition: TaskDefinition,
         task_context: ContextVariables,
@@ -334,8 +334,8 @@ class SwarmTeam:
         response repair agent.
 
         Args:
-            assignee: Team member who executed the task.
             response: Raw agent response after task execution.
+            assignee: Team member who executed the task.
             task: Executed task.
             task_definition: Task type definition.
             task_context: Execution context.
@@ -352,24 +352,25 @@ class SwarmTeam:
                     issues: list[str]
                     approved: bool
 
+
                 task = Task(id="review-1", type="review", title="Review PR")
                 assignee = TeamMember(
                     id="reviewer-1",
                     agent=Agent(id="review-gpt"),
-                    task_types=[ReviewTask]
+                    task_types=[ReviewTask],
                 )
                 task_def = TaskDefinition(
                     task_schema=ReviewTask,
-                    task_response_format=ReviewOutput
+                    task_response_format=ReviewOutput,
                 )
 
                 response = '{"issues": [], "approved": true}'
-                result = await team._process_agent_response(
-                    assignee=assignee,
+                result = await team._process_response(
                     response=response,
+                    assignee=assignee,
                     task=task,
                     task_definition=task_def,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns Result with TaskResult containing:
                 # - task details
@@ -386,12 +387,12 @@ class SwarmTeam:
                     'approved': false,  # Extra comma
                 }
                 '''
-                result = await team._process_agent_response(
-                    assignee=assignee,
+                result = await team._process_response(
                     response=response,
+                    assignee=assignee,
                     task=task,
                     task_definition=task_def,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns repaired and validated TaskResult
                 ```
@@ -400,15 +401,15 @@ class SwarmTeam:
                 ```python
                 task_def = TaskDefinition(
                     task_schema=Task,
-                    task_response_format=None  # No format specified
+                    task_response_format=None,  # No format specified
                 )
                 response = "Task completed successfully"
-                result = await team._process_agent_response(
-                    assignee=assignee,
+                result = await team._process_response(
                     response=response,
+                    assignee=assignee,
                     task=task,
                     task_definition=task_def,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns TaskResult with raw content
                 ```
@@ -427,7 +428,7 @@ class SwarmTeam:
 
         try:
             output = self._parse_response(
-                content=response,
+                response=response,
                 response_format=response_format,
                 task_context=task_context,
             )
