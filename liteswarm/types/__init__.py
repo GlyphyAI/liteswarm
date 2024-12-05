@@ -11,7 +11,16 @@ from .llm import LLM, AgentTool
 from .misc import JSON, Number
 from .result import Result
 from .swarm import Agent, AgentInstructions, Delta, Message, ToolCallResult, ToolMessage
-from .swarm_team import Artifact, ArtifactStatus, Plan, Task, TaskDefinition, TaskResult, TeamMember
+from .swarm_team import (
+    Artifact,
+    ArtifactStatus,
+    Plan,
+    PlanFeedbackHandler,
+    Task,
+    TaskDefinition,
+    TaskResult,
+    TeamMember,
+)
 
 __all__ = [
     "JSON",
@@ -27,6 +36,7 @@ __all__ = [
     "Message",
     "Number",
     "Plan",
+    "PlanFeedbackHandler",
     "ReservedContextKey",
     "Result",
     "Task",
