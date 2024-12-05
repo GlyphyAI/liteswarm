@@ -569,22 +569,24 @@ class SwarmTeam:
 
         return result
 
-    async def execute_plan(self, plan: Plan) -> Result[Artifact]:
+    async def execute_plan(self, plan: Plan) -> Artifact:
         """Execute a plan by running all its tasks in dependency order.
 
         Manages the complete execution lifecycle:
-            1. Executes tasks when their dependencies are met.
-            2. Tracks execution results and updates plan status.
-            3. Handles failures and notifies via stream handler.
-            4. Creates and returns an execution artifact.
+            1. Creates an execution artifact to track progress.
+            2. Executes tasks when their dependencies are met.
+            3. Tracks execution results and updates artifact status.
+            4. Handles failures and notifies via stream handler.
 
         Args:
             plan: Plan with tasks to execute.
 
         Returns:
-            Result containing either:
-                - Execution artifact with plan results and task outputs.
-                - Error if any task fails or dependencies are invalid.
+            An execution artifact that includes:
+                - The execution plan.
+                - All task results (including those completed before any failure).
+                - Final execution status (COMPLETED or FAILED).
+                - Any errors that occurred during execution.
 
         Examples:
             Create and execute a plan:
@@ -592,25 +594,24 @@ class SwarmTeam:
                 plan_result = await team.create_plan("Review PR #123")
                 if plan_result.error:
                     print(f"Planning failed: {plan_result.error}")
-                    raise plan_result.error
+                    return  # or raise
 
-                result = await team.execute_plan(plan_result.value)
-                if result.value:
-                    artifact = result.value
-                    print(f"Execution {artifact.id}:")
-                    print(f"Status: {artifact.status}")
-                    if artifact.error:
-                        print(f"Failed: {artifact.error}")
-                    else:
-                        for task_result in artifact.task_results:
-                            print(f"Task: {task_result.task.title}")
+                artifact = await team.execute_plan(plan_result.value)
+
+                if artifact.status == ArtifactStatus.FAILED:
+                    print(f"Execution failed: {artifact.error}")
+                    print(f"Completed {len(artifact.task_results)} tasks before failure")
+                else:
+                    print(f"Successfully completed all {len(artifact.task_results)} tasks")
+
+                for task_result in artifact.task_results:
+                    print(f"Task: {task_result.task.title}")
+                    print(f"Status: {task_result.task.status}")
                 ```
         """
         artifact_id = f"artifact_{len(self._artifacts) + 1}"
         artifact = Artifact(id=artifact_id, plan=plan, status=ArtifactStatus.EXECUTING)
         self._artifacts.append(artifact)
-
-        plan.status = PlanStatus.IN_PROGRESS
 
         try:
             while next_tasks := plan.get_next_tasks():
@@ -619,29 +620,26 @@ class SwarmTeam:
                     if result.error:
                         artifact.status = ArtifactStatus.FAILED
                         artifact.error = result.error
-                        return Result(error=result.error)
+                        return artifact
 
                     if result.value:
                         artifact.task_results.append(result.value)
                     else:
                         artifact.status = ArtifactStatus.FAILED
-                        error = ValueError(f"Failed to execute task {task.id}")
-                        artifact.error = error
-                        return Result(error=error)
+                        artifact.error = ValueError(f"Failed to execute task {task.id}")
+                        return artifact
 
-            plan.status = PlanStatus.COMPLETED
             artifact.status = ArtifactStatus.COMPLETED
 
             if self.stream_handler:
                 await self.stream_handler.on_plan_completed(plan)
 
-            return Result(value=artifact)
+            return artifact
 
         except Exception as error:
-            plan.status = PlanStatus.FAILED
             artifact.status = ArtifactStatus.FAILED
             artifact.error = error
-            return Result(error=error)
+            return artifact
 
     async def execute_task(self, task: Task) -> Result[TaskResult]:
         """Execute a single task using an appropriate team member.
