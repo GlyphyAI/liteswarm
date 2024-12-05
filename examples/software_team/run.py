@@ -126,12 +126,12 @@ async def main() -> None:
 
         match choice:
             case "1":
-                artifact_result = await team.execute_plan(plan)
-                if artifact_result.error:
-                    print(f"Failed to execute plan: {artifact_result.error}")
+                artifact = await team.execute_plan(plan)
+                if artifact.error:
+                    print(f"Failed to execute plan: {artifact.error}")
                     return
 
-                print_artifact(artifact_result.unwrap("No artifact found"))
+                print_artifact(artifact)
                 break
             case "2":
                 feedback = input("\nEnter your feedback: ")
