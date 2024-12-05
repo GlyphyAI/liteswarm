@@ -13,7 +13,7 @@ from liteswarm.types import ArtifactStatus
 from liteswarm.utils import enable_logging
 
 from .handlers import InteractivePlanFeedbackHandler, SwarmStreamHandler, SwarmTeamStreamHandler
-from .planner import create_planning_agent
+from .planning import create_planning_agent
 from .tasks import create_task_definitions
 from .team import create_team_members
 from .types import FileContent, Project
