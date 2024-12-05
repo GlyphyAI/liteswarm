@@ -7,7 +7,7 @@
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
+from typing import Any, Literal, Protocol, TypeAlias, TypeVar, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -195,7 +195,7 @@ class Task(BaseModel):
                 title="Process customer data",
                 description="Process Q1 customer data",
                 input_file="data/customers_q1.csv",
-                metadata={"priority": "high"}
+                metadata={"priority": "high"},
             )
             ```
     """
@@ -245,6 +245,7 @@ class Task(BaseModel):
                 class ReviewTask(Task):
                     type: Literal["code_review"]
 
+
                 task_type = ReviewTask.get_task_type()  # Returns "code_review"
                 ```
         """
@@ -269,7 +270,7 @@ class TaskDefinition(BaseModel):
             task_def = TaskDefinition(
                 task_schema=ReviewTask,
                 task_instructions="Review code at {task.pr_url}",
-                task_response_format=ReviewOutput
+                task_response_format=ReviewOutput,
             )
             ```
 
@@ -278,18 +279,20 @@ class TaskDefinition(BaseModel):
             def generate_instructions(task: Task, context: ContextVariables) -> str:
                 return f"Review {task.pr_url} focusing on {context.get('focus_areas')}"
 
+
             def parse_output(content: str, context: ContextVariables) -> BaseModel:
                 data = json.loads(content)
                 return ReviewOutput(
-                    approved=data['approved'],
-                    comments=data['comments'],
-                    suggestions=data['suggestions']
+                    approved=data["approved"],
+                    comments=data["comments"],
+                    suggestions=data["suggestions"],
                 )
+
 
             task_def = TaskDefinition(
                 task_schema=ReviewTask,
                 task_instructions=generate_instructions,
-                task_response_format=parse_output
+                task_response_format=parse_output,
             )
             ```
     """
@@ -324,15 +327,15 @@ class Plan(BaseModel):
                     ReviewTask(
                         id="review-1",
                         title="Review PR #123",
-                        pr_url="github.com/org/repo/123"
+                        pr_url="github.com/org/repo/123",
                     ),
                     TestTask(
                         id="test-1",
                         title="Test changes",
-                        dependencies=["review-1"]
-                    )
+                        dependencies=["review-1"],
+                    ),
                 ],
-                metadata={"priority": "high"}
+                metadata={"priority": "high"},
             )
             ```
     """
@@ -400,6 +403,74 @@ class Plan(BaseModel):
         ]
 
 
+class PlanFeedbackHandler(Protocol):
+    r"""Protocol for handling plan feedback in the execution loop.
+
+    Defines the interface for handlers that can review plans and provide
+    feedback for refinement before execution.
+
+    Examples:
+        Interactive feedback:
+            ```python
+            class InteractiveFeedback(PlanFeedbackHandler):
+                async def handle(
+                    self,
+                    plan: Plan,
+                    prompt: str,
+                    context: ContextVariables | None,
+                ) -> tuple[str, ContextVariables | None] | None:
+                    print("\nProposed plan:")
+                    for task in plan.tasks:
+                        print(f"- {task.title}")
+
+                    if input("Approve? [y/N]: ").lower() == "y":
+                        return None
+
+                    feedback = input("Enter feedback: ")
+                    new_prompt = f"Previous plan needs adjustments: {feedback}"
+                    return new_prompt, context
+            ```
+
+        Automated validation:
+            ```python
+            class TaskLimitValidator(PlanFeedbackHandler):
+                def __init__(self, max_tasks: int = 5) -> None:
+                    self.max_tasks = max_tasks
+
+                async def handle(
+                    self,
+                    plan: Plan,
+                    prompt: str,
+                    context: ContextVariables | None,
+                ) -> tuple[str, ContextVariables | None] | None:
+                    if len(plan.tasks) > self.max_tasks:
+                        new_context = ContextVariables(context or {})
+                        new_context.update({"max_tasks": self.max_tasks})
+                        return "Please create a more focused plan", new_context
+                    return None
+            ```
+    """
+
+    async def handle(
+        self,
+        plan: Plan,
+        prompt: str,
+        context: ContextVariables | None,
+    ) -> tuple[str, ContextVariables | None] | None:
+        """Handle plan feedback.
+
+        Args:
+            plan: The current plan to review.
+            prompt: The current prompt used to generate the plan.
+            context: The current context variables.
+
+        Returns:
+            None if the plan is approved, or a tuple of (new_prompt, new_context)
+            to create a new plan with the updated inputs.
+        """
+        ...
+
+
 class TeamMember(BaseModel):
     """Team member that can execute specific types of tasks.
 
@@ -415,10 +486,10 @@ class TeamMember(BaseModel):
                 agent=Agent(
                     id="review-gpt",
                     instructions="You are a code reviewer.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 task_types=[ReviewTask],
-                metadata={"specialty": "security"}
+                metadata={"specialty": "security"},
             )
 
             # Testing specialist
@@ -427,10 +498,10 @@ class TeamMember(BaseModel):
                 agent=Agent(
                     id="test-gpt",
                     instructions="You are a testing expert.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 task_types=[TestTask],
-                metadata={"coverage_target": 0.9}
+                metadata={"coverage_target": 0.9},
             )
             ```
     """
@@ -468,10 +539,10 @@ class TaskResult(BaseModel):
                 output=ReviewOutput(
                     approved=True,
                     comments=["Good error handling", "Well documented"],
-                    suggestions=[]
+                    suggestions=[],
                 ),
                 assignee=reviewer,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             if result.output and result.output.approved:
@@ -542,10 +613,10 @@ class Artifact(BaseModel):
                     TaskResult(
                         task=review_task,
                         content="Review completed",
-                        output=ReviewOutput(approved=True)
+                        output=ReviewOutput(approved=True),
                     )
                 ],
-                status=ArtifactStatus.COMPLETED
+                status=ArtifactStatus.COMPLETED,
             )
 
             if artifact.status == ArtifactStatus.FAILED:

@@ -53,13 +53,12 @@ class AgentPlanner(Protocol):
                 async def create_plan(
                     self,
                     prompt: str,
-                    context: ContextVariables,
-                    feedback: str | None = None
+                    context: ContextVariables | None = None,
                 ) -> Result[Plan]:
                     # Analyze prompt and create tasks
                     tasks = [
                         Task(id="task-1", title="First step"),
-                        Task(id="task-2", title="Second step", dependencies=["task-1"])
+                        Task(id="task-2", title="Second step", dependencies=["task-1"]),
                     ]
                     return Result(value=Plan(tasks=tasks))
             ```
@@ -69,14 +68,12 @@ class AgentPlanner(Protocol):
         self,
         prompt: str,
         context: ContextVariables | None = None,
-        feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan from the given prompt and context.
 
         Args:
             prompt: Description of work to be done.
             context: Optional additional context variables.
-            feedback: Optional feedback on previous attempts.
 
         Returns:
             Result containing either a valid Plan or an error.
@@ -98,23 +95,24 @@ class LiteAgentPlanner(AgentPlanner):
                 pr_url: str
                 review_type: str
 
+
             # Create task definitions
             review_def = TaskDefinition(
                 task_schema=ReviewTask,
-                task_instructions="Review {task.pr_url}"
+                task_instructions="Review {task.pr_url}",
             )
 
             # Initialize planner
             planner = LiteAgentPlanner(
                 swarm=swarm,
                 agent=Agent(id="planner", llm=LLM(model="gpt-4o")),
-                task_definitions=[review_def]
+                task_definitions=[review_def],
             )
 
             # Create plan
             result = await planner.create_plan(
                 prompt="Review PR #123",
-                context=ContextVariables(pr_url="github.com/org/repo/123")
+                context=ContextVariables(pr_url="github.com/org/repo/123"),
             )
             ```
     """
@@ -156,7 +154,7 @@ class LiteAgentPlanner(AgentPlanner):
         attempting to fix common issues like JSON formatting and schema violations.
 
         Returns:
-            ResponseRepairAgent: A configured repair agent instance using LiteResponseRepairAgent
+            A configured repair agent instance using LiteResponseRepairAgent
                 implementation with the current swarm.
 
         Examples:
@@ -176,7 +174,7 @@ class LiteAgentPlanner(AgentPlanner):
 
                 planner = LiteAgentPlanner(
                     swarm=swarm,
-                    response_repair_agent=CustomRepairAgent()
+                    response_repair_agent=CustomRepairAgent(),
                 )
                 # Will use custom agent instead of default
                 ```
@@ -232,10 +230,8 @@ class LiteAgentPlanner(AgentPlanner):
                 def custom_template(prompt: str, context: ContextVariables) -> str:
                     return f"{prompt} for {context.get('project_name')}"
 
-                planner = LiteAgentPlanner(
-                    swarm=swarm,
-                    prompt_template=custom_template
-                )
+
+                planner = LiteAgentPlanner(swarm=swarm, prompt_template=custom_template)
                 # Will format prompts with project name
                 ```
         """
@@ -251,10 +247,7 @@ class LiteAgentPlanner(AgentPlanner):
             Default format:
                 ```python
                 # With review and test task types
-                planner = LiteAgentPlanner(
-                    swarm=swarm,
-                    task_definitions=[review_def, test_def]
-                )
+                planner = LiteAgentPlanner(swarm=swarm, task_definitions=[review_def, test_def])
                 format = planner._default_planning_response_format()
                 # Returns Plan schema that accepts:
                 # - ReviewTask
@@ -267,10 +260,8 @@ class LiteAgentPlanner(AgentPlanner):
                     # Custom parsing logic
                     return Plan(tasks=[...])
 
-                planner = LiteAgentPlanner(
-                    swarm=swarm,
-                    response_format=parse_plan
-                )
+
+                planner = LiteAgentPlanner(swarm=swarm, response_format=parse_plan)
                 # Will use custom parser instead of schema
                 ```
         """
@@ -295,29 +286,31 @@ class LiteAgentPlanner(AgentPlanner):
         Examples:
             Valid plan:
                 ```python
-                plan = Plan(tasks=[
-                    Task(id="1", type="review", title="Review code"),
-                    Task(id="2", type="test", title="Run tests", dependencies=["1"])
-                ])
+                plan = Plan(
+                    tasks=[
+                        Task(id="1", type="review", title="Review code"),
+                        Task(id="2", type="test", title="Run tests", dependencies=["1"]),
+                    ]
+                )
                 result = planner._validate_plan(plan)
                 assert result.value == plan  # Plan is valid
                 ```
 
             Unknown task type:
                 ```python
-                plan = Plan(tasks=[
-                    Task(id="1", type="unknown", title="Invalid task")
-                ])
+                plan = Plan(tasks=[Task(id="1", type="unknown", title="Invalid task")])
                 result = planner._validate_plan(plan)
                 assert result.error  # ValueError: Unknown task type
                 ```
 
             Invalid dependencies:
                 ```python
-                plan = Plan(tasks=[
-                    Task(id="1", type="review", title="Task 1", dependencies=["2"]),
-                    Task(id="2", type="test", title="Task 2", dependencies=["1"])
-                ])
+                plan = Plan(
+                    tasks=[
+                        Task(id="1", type="review", title="Task 1", dependencies=["2"]),
+                        Task(id="2", type="test", title="Task 2", dependencies=["1"]),
+                    ]
+                )
                 result = planner._validate_plan(plan)
                 assert result.error  # ValueError: Cyclic dependencies
                 ```
@@ -372,7 +365,7 @@ class LiteAgentPlanner(AgentPlanner):
                 plan = await planner._parse_response(
                     response=response,
                     response_format=Plan,
-                    context=context
+                    context=context,
                 )
                 # Returns Plan instance
                 ```
@@ -384,10 +377,11 @@ class LiteAgentPlanner(AgentPlanner):
                     data = json.loads(content)
                     return Plan(tasks=[...])
 
+
                 plan = await planner._parse_response(
                     response=response,
                     response_format=parse_plan,
-                    context=context
+                    context=context,
                 )
                 # Returns Plan via custom parser
                 ```
@@ -409,7 +403,7 @@ class LiteAgentPlanner(AgentPlanner):
                 plan = await planner._parse_response(
                     response=response,
                     response_format=Plan,
-                    context=context
+                    context=context,
                 )
                 # Still returns valid Plan
                 ```
@@ -466,7 +460,7 @@ class LiteAgentPlanner(AgentPlanner):
                 result = await planner._process_planning_result(
                     agent=agent,
                     response=response,
-                    context=context
+                    context=context,
                 )
                 # Returns Result with valid Plan
                 ```
@@ -487,7 +481,7 @@ class LiteAgentPlanner(AgentPlanner):
                 result = await planner._process_planning_result(
                     agent=agent,
                     response=response,
-                    context=context
+                    context=context,
                 )
                 # Returns repaired and validated Plan
                 ```
@@ -508,7 +502,7 @@ class LiteAgentPlanner(AgentPlanner):
                 result = await planner._process_planning_result(
                     agent=agent,
                     response=response,
-                    context=context
+                    context=context,
                 )
                 assert result.error  # ValueError: Unknown task type
                 ```
@@ -550,14 +544,12 @@ class LiteAgentPlanner(AgentPlanner):
         self,
         prompt: str,
         context: ContextVariables | None = None,
-        feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan from the given prompt and context.
 
         Args:
             prompt: Description of work to be done.
             context: Optional additional context variables.
-            feedback: Optional feedback on previous attempts.
 
         Returns:
             Result containing either a valid Plan or an error.
@@ -582,24 +574,10 @@ class LiteAgentPlanner(AgentPlanner):
                     context=ContextVariables(
                         pr_url="github.com/org/repo/123",
                         focus_areas=["authentication", "authorization"],
-                        security_checklist=["SQL injection", "XSS", "CSRF"]
-                    )
+                        security_checklist=["SQL injection", "XSS", "CSRF"],
+                    ),
                 )
                 # Plan tasks will incorporate context information
-                ```
-
-            With feedback:
-                ```python
-                # First attempt
-                result = await planner.create_plan(
-                    prompt="Review the API changes"
-                )
-                if result.error:
-                    # Try again with feedback
-                    result = await planner.create_plan(
-                        prompt="Review the API changes",
-                        feedback="Please add performance testing tasks"
-                    )
                 ```
 
             Complex workflow:
@@ -632,9 +610,7 @@ class LiteAgentPlanner(AgentPlanner):
 
             Error handling:
                 ```python
-                result = await planner.create_plan(
-                    prompt="Review the changes"
-                )
+                result = await planner.create_plan(prompt="Review the changes")
                 if result.error:
                     if "Unknown task type" in str(result.error):
                         print("Plan contains unsupported task types")
@@ -653,19 +629,16 @@ class LiteAgentPlanner(AgentPlanner):
                 planner = LiteAgentPlanner(
                     swarm=swarm,
                     prompt_template=lambda p, c: f"{p} for {c.get('project')}",
-                    task_definitions=[review_def, test_def]
+                    task_definitions=[review_def, test_def],
                 )
                 result = await planner.create_plan(
                     prompt="Review the changes",
-                    context=ContextVariables(project="Payment API")
+                    context=ContextVariables(project="Payment API"),
                 )
                 # Template will format prompt as "Review the changes for Payment API"
                 ```
         """
         context = ContextVariables(context or {})
-
-        if feedback:
-            prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
 
         if is_callable(self.prompt_template):
             prompt = self.prompt_template(prompt, context)
