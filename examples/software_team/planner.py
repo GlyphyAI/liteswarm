@@ -9,7 +9,7 @@ from liteswarm.experimental import AgentPlanner, LiteAgentPlanner
 from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition
 
 from .types import FlutterTask, SoftwarePlan
-from .utils import dump_json, find_tag
+from .utils import dump_json, find_json_tag
 
 AGENT_PLANNER_SYSTEM_PROMPT = """
 You are an advanced AI Software Planning Agent designed to assist software engineering teams in project planning and task management. Your primary function is to analyze user queries, decompose them into actionable tasks, and generate a structured plan that can be executed by development teams across various technologies and frameworks.
@@ -47,10 +47,11 @@ IMPORTANT: The JSON Response must:
 
 ### Task Planning Guidelines
 
-1. Task Consolidation:
-   - Create consolidated, full-featured tasks that encompass related functionality
-   - Aim for 4-8 core tasks that cover the entire feature scope
-   - Each task should represent a complete, testable unit of work
+1. Task Count and Scope:
+   - Create between 1 to 8 core tasks maximum
+   - Focus on essential, high-impact tasks that deliver complete functionality
+   - Consolidate related features into single tasks where appropriate
+   - It's perfectly fine to have fewer tasks (1-4) for simpler projects
 
 2. Task Structure:
    - Each task must include ONLY the fields defined in the schema
@@ -130,11 +131,11 @@ def build_planner_user_prompt(prompt: str, context: ContextVariables) -> str:
 
 def parse_planner_response(response: str, context: ContextVariables) -> SoftwarePlan:
     """Parse the response from the planner agent."""
-    json_response = find_tag(response, "json_response")
+    json_response = find_json_tag(response, "json_response")
     if not json_response:
         raise ValueError("No JSON response found")
 
-    return SoftwarePlan.model_validate_json(json_response)
+    return SoftwarePlan.model_validate(json_response)
 
 
 def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -> AgentPlanner:

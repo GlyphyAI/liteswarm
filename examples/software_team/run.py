@@ -9,7 +9,7 @@ import os
 
 from liteswarm.core import Swarm
 from liteswarm.experimental import SwarmTeam
-from liteswarm.types import ContextVariables
+from liteswarm.types import Artifact, ContextVariables
 from liteswarm.utils import dedent_prompt, enable_logging
 
 from .planner import create_agent_planner
@@ -21,13 +21,51 @@ os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 
 USER_PROMPT = """
-Create a Flutter TODO list app with the following features:
-
-1. Add/edit/delete tasks
-2. Mark tasks as complete
-3. Local storage for persistence
-4. Clean, modern UI design
+Create a simple todo list app
 """.strip()
+
+
+def print_artifact(artifact: Artifact) -> None:
+    """Print a detailed, well-formatted view of an execution artifact."""
+    print("\n" + "=" * 50)
+    print(f"🏷  Artifact ID: {artifact.id}")
+    print(f"📊 Status: {_get_status_emoji(artifact.status)} {artifact.status}")
+    print("=" * 50 + "\n")
+
+    if artifact.error:
+        print("❌ Execution Failed")
+        print(f"Error: {artifact.error}")
+        return
+
+    print(f"✅ Successfully completed {len(artifact.task_results)} tasks\n")
+
+    for i, task_result in enumerate(artifact.task_results, 1):
+        agent_id = task_result.assignee.agent.id if task_result.assignee else "unknown"
+        print(f"Task {i}/{len(artifact.task_results)}")
+        print(f"├─ ID: {task_result.task.id}")
+        print(f"├─ Type: {task_result.task.type}")
+        print(f"├─ Title: {task_result.task.title}")
+        print(f"├─ Status: {_get_status_emoji(task_result.task.status)} {task_result.task.status}")
+        print(f"└─ Executed by: 🤖 {agent_id}\n")
+
+        if task_result.output:
+            print("   Output:")
+            for key, value in task_result.output.model_dump().items():
+                print(f"   ├─ {key}: {value}")
+            print()
+
+    print("=" * 50)
+
+
+def _get_status_emoji(status: str) -> str:
+    """Get an appropriate emoji for a status."""
+    return {
+        "COMPLETED": "✅",
+        "FAILED": "❌",
+        "IN_PROGRESS": "⏳",
+        "PENDING": "⏳",
+        "EXECUTING": "🔄",
+    }.get(str(status).upper(), "❓")
 
 
 async def main() -> None:
@@ -88,16 +126,12 @@ async def main() -> None:
 
         match choice:
             case "1":
-                plan_output = await team.execute_plan(plan)
-                if plan_output.error:
-                    print(f"Failed to execute plan: {plan_output.error}")
+                artifact = await team.execute_plan(plan)
+                if artifact.error:
+                    print(f"Failed to execute plan: {artifact.error}")
                     return
 
-                results = plan_output.value or []
-                for result in results:
-                    agent_id = result.assignee.agent.id if result.assignee else "unknown"
-                    print(f"Task {result.task.id} completed by {agent_id}")
-
+                print_artifact(artifact)
                 break
             case "2":
                 feedback = input("\nEnter your feedback: ")

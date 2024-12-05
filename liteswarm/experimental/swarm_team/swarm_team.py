@@ -21,8 +21,9 @@ from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHand
 from liteswarm.types.result import Result
 from liteswarm.types.swarm import ContextVariables
 from liteswarm.types.swarm_team import (
+    Artifact,
+    ArtifactStatus,
     Plan,
-    PlanStatus,
     Task,
     TaskDefinition,
     TaskResponseFormat,
@@ -47,34 +48,36 @@ class SwarmTeam:
                 pr_url: str
                 review_type: str
 
+
             class ReviewOutput(BaseModel):
                 issues: list[str]
                 approved: bool
+
 
             # Create task definition
             review_def = TaskDefinition(
                 task_schema=ReviewTask,
                 task_instructions="Review {task.pr_url}",
-                task_response_format=ReviewOutput
+                task_response_format=ReviewOutput,
             )
 
             # Create team member
             reviewer = TeamMember(
                 id="reviewer-1",
                 agent=Agent(id="review-gpt", llm=LLM(model="gpt-4o")),
-                task_types=[ReviewTask]
+                task_types=[ReviewTask],
             )
 
             # Create and use team
             team = SwarmTeam(
                 swarm=swarm,
                 members=[reviewer],
-                task_definitions=[review_def]
+                task_definitions=[review_def],
             )
 
             # Execute workflow
             plan = await team.create_plan("Review PR #123")
-            results = await team.execute_plan(plan)
+            results = await team.execute_plan(plan.unwrap())
             ```
     """
 
@@ -111,7 +114,7 @@ class SwarmTeam:
 
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
-        self._execution_history: list[TaskResult] = []
+        self._artifacts: list[Artifact] = []
         self._team_capabilities = self._get_team_capabilities()
         self._context: ContextVariables = ContextVariables(
             team_capabilities=self._team_capabilities,
@@ -157,7 +160,7 @@ class SwarmTeam:
                     id="review-1",
                     type="review",
                     title="Review PR",
-                    pr_url="github.com/org/repo/123"
+                    pr_url="github.com/org/repo/123",
                 )
                 context = team._build_task_context(task)
                 # Returns ContextVariables with:
@@ -170,13 +173,13 @@ class SwarmTeam:
                 ```python
                 context = team._build_task_context(task)
                 task_data = context.get("task")  # Get task details
-                history = context.get("execution_history")  # Get previous results
+                artifacts = context.get("artifacts")  # Get previous results
                 capabilities = context.get("team_capabilities")  # Get team info
                 ```
         """
         context = ContextVariables(
             task=task.model_dump(),
-            execution_history=self._execution_history,
+            artifacts=self._artifacts,
             **self._context,
         )
 
@@ -207,9 +210,9 @@ class SwarmTeam:
                     task=task,
                     task_definition=TaskDefinition(
                         task_schema=Task,
-                        task_instructions="Process {task.title}"
+                        task_instructions="Process {task.title}",
                     ),
-                    task_context=context
+                    task_context=context,
                 )
                 ```
 
@@ -218,13 +221,14 @@ class SwarmTeam:
                 def generate_instructions(task: Task, task_context: ContextVariables) -> str:
                     return f"Process {task.title} with {task_context.get('tool')}"
 
+
                 instructions = team._prepare_instructions(
                     task=task,
                     task_definition=TaskDefinition(
                         task_schema=Task,
                         task_instructions=generate_instructions,
                     ),
-                    task_context=context
+                    task_context=context,
                 )
                 ```
         """
@@ -233,14 +237,14 @@ class SwarmTeam:
 
     def _parse_response(
         self,
-        content: str,
+        response: str,
         response_format: TaskResponseFormat,
         task_context: ContextVariables,
     ) -> BaseModel:
         """Parse agent response using schema with error recovery.
 
         Args:
-            content: Raw content to parse.
+            response: Raw agent response to parse.
             response_format: Schema or parser function.
             task_context: Context for parsing.
 
@@ -258,16 +262,17 @@ class SwarmTeam:
                     issues: list[str]
                     approved: bool
 
-                content = '''
+
+                response = '''
                 {
                     "issues": ["Security risk in auth", "Missing tests"],
                     "approved": false
                 }
                 '''
                 output = team._parse_response(
-                    content=content,
+                    response=response,
                     response_format=ReviewOutput,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns ReviewOutput instance
                 ```
@@ -279,10 +284,11 @@ class SwarmTeam:
                     data = json.loads(content)
                     return ReviewOutput(**data)
 
+
                 output = team._parse_response(
-                    content=content,
+                    response=response,
                     response_format=parse_review,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns ReviewOutput instance via custom parser
                 ```
@@ -290,36 +296,36 @@ class SwarmTeam:
             With json_repair:
                 ```python
                 # Even with slightly invalid JSON
-                content = '''
+                response = '''
                 {
                     'issues': ['Missing tests'],  # Single quotes
                     approved: false  # Missing quotes
                 }
                 '''
                 output = team._parse_response(
-                    content=content,
+                    response=response,
                     response_format=ReviewOutput,
-                    task_context=context
+                    task_context=context,
                 )
                 # Still returns valid ReviewOutput
                 ```
         """
         if is_callable(response_format):
-            return response_format(content, task_context)
+            return response_format(response, task_context)
 
         if not is_subtype(response_format, BaseModel):
             raise ValueError("Invalid response format")
 
-        decoded_object = json_repair.repair_json(content, return_objects=True)
+        decoded_object = json_repair.repair_json(response, return_objects=True)
         if isinstance(decoded_object, tuple):
             decoded_object = decoded_object[0]
 
         return response_format.model_validate(decoded_object)
 
-    async def _process_agent_response(
+    async def _process_response(
         self,
-        assignee: TeamMember,
         response: str,
+        assignee: TeamMember,
         task: Task,
         task_definition: TaskDefinition,
         task_context: ContextVariables,
@@ -331,8 +337,8 @@ class SwarmTeam:
         response repair agent.
 
         Args:
-            assignee: Team member who executed the task.
             response: Raw agent response after task execution.
+            assignee: Team member who executed the task.
             task: Executed task.
             task_definition: Task type definition.
             task_context: Execution context.
@@ -349,24 +355,25 @@ class SwarmTeam:
                     issues: list[str]
                     approved: bool
 
+
                 task = Task(id="review-1", type="review", title="Review PR")
                 assignee = TeamMember(
                     id="reviewer-1",
                     agent=Agent(id="review-gpt"),
-                    task_types=[ReviewTask]
+                    task_types=[ReviewTask],
                 )
                 task_def = TaskDefinition(
                     task_schema=ReviewTask,
-                    task_response_format=ReviewOutput
+                    task_response_format=ReviewOutput,
                 )
 
                 response = '{"issues": [], "approved": true}'
-                result = await team._process_agent_response(
-                    assignee=assignee,
+                result = await team._process_response(
                     response=response,
+                    assignee=assignee,
                     task=task,
                     task_definition=task_def,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns Result with TaskResult containing:
                 # - task details
@@ -383,12 +390,12 @@ class SwarmTeam:
                     'approved': false,  # Extra comma
                 }
                 '''
-                result = await team._process_agent_response(
-                    assignee=assignee,
+                result = await team._process_response(
                     response=response,
+                    assignee=assignee,
                     task=task,
                     task_definition=task_def,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns repaired and validated TaskResult
                 ```
@@ -397,15 +404,15 @@ class SwarmTeam:
                 ```python
                 task_def = TaskDefinition(
                     task_schema=Task,
-                    task_response_format=None  # No format specified
+                    task_response_format=None,  # No format specified
                 )
                 response = "Task completed successfully"
-                result = await team._process_agent_response(
-                    assignee=assignee,
+                result = await team._process_response(
                     response=response,
+                    assignee=assignee,
                     task=task,
                     task_definition=task_def,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns TaskResult with raw content
                 ```
@@ -424,7 +431,7 @@ class SwarmTeam:
 
         try:
             output = self._parse_response(
-                content=response,
+                response=response,
                 response_format=response_format,
                 task_context=task_context,
             )
@@ -482,16 +489,12 @@ class SwarmTeam:
         Examples:
             With specific assignee:
                 ```python
-                member = team._select_matching_member(
-                    Task(type="review", assignee="reviewer-1")
-                )
+                member = team._select_matching_member(Task(type="review", assignee="reviewer-1"))
                 ```
 
             Based on task type:
                 ```python
-                member = team._select_matching_member(
-                    Task(type="review")
-                )
+                member = team._select_matching_member(Task(type="review"))
                 ```
         """
         if task.assignee and task.assignee in self.members:
@@ -547,8 +550,8 @@ class SwarmTeam:
                     prompt="Review authentication changes in PR #123",
                     context=ContextVariables(
                         pr_url="github.com/org/repo/123",
-                        focus_areas=["security", "performance"]
-                    )
+                        focus_areas=["security", "performance"],
+                    ),
                 )
                 ```
         """
@@ -565,21 +568,24 @@ class SwarmTeam:
 
         return result
 
-    async def execute_plan(self, plan: Plan) -> Result[list[TaskResult]]:
+    async def execute_plan(self, plan: Plan) -> Artifact:
         """Execute a plan by running all its tasks in dependency order.
 
         Manages the complete execution lifecycle:
-            1. Executes tasks when their dependencies are met.
-            2. Tracks execution results and updates plan status.
-            3. Handles failures and notifies via stream handler.
+            1. Creates an execution artifact to track progress.
+            2. Executes tasks when their dependencies are met.
+            3. Tracks execution results and updates artifact status.
+            4. Handles failures and notifies via stream handler.
 
         Args:
             plan: Plan with tasks to execute.
 
         Returns:
-            Result containing either:
-                - List of all executed task results.
-                - Error if any task fails or dependencies are invalid.
+            An execution artifact that includes:
+                - The execution plan.
+                - All task results (including those completed before any failure).
+                - Final execution status (COMPLETED or FAILED).
+                - Any errors that occurred during execution.
 
         Examples:
             Create and execute a plan:
@@ -587,42 +593,52 @@ class SwarmTeam:
                 plan_result = await team.create_plan("Review PR #123")
                 if plan_result.error:
                     print(f"Planning failed: {plan_result.error}")
-                    raise plan_result.error
+                    return  # or raise
 
-                result = await team.execute_plan(plan_result.value)
-                if result.value:
-                    for task_result in result.value:
-                        print(f"Task: {task_result.task.title}")
-                        print(f"Status: {task_result.task.status}")
-                        if task_result.output:
-                            print(f"Output: {task_result.output.model_dump()}")
+                artifact = await team.execute_plan(plan_result.value)
+
+                if artifact.status == ArtifactStatus.FAILED:
+                    print(f"Execution failed: {artifact.error}")
+                    print(f"Completed {len(artifact.task_results)} tasks before failure")
+                else:
+                    print(f"Successfully completed all {len(artifact.task_results)} tasks")
+
+                for task_result in artifact.task_results:
+                    print(f"Task: {task_result.task.title}")
+                    print(f"Status: {task_result.task.status}")
                 ```
         """
-        plan.status = PlanStatus.IN_PROGRESS
-        results: list[TaskResult] = []
+        artifact_id = f"artifact_{len(self._artifacts) + 1}"
+        artifact = Artifact(id=artifact_id, plan=plan, status=ArtifactStatus.EXECUTING)
+        self._artifacts.append(artifact)
 
         try:
             while next_tasks := plan.get_next_tasks():
                 for task in next_tasks:
                     result = await self.execute_task(task)
                     if result.error:
-                        return Result(error=result.error)
+                        artifact.status = ArtifactStatus.FAILED
+                        artifact.error = result.error
+                        return artifact
 
                     if result.value:
-                        results.append(result.value)
+                        artifact.task_results.append(result.value)
                     else:
-                        return Result(error=ValueError(f"Failed to execute task {task.id}"))
+                        artifact.status = ArtifactStatus.FAILED
+                        artifact.error = ValueError(f"Failed to execute task {task.id}")
+                        return artifact
 
-            plan.status = PlanStatus.COMPLETED
+            artifact.status = ArtifactStatus.COMPLETED
 
             if self.stream_handler:
                 await self.stream_handler.on_plan_completed(plan)
 
-            return Result(value=results)
+            return artifact
 
-        except Exception as e:
-            plan.status = PlanStatus.FAILED
-            return Result(error=e)
+        except Exception as error:
+            artifact.status = ArtifactStatus.FAILED
+            artifact.error = error
+            return artifact
 
     async def execute_task(self, task: Task) -> Result[TaskResult]:
         """Execute a single task using an appropriate team member.
@@ -649,7 +665,7 @@ class SwarmTeam:
                         id="review-1",
                         title="Security review of auth changes",
                         pr_url="github.com/org/repo/123",
-                        review_type="security"
+                        review_type="security",
                     )
                 )
 
@@ -693,9 +709,9 @@ class SwarmTeam:
             task.status = TaskStatus.FAILED
             return Result(error=ValueError("The agent did not return any content"))
 
-        task_result = await self._process_agent_response(
-            assignee=assignee,
+        task_result = await self._process_response(
             response=result.content,
+            assignee=assignee,
             task=task,
             task_definition=task_definition,
             task_context=task_context,
@@ -710,3 +726,46 @@ class SwarmTeam:
             await self.stream_handler.on_task_completed(task)
 
         return task_result
+
+    def get_artifacts(self) -> list[Artifact]:
+        """Get all execution artifacts.
+
+        Returns:
+            List of all execution artifacts in chronological order.
+
+        Examples:
+            Analyze execution history:
+                ```python
+                artifacts = team.get_artifacts()
+                for artifact in artifacts:
+                    print(f"Execution {artifact.id}:")
+                    print(f"Status: {artifact.status}")
+                    if artifact.error:
+                        print(f"Failed: {artifact.error}")
+                    else:
+                        print(f"Completed {len(artifact.task_results)} tasks")
+                ```
+        """
+        return self._artifacts
+
+    def get_latest_artifact(self) -> Artifact | None:
+        """Get the most recent execution artifact.
+
+        Returns:
+            The most recent artifact or None if no artifacts exist.
+
+        Examples:
+            Check latest execution:
+                ```python
+                if artifact := team.get_latest_artifact():
+                    print(f"Latest execution {artifact.id}:")
+                    print(f"Status: {artifact.status}")
+                    if artifact.error:
+                        print(f"Failed: {artifact.error}")
+                    else:
+                        print(f"Completed {len(artifact.task_results)} tasks")
+                else:
+                    print("No executions yet")
+                ```
+        """
+        return self._artifacts[-1] if self._artifacts else None

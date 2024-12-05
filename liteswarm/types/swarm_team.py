@@ -310,29 +310,6 @@ class TaskDefinition(BaseModel):
     )
 
 
-class PlanStatus(str, Enum):
-    """Status of a plan in its lifecycle.
-
-    Tracks the progression of a plan from creation through approval
-    to execution and completion.
-    """
-
-    DRAFT = "draft"
-    """Plan is created but not yet approved."""
-
-    APPROVED = "approved"
-    """Plan is approved and ready for execution."""
-
-    IN_PROGRESS = "in_progress"
-    """Plan is currently being executed."""
-
-    COMPLETED = "completed"
-    """All tasks in plan have completed successfully."""
-
-    FAILED = "failed"
-    """Plan execution has failed."""
-
-
 class Plan(BaseModel):
     """Plan consisting of ordered tasks with dependencies.
 
@@ -362,9 +339,6 @@ class Plan(BaseModel):
 
     tasks: Sequence[Task]
     """Tasks in this plan."""
-
-    status: PlanStatus = PlanStatus.DRAFT
-    """Current plan status."""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
     """Additional plan metadata."""
@@ -521,6 +495,83 @@ class TaskResult(BaseModel):
 
     timestamp: datetime = Field(default_factory=datetime.now)
     """When execution completed."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+    )
+
+
+class ArtifactStatus(str, Enum):
+    """Status of an execution artifact.
+
+    Tracks the progression of a planning and execution iteration
+    from creation through completion or failure.
+    """
+
+    CREATED = "created"
+    """Artifact is initialized."""
+
+    PLANNING = "planning"
+    """Plan is being created."""
+
+    EXECUTING = "executing"
+    """Plan is being executed."""
+
+    COMPLETED = "completed"
+    """Execution completed successfully."""
+
+    FAILED = "failed"
+    """Execution failed."""
+
+
+class Artifact(BaseModel):
+    """Record of a planning and execution iteration.
+
+    Captures the complete lifecycle of a single attempt to create and execute
+    a plan, including any errors that occurred.
+
+    Examples:
+        Track execution progress:
+            ```python
+            artifact = Artifact(
+                id="exec-1",
+                timestamp=datetime.now(),
+                plan=plan,
+                task_results=[
+                    TaskResult(
+                        task=review_task,
+                        content="Review completed",
+                        output=ReviewOutput(approved=True)
+                    )
+                ],
+                status=ArtifactStatus.COMPLETED
+            )
+
+            if artifact.status == ArtifactStatus.FAILED:
+                print(f"Execution failed: {artifact.error}")
+            else:
+                print(f"Completed {len(artifact.task_results)} tasks")
+            ```
+    """
+
+    id: str
+    """Unique identifier for this artifact."""
+
+    timestamp: datetime = Field(default_factory=datetime.now)
+    """When this artifact was created."""
+
+    plan: Plan | None = None
+    """Plan that was executed."""
+
+    task_results: list[TaskResult] = Field(default_factory=list)
+    """Results from executed tasks."""
+
+    error: Exception | None = None
+    """Error if execution failed."""
+
+    status: ArtifactStatus = ArtifactStatus.CREATED
+    """Current status of this artifact."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
