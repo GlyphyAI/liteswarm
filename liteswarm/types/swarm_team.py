@@ -7,7 +7,7 @@
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, TypeAlias, TypeVar, get_args, get_origin
+from typing import Any, Literal, Protocol, TypeAlias, TypeVar, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -398,6 +398,74 @@ class Plan(BaseModel):
             if task.status == TaskStatus.PENDING
             and all(dep in completed_tasks for dep in task.dependencies)
         ]
+
+
+class PlanFeedbackHandler(Protocol):
+    r"""Protocol for handling plan feedback in the execution loop.
+
+    Defines the interface for handlers that can review plans and provide
+    feedback for refinement before execution.
+
+    Examples:
+        Interactive feedback:
+            ```python
+            class InteractiveFeedback(PlanFeedbackHandler):
+                async def handle(
+                    self,
+                    plan: Plan,
+                    prompt: str,
+                    context: ContextVariables | None,
+                ) -> tuple[str, ContextVariables | None] | None:
+                    print("\nProposed plan:")
+                    for task in plan.tasks:
+                        print(f"- {task.title}")
+
+                    if input("Approve? [y/N]: ").lower() == "y":
+                        return None
+
+                    feedback = input("Enter feedback: ")
+                    new_prompt = f"Previous plan needs adjustments: {feedback}"
+                    return new_prompt, context
+            ```
+
+        Automated validation:
+            ```python
+            class TaskLimitValidator(PlanFeedbackHandler):
+                def __init__(self, max_tasks: int = 5) -> None:
+                    self.max_tasks = max_tasks
+
+                async def handle(
+                    self,
+                    plan: Plan,
+                    prompt: str,
+                    context: ContextVariables | None,
+                ) -> tuple[str, ContextVariables | None] | None:
+                    if len(plan.tasks) > self.max_tasks:
+                        new_context = ContextVariables(context or {})
+                        new_context.update({"max_tasks": self.max_tasks})
+                        return "Please create a more focused plan", new_context
+                    return None
+            ```
+    """
+
+    async def handle(
+        self,
+        plan: Plan,
+        prompt: str,
+        context: ContextVariables | None,
+    ) -> tuple[str, ContextVariables | None] | None:
+        """Handle plan feedback.
+
+        Args:
+            plan: The current plan to review.
+            prompt: The current prompt used to generate the plan.
+            context: The current context variables.
+
+        Returns:
+            None if the plan is approved, or a tuple of (new_prompt, new_context)
+            to create a new plan with the updated inputs.
+        """
+        ...
 
 
 class TeamMember(BaseModel):
