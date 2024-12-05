@@ -24,6 +24,7 @@ from liteswarm.types.swarm_team import (
     Artifact,
     ArtifactStatus,
     Plan,
+    PlanFeedbackHandler,
     Task,
     TaskDefinition,
     TaskResponseFormat,
@@ -567,6 +568,121 @@ class SwarmTeam:
             await self.stream_handler.on_plan_created(result.value)
 
         return result
+
+    async def execute(
+        self,
+        prompt: str,
+        context: ContextVariables | None = None,
+        *,
+        feedback_handler: PlanFeedbackHandler | None = None,
+    ) -> Artifact:
+        r"""Execute a user request by creating and running a plan, with optional feedback loop.
+
+        This is a high-level interface that combines plan creation and execution.
+        If a feedback handler is provided, it will be called after plan creation
+        to allow for plan refinement before execution.
+
+        Args:
+            prompt: Natural language description of work to be done.
+            context: Optional variables for plan customization.
+            feedback_handler: Optional handler for reviewing and refining plans
+                before execution.
+
+        Returns:
+            An execution artifact that includes the plan, results, and any errors.
+
+        Examples:
+            Basic execution:
+                ```python
+                artifact = await team.execute(
+                    prompt="Review and test PR #123",
+                    context=ContextVariables(pr_url="github.com/org/repo/123"),
+                )
+                if artifact.status == ArtifactStatus.FAILED:
+                    print(f"Execution failed: {artifact.error}")
+                else:
+                    print(f"Completed {len(artifact.task_results)} tasks")
+                ```
+
+            With interactive feedback:
+                ```python
+                class InteractiveFeedback(PlanFeedbackHandler):
+                    async def handle(
+                        self,
+                        plan: Plan,
+                        prompt: str,
+                        context: ContextVariables | None,
+                    ) -> tuple[str, ContextVariables | None] | None:
+                        print("\nProposed plan:")
+                        for task in plan.tasks:
+                            print(f"- {task.title}")
+
+                        if input("Approve? [y/N]: ").lower() == "y":
+                            return None
+
+                        feedback = input("Enter feedback: ")
+                        new_prompt = f"Previous plan needs adjustments: {feedback}"
+                        return new_prompt, context
+
+
+                artifact = await team.execute(
+                    prompt="Create a Flutter TODO app",
+                    feedback_handler=InteractiveFeedback(),
+                )
+                ```
+
+            With automated validation:
+                ```python
+                class TaskLimitValidator(PlanFeedbackHandler):
+                    def __init__(self, max_tasks: int = 5) -> None:
+                        self.max_tasks = max_tasks
+
+                    async def handle(
+                        self,
+                        plan: Plan,
+                        prompt: str,
+                        context: ContextVariables | None,
+                    ) -> tuple[str, ContextVariables | None] | None:
+                        if len(plan.tasks) > self.max_tasks:
+                            new_context = ContextVariables(context or {})
+                            new_context.update({"max_tasks": self.max_tasks})
+                            return "Please create a more focused plan", new_context
+                        return None
+
+
+                artifact = await team.execute(
+                    prompt="Implement authentication",
+                    context=ContextVariables(
+                        tech_stack={"framework": "Django"},
+                        security_requirements=["2FA", "OAuth"],
+                    ),
+                    feedback_handler=TaskLimitValidator(max_tasks=3),
+                )
+                ```
+        """
+        current_prompt = prompt
+        current_context = context
+
+        while True:
+            plan_result = await self.create_plan(current_prompt, current_context)
+            if plan_result.error:
+                artifact = Artifact(
+                    id=f"artifact_{len(self._artifacts) + 1}",
+                    status=ArtifactStatus.FAILED,
+                    error=plan_result.error,
+                )
+                self._artifacts.append(artifact)
+                return artifact
+
+            plan = plan_result.unwrap("No plan found")
+
+            if feedback_handler:
+                result = await feedback_handler.handle(plan, current_prompt, current_context)
+                if result:
+                    current_prompt, current_context = result
+                    continue
+
+            return await self.execute_plan(plan)
 
     async def execute_plan(self, plan: Plan) -> Artifact:
         """Execute a plan by running all its tasks in dependency order.
