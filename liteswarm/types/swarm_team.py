@@ -310,29 +310,6 @@ class TaskDefinition(BaseModel):
     )
 
 
-class PlanStatus(str, Enum):
-    """Status of a plan in its lifecycle.
-
-    Tracks the progression of a plan from creation through approval
-    to execution and completion.
-    """
-
-    DRAFT = "draft"
-    """Plan is created but not yet approved."""
-
-    APPROVED = "approved"
-    """Plan is approved and ready for execution."""
-
-    IN_PROGRESS = "in_progress"
-    """Plan is currently being executed."""
-
-    COMPLETED = "completed"
-    """All tasks in plan have completed successfully."""
-
-    FAILED = "failed"
-    """Plan execution has failed."""
-
-
 class Plan(BaseModel):
     """Plan consisting of ordered tasks with dependencies.
 
@@ -362,9 +339,6 @@ class Plan(BaseModel):
 
     tasks: Sequence[Task]
     """Tasks in this plan."""
-
-    status: PlanStatus = PlanStatus.DRAFT
-    """Current plan status."""
 
     metadata: dict[str, Any] = Field(default_factory=dict)
     """Additional plan metadata."""
