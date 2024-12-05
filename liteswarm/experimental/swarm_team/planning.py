@@ -40,7 +40,7 @@ Follow the output format specified in the prompt to create your plan.
 """.strip()
 
 
-class AgentPlanner(Protocol):
+class PlanningAgent(Protocol):
     """Protocol for agents that create task plans.
 
     Defines the interface for planning agents that can analyze prompts and create
@@ -49,7 +49,7 @@ class AgentPlanner(Protocol):
     Examples:
         Create a custom planner:
             ```python
-            class CustomPlanner(AgentPlanner):
+            class CustomPlanningAgent(PlanningAgent):
                 async def create_plan(
                     self,
                     prompt: str,
@@ -81,7 +81,7 @@ class AgentPlanner(Protocol):
         ...
 
 
-class LiteAgentPlanner(AgentPlanner):
+class LitePlanningAgent(PlanningAgent):
     """LLM-based implementation of the planning protocol.
 
     Uses an LLM agent to analyze requirements and generate structured plans,
@@ -103,7 +103,7 @@ class LiteAgentPlanner(AgentPlanner):
             )
 
             # Initialize planner
-            planner = LiteAgentPlanner(
+            planner = LitePlanningAgent(
                 swarm=swarm,
                 agent=Agent(id="planner", llm=LLM(model="gpt-4o")),
                 task_definitions=[review_def],
@@ -160,7 +160,7 @@ class LiteAgentPlanner(AgentPlanner):
         Examples:
             Basic usage:
                 ```python
-                planner = LiteAgentPlanner(swarm=swarm)
+                planner = LitePlanningAgent(swarm=swarm)
                 repair_agent = planner._default_response_repair_agent()
                 assert isinstance(repair_agent, LiteResponseRepairAgent)
                 ```
@@ -172,7 +172,7 @@ class LiteAgentPlanner(AgentPlanner):
                         # Custom repair logic
                         pass
 
-                planner = LiteAgentPlanner(
+                planner = LitePlanningAgent(
                     swarm=swarm,
                     response_repair_agent=CustomRepairAgent(),
                 )
@@ -199,7 +199,7 @@ class LiteAgentPlanner(AgentPlanner):
 
             Use in planner:
                 ```python
-                planner = LiteAgentPlanner(swarm=swarm)
+                planner = LitePlanningAgent(swarm=swarm)
                 # Automatically creates default agent if none provided
                 assert planner.agent.id == "agent-planner"
                 assert planner.agent.llm.model == "gpt-4o"
@@ -231,7 +231,7 @@ class LiteAgentPlanner(AgentPlanner):
                     return f"{prompt} for {context.get('project_name')}"
 
 
-                planner = LiteAgentPlanner(swarm=swarm, prompt_template=custom_template)
+                planner = LitePlanningAgent(swarm=swarm, prompt_template=custom_template)
                 # Will format prompts with project name
                 ```
         """
@@ -247,7 +247,7 @@ class LiteAgentPlanner(AgentPlanner):
             Default format:
                 ```python
                 # With review and test task types
-                planner = LiteAgentPlanner(swarm=swarm, task_definitions=[review_def, test_def])
+                planner = LitePlanningAgent(swarm=swarm, task_definitions=[review_def, test_def])
                 format = planner._default_planning_response_format()
                 # Returns Plan schema that accepts:
                 # - ReviewTask
@@ -261,7 +261,7 @@ class LiteAgentPlanner(AgentPlanner):
                     return Plan(tasks=[...])
 
 
-                planner = LiteAgentPlanner(swarm=swarm, response_format=parse_plan)
+                planner = LitePlanningAgent(swarm=swarm, response_format=parse_plan)
                 # Will use custom parser instead of schema
                 ```
         """
@@ -626,7 +626,7 @@ class LiteAgentPlanner(AgentPlanner):
             Custom template:
                 ```python
                 # With custom prompt template
-                planner = LiteAgentPlanner(
+                planner = LitePlanningAgent(
                     swarm=swarm,
                     prompt_template=lambda p, c: f"{p} for {c.get('project')}",
                     task_definitions=[review_def, test_def],
