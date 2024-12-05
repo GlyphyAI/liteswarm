@@ -24,7 +24,6 @@ from liteswarm.types.swarm_team import (
     Artifact,
     ArtifactStatus,
     Plan,
-    PlanStatus,
     Task,
     TaskDefinition,
     TaskResponseFormat,
@@ -235,14 +234,14 @@ class SwarmTeam:
 
     def _parse_response(
         self,
-        content: str,
+        response: str,
         response_format: TaskResponseFormat,
         task_context: ContextVariables,
     ) -> BaseModel:
         """Parse agent response using schema with error recovery.
 
         Args:
-            content: Raw content to parse.
+            response: Raw agent response to parse.
             response_format: Schema or parser function.
             task_context: Context for parsing.
 
@@ -260,16 +259,17 @@ class SwarmTeam:
                     issues: list[str]
                     approved: bool
 
-                content = '''
+
+                response = '''
                 {
                     "issues": ["Security risk in auth", "Missing tests"],
                     "approved": false
                 }
                 '''
                 output = team._parse_response(
-                    content=content,
+                    response=response,
                     response_format=ReviewOutput,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns ReviewOutput instance
                 ```
@@ -281,10 +281,11 @@ class SwarmTeam:
                     data = json.loads(content)
                     return ReviewOutput(**data)
 
+
                 output = team._parse_response(
-                    content=content,
+                    response=response,
                     response_format=parse_review,
-                    task_context=context
+                    task_context=context,
                 )
                 # Returns ReviewOutput instance via custom parser
                 ```
@@ -292,27 +293,27 @@ class SwarmTeam:
             With json_repair:
                 ```python
                 # Even with slightly invalid JSON
-                content = '''
+                response = '''
                 {
                     'issues': ['Missing tests'],  # Single quotes
                     approved: false  # Missing quotes
                 }
                 '''
                 output = team._parse_response(
-                    content=content,
+                    response=response,
                     response_format=ReviewOutput,
-                    task_context=context
+                    task_context=context,
                 )
                 # Still returns valid ReviewOutput
                 ```
         """
         if is_callable(response_format):
-            return response_format(content, task_context)
+            return response_format(response, task_context)
 
         if not is_subtype(response_format, BaseModel):
             raise ValueError("Invalid response format")
 
-        decoded_object = json_repair.repair_json(content, return_objects=True)
+        decoded_object = json_repair.repair_json(response, return_objects=True)
         if isinstance(decoded_object, tuple):
             decoded_object = decoded_object[0]
 
