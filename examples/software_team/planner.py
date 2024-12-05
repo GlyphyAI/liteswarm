@@ -5,7 +5,7 @@
 # https://opensource.org/licenses/MIT.
 
 from liteswarm.core import Swarm
-from liteswarm.experimental import AgentPlanner, LiteAgentPlanner
+from liteswarm.experimental import LitePlanningAgent, PlanningAgent
 from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition
 
 from .types import FlutterTask, SoftwarePlan
@@ -149,7 +149,7 @@ def parse_planner_response(response: str, context: ContextVariables) -> Software
     return SoftwarePlan.model_validate(json_response)
 
 
-def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -> AgentPlanner:
+def create_planning_agent(swarm: Swarm, task_definitions: list[TaskDefinition]) -> PlanningAgent:
     """Create a software planning agent."""
     agent = Agent(
         id="planner",
@@ -157,7 +157,7 @@ def create_agent_planner(swarm: Swarm, task_definitions: list[TaskDefinition]) -
         llm=LLM(model="claude-3-5-sonnet-20241022"),
     )
 
-    return LiteAgentPlanner(
+    return LitePlanningAgent(
         swarm=swarm,
         agent=agent,
         prompt_template=build_planner_user_prompt,

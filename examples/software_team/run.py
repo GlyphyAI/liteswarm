@@ -13,7 +13,7 @@ from liteswarm.types import ArtifactStatus
 from liteswarm.utils import enable_logging
 
 from .handlers import InteractivePlanFeedbackHandler, SwarmStreamHandler, SwarmTeamStreamHandler
-from .planner import create_agent_planner
+from .planner import create_planning_agent
 from .tasks import create_task_definitions
 from .team import create_team_members
 from .types import FileContent, Project
@@ -92,13 +92,13 @@ def create_team() -> SwarmTeam:
 
     task_definitions = create_task_definitions()
     team_members = create_team_members()
-    agent_planner = create_agent_planner(swarm, task_definitions)
+    planning_agent = create_planning_agent(swarm, task_definitions)
 
     team = SwarmTeam(
         swarm=swarm,
         members=team_members,
         task_definitions=task_definitions,
-        agent_planner=agent_planner,
+        planning_agent=planning_agent,
         stream_handler=SwarmTeamStreamHandler(),
     )
 
