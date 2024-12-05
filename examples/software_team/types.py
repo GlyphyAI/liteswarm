@@ -21,7 +21,8 @@ class FileContent(BaseModel):
     content: str
     """The full content of the file."""
 
-    model_config = ConfigDict(extra="forbid",
+    model_config = ConfigDict(
+        extra="forbid",
     )
 
 
@@ -120,7 +121,9 @@ class CodeBlock(BaseModel):
     language: str | None = None
     """The language of the code block."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class FlutterTask(Task):
@@ -132,7 +135,9 @@ class FlutterTask(Task):
     feature_type: str
     """Type of Flutter feature (e.g., 'widget', 'screen', 'service', etc.)."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class FlutterOutput(BaseModel):
@@ -141,7 +146,9 @@ class FlutterOutput(BaseModel):
     files: list[FileContent]
     """List of files to be created or modified for this feature."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class DebugTask(Task):
@@ -156,7 +163,9 @@ class DebugTask(Task):
     stack_trace: str | None = None
     """Error stack trace if available."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class DebugOutput(BaseModel):
@@ -168,7 +177,9 @@ class DebugOutput(BaseModel):
     files: list[FileContent]
     """List of files that need to be modified to fix the error."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
 
 
 class SoftwarePlan(Plan):
@@ -177,4 +188,6 @@ class SoftwarePlan(Plan):
     tasks: list[FlutterTask | DebugTask]
     """List of tasks to be completed."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(
+        extra="forbid",
+    )
