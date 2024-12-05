@@ -195,7 +195,7 @@ class Task(BaseModel):
                 title="Process customer data",
                 description="Process Q1 customer data",
                 input_file="data/customers_q1.csv",
-                metadata={"priority": "high"}
+                metadata={"priority": "high"},
             )
             ```
     """
@@ -245,6 +245,7 @@ class Task(BaseModel):
                 class ReviewTask(Task):
                     type: Literal["code_review"]
 
+
                 task_type = ReviewTask.get_task_type()  # Returns "code_review"
                 ```
         """
@@ -269,7 +270,7 @@ class TaskDefinition(BaseModel):
             task_def = TaskDefinition(
                 task_schema=ReviewTask,
                 task_instructions="Review code at {task.pr_url}",
-                task_response_format=ReviewOutput
+                task_response_format=ReviewOutput,
             )
             ```
 
@@ -278,18 +279,20 @@ class TaskDefinition(BaseModel):
             def generate_instructions(task: Task, context: ContextVariables) -> str:
                 return f"Review {task.pr_url} focusing on {context.get('focus_areas')}"
 
+
             def parse_output(content: str, context: ContextVariables) -> BaseModel:
                 data = json.loads(content)
                 return ReviewOutput(
-                    approved=data['approved'],
-                    comments=data['comments'],
-                    suggestions=data['suggestions']
+                    approved=data["approved"],
+                    comments=data["comments"],
+                    suggestions=data["suggestions"],
                 )
+
 
             task_def = TaskDefinition(
                 task_schema=ReviewTask,
                 task_instructions=generate_instructions,
-                task_response_format=parse_output
+                task_response_format=parse_output,
             )
             ```
     """
@@ -324,15 +327,15 @@ class Plan(BaseModel):
                     ReviewTask(
                         id="review-1",
                         title="Review PR #123",
-                        pr_url="github.com/org/repo/123"
+                        pr_url="github.com/org/repo/123",
                     ),
                     TestTask(
                         id="test-1",
                         title="Test changes",
-                        dependencies=["review-1"]
-                    )
+                        dependencies=["review-1"],
+                    ),
                 ],
-                metadata={"priority": "high"}
+                metadata={"priority": "high"},
             )
             ```
     """
@@ -483,10 +486,10 @@ class TeamMember(BaseModel):
                 agent=Agent(
                     id="review-gpt",
                     instructions="You are a code reviewer.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 task_types=[ReviewTask],
-                metadata={"specialty": "security"}
+                metadata={"specialty": "security"},
             )
 
             # Testing specialist
@@ -495,10 +498,10 @@ class TeamMember(BaseModel):
                 agent=Agent(
                     id="test-gpt",
                     instructions="You are a testing expert.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 task_types=[TestTask],
-                metadata={"coverage_target": 0.9}
+                metadata={"coverage_target": 0.9},
             )
             ```
     """
@@ -536,10 +539,10 @@ class TaskResult(BaseModel):
                 output=ReviewOutput(
                     approved=True,
                     comments=["Good error handling", "Well documented"],
-                    suggestions=[]
+                    suggestions=[],
                 ),
                 assignee=reviewer,
-                timestamp=datetime.now()
+                timestamp=datetime.now(),
             )
 
             if result.output and result.output.approved:
@@ -610,10 +613,10 @@ class Artifact(BaseModel):
                     TaskResult(
                         task=review_task,
                         content="Review completed",
-                        output=ReviewOutput(approved=True)
+                        output=ReviewOutput(approved=True),
                     )
                 ],
-                status=ArtifactStatus.COMPLETED
+                status=ArtifactStatus.COMPLETED,
             )
 
             if artifact.status == ArtifactStatus.FAILED:
