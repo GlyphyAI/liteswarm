@@ -48,34 +48,36 @@ class SwarmTeam:
                 pr_url: str
                 review_type: str
 
+
             class ReviewOutput(BaseModel):
                 issues: list[str]
                 approved: bool
+
 
             # Create task definition
             review_def = TaskDefinition(
                 task_schema=ReviewTask,
                 task_instructions="Review {task.pr_url}",
-                task_response_format=ReviewOutput
+                task_response_format=ReviewOutput,
             )
 
             # Create team member
             reviewer = TeamMember(
                 id="reviewer-1",
                 agent=Agent(id="review-gpt", llm=LLM(model="gpt-4o")),
-                task_types=[ReviewTask]
+                task_types=[ReviewTask],
             )
 
             # Create and use team
             team = SwarmTeam(
                 swarm=swarm,
                 members=[reviewer],
-                task_definitions=[review_def]
+                task_definitions=[review_def],
             )
 
             # Execute workflow
             plan = await team.create_plan("Review PR #123")
-            results = await team.execute_plan(plan)
+            results = await team.execute_plan(plan.unwrap())
             ```
     """
 
@@ -158,7 +160,7 @@ class SwarmTeam:
                     id="review-1",
                     type="review",
                     title="Review PR",
-                    pr_url="github.com/org/repo/123"
+                    pr_url="github.com/org/repo/123",
                 )
                 context = team._build_task_context(task)
                 # Returns ContextVariables with:
@@ -208,9 +210,9 @@ class SwarmTeam:
                     task=task,
                     task_definition=TaskDefinition(
                         task_schema=Task,
-                        task_instructions="Process {task.title}"
+                        task_instructions="Process {task.title}",
                     ),
-                    task_context=context
+                    task_context=context,
                 )
                 ```
 
@@ -219,13 +221,14 @@ class SwarmTeam:
                 def generate_instructions(task: Task, task_context: ContextVariables) -> str:
                     return f"Process {task.title} with {task_context.get('tool')}"
 
+
                 instructions = team._prepare_instructions(
                     task=task,
                     task_definition=TaskDefinition(
                         task_schema=Task,
                         task_instructions=generate_instructions,
                     ),
-                    task_context=context
+                    task_context=context,
                 )
                 ```
         """
@@ -486,16 +489,12 @@ class SwarmTeam:
         Examples:
             With specific assignee:
                 ```python
-                member = team._select_matching_member(
-                    Task(type="review", assignee="reviewer-1")
-                )
+                member = team._select_matching_member(Task(type="review", assignee="reviewer-1"))
                 ```
 
             Based on task type:
                 ```python
-                member = team._select_matching_member(
-                    Task(type="review")
-                )
+                member = team._select_matching_member(Task(type="review"))
                 ```
         """
         if task.assignee and task.assignee in self.members:
@@ -551,8 +550,8 @@ class SwarmTeam:
                     prompt="Review authentication changes in PR #123",
                     context=ContextVariables(
                         pr_url="github.com/org/repo/123",
-                        focus_areas=["security", "performance"]
-                    )
+                        focus_areas=["security", "performance"],
+                    ),
                 )
                 ```
         """
@@ -666,7 +665,7 @@ class SwarmTeam:
                         id="review-1",
                         title="Security review of auth changes",
                         pr_url="github.com/org/repo/123",
-                        review_type="security"
+                        review_type="security",
                     )
                 )
 
