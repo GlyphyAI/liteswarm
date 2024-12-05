@@ -10,7 +10,16 @@ from litellm.types.utils import ChatCompletionDeltaToolCall
 
 from liteswarm.core import LiteSwarmStreamHandler
 from liteswarm.experimental import LiteSwarmTeamStreamHandler
-from liteswarm.types import Agent, Delta, Message, Plan, Task, ToolCallResult
+from liteswarm.types import (
+    Agent,
+    ContextVariables,
+    Delta,
+    Message,
+    Plan,
+    PlanFeedbackHandler,
+    Task,
+    ToolCallResult,
+)
 
 
 class SwarmStreamHandler(LiteSwarmStreamHandler):
@@ -141,3 +150,47 @@ class SwarmTeamStreamHandler(LiteSwarmTeamStreamHandler):
         """Print when the plan is completed."""
         print("\nPlan Completed!")
         print("All tasks have been executed successfully.")
+
+
+class InteractivePlanFeedbackHandler(PlanFeedbackHandler):
+    """Interactive feedback handler for plan review and refinement."""
+
+    async def handle(
+        self,
+        plan: Plan,
+        prompt: str,
+        context: ContextVariables | None,
+    ) -> tuple[str, ContextVariables | None] | None:
+        """Handle plan feedback interactively.
+
+        Args:
+            plan: The current plan to review.
+            prompt: The current prompt used to generate the plan.
+            context: The current context variables.
+
+        Returns:
+            None if the plan is approved, or a tuple of (new_prompt, new_context)
+            to create a new plan with the updated inputs.
+        """
+        print("\nProposed Plan:")
+        print("-" * 30)
+        for i, task in enumerate(plan.tasks, 1):
+            print(f"{i}. {task.title}")
+            if task.description:
+                print(f"   {task.description}")
+        print("-" * 30)
+
+        choice = input("\n1. Approve and execute\n2. Provide feedback\n3. Exit\n\nYour choice (1-3): ")  # fmt: skip
+
+        match choice:
+            case "1":
+                return None
+            case "2":
+                feedback = input("\nEnter your feedback: ")
+                new_prompt = f"Original request: {prompt}\n\nPrevious attempt wasn't quite right because: {feedback}\n\nPlease try again with these adjustments."
+                return new_prompt, context
+            case "3":
+                raise KeyboardInterrupt("User chose to exit")
+            case _:
+                print("Invalid choice. Please try again.")
+                return await self.handle(plan, prompt, context)

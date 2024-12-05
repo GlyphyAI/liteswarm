@@ -4,8 +4,6 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from typing import Any
-
 from liteswarm.types import ContextVariables, TaskDefinition
 
 from .types import DebugOutput, DebugTask, FileContent, FlutterOutput, FlutterTask
@@ -13,13 +11,19 @@ from .utils import dump_json, find_json_tag
 
 FLUTTER_TASK_PROMPT = """
 Implement the following Flutter feature:
-- Feature Type: {task.feature_type}
-- Title: {task.title}
-- Description: {task.description}
+
+<task_details>
+Feature Type: {TASK.feature_type}
+Title: {TASK.title}
+Description: {TASK.description}
+</task_details>
 
 Project Context:
-- Framework: {project_framework}
-- Structure: {project_directories}
+
+<project_context>
+Tech Stack: {PROJECT_TECH_STACK}
+Structure: {PROJECT_DIRECTORIES}
+</project_context>
 
 ### Task Execution Guidelines
 
@@ -56,7 +60,7 @@ Your response MUST include two sections:
    A valid JSON object that strictly follows the response format provided in <response_format> tag.
 
 <response_format>
-{response_format}
+{RESPONSE_FORMAT}
 </response_format>
 
 IMPORTANT: The JSON Response must:
@@ -68,6 +72,7 @@ IMPORTANT: The JSON Response must:
 
 Example Response Structure:
 
+<example_response>
 <task_analysis>
 {TASK_ANALYSIS_EXAMPLE}
 </task_analysis>
@@ -75,21 +80,31 @@ Example Response Structure:
 <json_response>
 {JSON_RESPONSE_EXAMPLE}
 </json_response>
+</example_response>
 
 Now proceed to execute the task.
 """.strip()
 
 DEBUG_TASK_PROMPT = """
 Debug the following issue:
-- Error Type: {task.error_type}
-- Description: {task.description}
+
+<task_details>
+Error Type: {TASK.error_type}
+Description: {TASK.description}
+</task_details>
 
 Stack Trace:
-{stack_trace}
+
+<stack_trace>
+{STACK_TRACE}
+</stack_trace>
 
 Project Context:
-- Framework: {project_framework}
-- Structure: {project_directories}
+
+<project_context>
+Tech Stack: {PROJECT_TECH_STACK}
+Structure: {PROJECT_DIRECTORIES}
+</project_context>
 
 ### Task Execution Guidelines
 
@@ -127,7 +142,7 @@ Your response MUST include two sections:
    A valid JSON object that strictly follows the response format provided in <response_format> tag.
 
 <response_format>
-{response_format}
+{RESPONSE_FORMAT}
 </response_format>
 
 IMPORTANT: The JSON Response must:
@@ -139,6 +154,7 @@ IMPORTANT: The JSON Response must:
 
 Example Response Structure:
 
+<example_response>
 <task_analysis>
 {TASK_ANALYSIS_EXAMPLE}
 </task_analysis>
@@ -146,6 +162,7 @@ Example Response Structure:
 <json_response>
 {JSON_RESPONSE_EXAMPLE}
 </json_response>
+</example_response>
 
 Now proceed to execute the task.
 """.strip()
@@ -153,9 +170,8 @@ Now proceed to execute the task.
 
 def build_flutter_task_prompt(task: FlutterTask, context: ContextVariables) -> str:
     """Build the instructions for a Flutter task."""
-    project: dict[str, Any] = context.get("project", {})
-    project_framework = project.get("framework", "Flutter")
-    project_directories = project.get("directories", [])
+    project_tech_stack = context.get("tech_stack", {})
+    project_directories = context.get("directories", [])
 
     response_example = FlutterOutput(
         files=[
@@ -167,10 +183,10 @@ def build_flutter_task_prompt(task: FlutterTask, context: ContextVariables) -> s
     )
 
     return FLUTTER_TASK_PROMPT.format(
-        task=task,
-        project_framework=project_framework,
-        project_directories=dump_json(project_directories),
-        response_format=dump_json(FlutterOutput.model_json_schema()),
+        TASK=task,
+        PROJECT_TECH_STACK=project_tech_stack,
+        PROJECT_DIRECTORIES=dump_json(project_directories),
+        RESPONSE_FORMAT=dump_json(FlutterOutput.model_json_schema()),
         TASK_ANALYSIS_EXAMPLE="Provide your detailed analysis of the feature implementation here.",
         JSON_RESPONSE_EXAMPLE=response_example.model_dump_json(),
     )
@@ -178,9 +194,8 @@ def build_flutter_task_prompt(task: FlutterTask, context: ContextVariables) -> s
 
 def build_debug_task_prompt(task: DebugTask, context: ContextVariables) -> str:
     """Build the instructions for a Debug task."""
-    project: dict[str, Any] = context.get("project", {})
-    project_framework = project.get("framework", "Flutter")
-    project_directories = project.get("directories", [])
+    project_tech_stack = context.get("tech_stack", {})
+    project_directories = context.get("directories", [])
 
     stack_trace = task.stack_trace or "No stack trace provided"
 
@@ -195,11 +210,11 @@ def build_debug_task_prompt(task: DebugTask, context: ContextVariables) -> str:
     )
 
     return DEBUG_TASK_PROMPT.format(
-        task=task,
-        stack_trace=stack_trace,
-        project_framework=project_framework,
-        project_directories=dump_json(project_directories),
-        response_format=dump_json(DebugOutput.model_json_schema()),
+        TASK=task,
+        STACK_TRACE=stack_trace,
+        PROJECT_TECH_STACK=project_tech_stack,
+        PROJECT_DIRECTORIES=dump_json(project_directories),
+        RESPONSE_FORMAT=dump_json(DebugOutput.model_json_schema()),
         TASK_ANALYSIS_EXAMPLE="Provide your detailed analysis of the debugging process here.",
         JSON_RESPONSE_EXAMPLE=response_example.model_dump_json(),
     )
