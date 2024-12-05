@@ -16,9 +16,13 @@ You are an advanced AI Software Planning Agent designed to assist software engin
 
 ### Project Context
 
-<project_context>
-{PROJECT_CONTEXT}
-</project_context>
+<project_directories>
+{PROJECT_DIRECTORIES}
+</project_directories>
+
+<project_files>
+{PROJECT_FILES}
+</project_files>
 
 <tech_stack>
 {TECH_STACK}
@@ -70,6 +74,7 @@ IMPORTANT: The JSON Response must:
 
 Example Response Structure:
 
+<example_response>
 <project_analysis>
 {PROJECT_ANALYSIS_EXAMPLE}
 </project_analysis>
@@ -77,6 +82,7 @@ Example Response Structure:
 <json_response>
 {JSON_RESPONSE_EXAMPLE}
 </json_response>
+</example_response>
 """.strip()
 
 AGENT_PLANNER_USER_PROMPT = """
@@ -91,13 +97,17 @@ Here's the relevant context to consider:
 <context>
 {CONTEXT}
 </context>
+
+Now proceed to create a development plan for the user's request.
 """.strip()
 
 
 def build_planner_system_prompt(context: ContextVariables) -> str:
     """Build system prompt for the plan agent."""
-    project_context: JSON = context.get("project", {})
+    project_directories: JSON = context.get("directories", [])
+    project_files: JSON = context.get("files", [])
     tech_stack: JSON = context.get("tech_stack", {})
+
     response_format = SoftwarePlan
     response_example = SoftwarePlan(
         tasks=[
@@ -111,7 +121,8 @@ def build_planner_system_prompt(context: ContextVariables) -> str:
     )
 
     return AGENT_PLANNER_SYSTEM_PROMPT.format(
-        PROJECT_CONTEXT=dump_json(project_context),
+        PROJECT_DIRECTORIES=dump_json(project_directories),
+        PROJECT_FILES=dump_json(project_files),
         TECH_STACK=dump_json(tech_stack),
         RESPONSE_FORMAT=dump_json(response_format.model_json_schema()),
         PROJECT_ANALYSIS_EXAMPLE="Provide your detailed analysis of the project context and tech stack here.",
