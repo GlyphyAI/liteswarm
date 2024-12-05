@@ -69,7 +69,6 @@ class AgentPlanner(Protocol):
         self,
         prompt: str,
         context: ContextVariables | None = None,
-        feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan from the given prompt and context.
 
@@ -550,7 +549,6 @@ class LiteAgentPlanner(AgentPlanner):
         self,
         prompt: str,
         context: ContextVariables | None = None,
-        feedback: str | None = None,
     ) -> Result[Plan]:
         """Create a plan from the given prompt and context.
 
@@ -663,9 +661,6 @@ class LiteAgentPlanner(AgentPlanner):
                 ```
         """
         context = ContextVariables(context or {})
-
-        if feedback:
-            prompt = f"{prompt}\n\nPrevious feedback:\n{feedback}"
 
         if is_callable(self.prompt_template):
             prompt = self.prompt_template(prompt, context)
