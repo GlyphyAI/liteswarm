@@ -6,7 +6,7 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
@@ -59,16 +59,10 @@ class Message(BaseModel):
         Create different message types:
             ```python
             # System instructions
-            system_msg = Message(
-                role="system",
-                content="You are a helpful assistant."
-            )
+            system_msg = Message(role="system", content="You are a helpful assistant.")
 
             # User input
-            user_msg = Message(
-                role="user",
-                content="Calculate 2 + 2"
-            )
+            user_msg = Message(role="user", content="Calculate 2 + 2")
 
             # Assistant response with tool
             assistant_msg = Message(
@@ -77,17 +71,13 @@ class Message(BaseModel):
                 tool_calls=[
                     ChatCompletionDeltaToolCall(
                         id="calc_1",
-                        function={"name": "add", "arguments": '{"a": 2, "b": 2}'}
+                        function={"name": "add", "arguments": '{"a": 2, "b": 2}'},
                     )
-                ]
+                ],
             )
 
             # Tool result
-            tool_msg = Message(
-                role="tool",
-                content="4",
-                tool_call_id="calc_1"
-            )
+            tool_msg = Message(role="tool", content="4", tool_call_id="calc_1")
             ```
     """
 
@@ -126,7 +116,7 @@ class ToolMessage(BaseModel):
                 message=Message(
                     role="tool",
                     content="4",
-                    tool_call_id="calc_1"
+                    tool_call_id="calc_1",
                 )
             )
             ```
@@ -137,17 +127,17 @@ class ToolMessage(BaseModel):
                 message=Message(
                     role="tool",
                     content="Switching to expert",
-                    tool_call_id="switch_1"
+                    tool_call_id="switch_1",
                 ),
                 agent=Agent(
                     id="math-expert",
                     instructions="You are a math expert.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 context_variables=ContextVariables(
                     specialty="mathematics",
-                    confidence=0.9
-                )
+                    confidence=0.9,
+                ),
             )
             ```
     """
@@ -177,17 +167,14 @@ class Delta(BaseModel):
         Different types of updates:
             ```python
             # Content chunk
-            content_delta = Delta(
-                role="assistant",
-                content="Hello, "
-            )
+            content_delta = Delta(role="assistant", content="Hello, ")
 
             # Tool call start
             tool_delta = Delta(
                 tool_calls=[
                     ChatCompletionDeltaToolCall(
                         id="calc_1",
-                        function={"name": "add", "arguments": '{"a": 2'}
+                        function={"name": "add", "arguments": '{"a": 2'},
                     )
                 ]
             )
@@ -197,7 +184,7 @@ class Delta(BaseModel):
                 tool_calls=[
                     ChatCompletionDeltaToolCall(
                         id="calc_1",
-                        function={"name": "add", "arguments": ', "b": 2}'}
+                        function={"name": "add", "arguments": ', "b": 2}'},
                     )
                 ]
             )
@@ -253,7 +240,7 @@ class ResponseCost(BaseModel):
             ```python
             cost = ResponseCost(
                 prompt_tokens_cost=0.001,  # $0.001 for input
-                completion_tokens_cost=0.002  # $0.002 for output
+                completion_tokens_cost=0.002,  # $0.002 for output
             )
             total = cost.prompt_tokens_cost + cost.completion_tokens_cost
             ```
@@ -328,10 +315,11 @@ class Agent(BaseModel):
                     Language: {context.get('language')}.
                 '''
 
+
             agent = Agent(
                 id="expert",
                 instructions=get_instructions,
-                llm=LLM(model="gpt-4o")
+                llm=LLM(model="gpt-4o"),
             )
             ```
     """
@@ -424,12 +412,12 @@ class ToolCallMessageResult(ToolCallResult):
                 message=Message(
                     role="tool",
                     content="42",
-                    tool_call_id="calc_1"
+                    tool_call_id="calc_1",
                 ),
                 context_variables=ContextVariables(
                     last_result=42,
-                    calculation_type="simple"
-                )
+                    calculation_type="simple",
+                ),
             )
             ```
     """
@@ -455,17 +443,17 @@ class ToolCallAgentResult(ToolCallResult):
                 agent=Agent(
                     id="math-expert",
                     instructions="You are a math expert.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 message=Message(
                     role="tool",
                     content="Switching to math expert",
-                    tool_call_id="switch_1"
+                    tool_call_id="switch_1",
                 ),
                 context_variables=ContextVariables(
                     expertise="mathematics",
-                    difficulty="advanced"
-                )
+                    difficulty="advanced",
+                ),
             )
             ```
     """
@@ -490,7 +478,7 @@ class ToolCallFailureResult(ToolCallResult):
             ```python
             result = ToolCallFailureResult(
                 tool_call=failed_call,
-                error=ValueError("Invalid input: negative number")
+                error=ValueError("Invalid input: negative number"),
             )
             ```
     """
@@ -511,15 +499,11 @@ class CompletionResponse(BaseModel):
             response = CompletionResponse(
                 delta=Delta(content="Hello"),
                 finish_reason=None,
-                usage=Usage(
-                    prompt_tokens=10,
-                    completion_tokens=1,
-                    total_tokens=11
-                ),
+                usage=Usage(prompt_tokens=10, completion_tokens=1, total_tokens=11),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.0001,
-                    completion_tokens_cost=0.0002
-                )
+                    completion_tokens_cost=0.0002,
+                ),
             )
             ```
     """
@@ -559,8 +543,8 @@ class AgentResponse(BaseModel):
                 usage=Usage(prompt_tokens=10, completion_tokens=2),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.0001,
-                    completion_tokens_cost=0.0002
-                )
+                    completion_tokens_cost=0.0002,
+                ),
             )
             ```
     """
@@ -603,15 +587,15 @@ class ConversationState(BaseModel):
                 agent=current_agent,
                 agent_messages=[  # Current context
                     Message(role="user", content="Hello"),
-                    Message(role="assistant", content="Hi")
+                    Message(role="assistant", content="Hi"),
                 ],
                 agent_queue=[backup_agent],  # Queued agents
                 messages=[],  # Full history
                 usage=Usage(total_tokens=100),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.001,
-                    completion_tokens_cost=0.002
-                )
+                    completion_tokens_cost=0.002,
+                ),
             )
             ```
     """
