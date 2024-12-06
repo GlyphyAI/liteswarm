@@ -60,6 +60,7 @@ def safe_get_attr(
             class Example:
                 attribute: int = 42
 
+
             instance = Example()
 
             # Attribute exists and matches expected type
@@ -67,9 +68,7 @@ def safe_get_attr(
             print(value1)  # Output: 42
 
             # Attribute exists but does not match expected type
-            value2: str = safe_get_attr(
-                instance, "attribute", str, default="default_value"
-            )
+            value2: str = safe_get_attr(instance, "attribute", str, default="default_value")
             print(value2)  # Output: "default_value"
 
             # Attribute does not exist, returns default
@@ -131,7 +130,7 @@ def extract_json(content: str) -> JSON:
             assert data == {"x": 1, "y": 2}
 
             # Array
-            items = extract_json('[1, 2, 3]')
+            items = extract_json("[1, 2, 3]")
             assert items == [1, 2, 3]
             ```
 
