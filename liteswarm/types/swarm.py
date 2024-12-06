@@ -354,6 +354,47 @@ class Agent(BaseModel):
     )
 
 
+class ToolOutput(BaseModel):
+    """Output from a tool execution.
+
+    Contains the tool's output value and optionally includes a new agent
+    or context updates.
+
+    Examples:
+        Simple tool output:
+            ```python
+            output = ToolOutput(content=42)
+            ```
+
+        Agent switch with context:
+            ```python
+            output = ToolOutput(
+                content="Switching to expert",
+                agent=Agent(
+                    id="math-expert",
+                    instructions="You are a math expert.",
+                    llm=LLM(model="gpt-4o"),
+                ),
+                context_variables=ContextVariables(specialty="mathematics"),
+            )
+            ```
+    """
+
+    content: Any
+    """Content of the tool output."""
+
+    agent: Agent | None = None
+    """New agent to switch to."""
+
+    context_variables: ContextVariables | None = None
+    """Context updates to apply."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+    )
+
+
 class ToolCallResult(BaseModel):
     """Base class for tool call results.
 
