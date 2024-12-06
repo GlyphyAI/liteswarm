@@ -9,6 +9,7 @@ from textwrap import dedent
 from typing import Any, TypeVar
 
 import orjson
+from pydantic import BaseModel
 
 from liteswarm.types.misc import JSON
 
@@ -258,3 +259,32 @@ def find_tag_content(text: str, tag: str) -> str | None:
     pattern = re.compile(rf"<{tag}>(.*?)</{tag}>", re.DOTALL)
     match = pattern.search(text)
     return match.group(1) if match else None
+
+
+def parse_content(value: Any) -> str:
+    """Parse any value to a string representation suitable for content.
+
+    Handles different types appropriately:
+    - Strings are returned as-is
+    - Pydantic models are JSON serialized
+    - Other objects are JSON serialized with special handling
+
+    Args:
+        value: Any value to convert to string.
+
+    Returns:
+        String representation of the value.
+
+    Examples:
+        ```python
+        to_content_string("hello")  # Returns: hello
+        to_content_string(42)  # Returns: 42
+        to_content_string({"x": 1})  # Returns: {"x": 1}
+        to_content_string(MyModel(field=1))  # Returns: {"field": 1}
+        ```
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, BaseModel):
+        return value.model_dump_json()
+    return orjson.dumps(value).decode()
