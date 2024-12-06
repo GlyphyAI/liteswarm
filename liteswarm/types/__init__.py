@@ -9,8 +9,7 @@ from litellm.types.utils import ChatCompletionDeltaToolCall
 from .context import ContextVariables, ReservedContextKey
 from .llm import LLM, AgentTool
 from .misc import JSON, Number
-from .result import Result
-from .swarm import Agent, AgentInstructions, Delta, Message, ToolCallResult, ToolMessage
+from .swarm import Agent, AgentInstructions, Delta, Message, ToolCallResult, ToolMessage, ToolOutput
 from .swarm_team import (
     Artifact,
     ArtifactStatus,
@@ -38,11 +37,11 @@ __all__ = [
     "Plan",
     "PlanFeedbackHandler",
     "ReservedContextKey",
-    "Result",
     "Task",
     "TaskDefinition",
     "TaskResult",
     "TeamMember",
     "ToolCallResult",
     "ToolMessage",
+    "ToolOutput",
 ]
