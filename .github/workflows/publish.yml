@@ -1,26 +1,57 @@
-name: Publish Python Package
+name: Publish Python Package to PyPI
 
 on:
   release:
     types: [created]
 
 jobs:
-  deploy:
+  build-and-publish:
     runs-on: ubuntu-latest
+
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: '3.11'
-    - name: Install dependencies
-      run: |
-        pip install uv
-        uv pip install --system build twine
-    - name: Build package
-      run: uv pip build --system
-    - name: Publish package
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-      run: twine upload dist/*
+      # Step 1: Checkout the repository
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      # Step 2: Set up Python environment
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+
+      # Step 3: Install Build Tools and Dev Dependencies
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine uv
+          pip install ".[dev]"
+
+      # Step 4: Run Linting with Ruff
+      # - name: Run Linting with Ruff
+      #   run: |
+      #     ruff check .
+
+      # Step 5: Run Type Checking with MyPy
+      # - name: Run Type Checking with MyPy
+      #   run: |
+      #     mypy .
+
+      # Step 6: (Optional) Run Additional Development Tools
+      # If you have other dev tools like `pytest`, you can install and run them similarly
+      # - name: Run Tests with Pytest
+      #   run: |
+      #     pip install pytest
+      #     pytest
+
+      # Step 7: Build the Package
+      - name: Build Package
+        run: |
+          python -m build
+
+      # Step 8: Publish to PyPI
+      - name: Publish to PyPI
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+        run: |
+          python -m twine upload dist/* --non-interactive --verbose
