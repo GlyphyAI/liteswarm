@@ -342,30 +342,62 @@ class Agent(BaseModel):
     )
 
 
-class ToolOutput(BaseModel):
-    """Output from a tool execution.
+class ToolResult(BaseModel):
+    """Public API wrapper for tool execution results.
 
-    Contains the tool's output value and optionally includes a new agent
-    or context updates.
+    This class is part of the public API and should be used to wrap results from
+    your tool functions. It allows you to:
+    - Return data from your tools
+    - Switch to a different agent
+    - Update context variables
+
+    The content must be JSON serializable to be used as a tool result. For complex
+    return types, consider serializing them to a JSON-compatible format.
 
     Examples:
-        Simple tool output:
+        Simple tool result:
             ```python
-            output = ToolOutput(content=42)
+            # In your tool function
+            def calculate(a: int, b: int) -> ToolResult:
+                result = a + b
+                return ToolResult(content=result)
             ```
 
-        Agent switch with context:
+        Tool result with context updates:
             ```python
-            output = ToolOutput(
-                content="Switching to expert",
-                agent=Agent(
-                    id="math-expert",
-                    instructions="You are a math expert.",
-                    llm=LLM(model="gpt-4o"),
-                ),
-                context_variables=ContextVariables(specialty="mathematics"),
-            )
+            def fetch_data(url: str) -> ToolResult:
+                data = requests.get(url).json()
+                return ToolResult(
+                    content=data["summary"],
+                    context_variables=ContextVariables(
+                        full_data=data,
+                        last_updated=datetime.now().isoformat(),
+                    ),
+                )
             ```
+
+        Agent switching with context:
+            ```python
+            def analyze_complexity(code: str) -> ToolResult:
+                if "machine learning" in code:
+                    return ToolResult(
+                        content="Switching to ML expert",
+                        agent=Agent(
+                            id="ml-expert",
+                            instructions="You are an ML expert.",
+                            llm=LLM(model="gpt-4o"),
+                        ),
+                        context_variables=ContextVariables(
+                            domain="machine_learning",
+                            complexity="high",
+                        ),
+                    )
+                return ToolResult(content="Standard code review needed")
+            ```
+
+    Note:
+        This is the recommended way to return results from your tool functions.
+        Do not use internal classes like ToolCallResult and its subclasses.
     """
 
     content: Any
