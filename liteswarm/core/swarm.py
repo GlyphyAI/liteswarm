@@ -1264,13 +1264,18 @@ class Swarm:
                 def get_instructions(context: ContextVariables) -> str:
                     return f"Help {context['user_name']} with math."
 
+
                 def add(a: float, b: float, context_variables: ContextVariables) -> float:
                     return a + b
+
 
                 agent = Agent(
                     id="math",
                     instructions=get_instructions,
-                    llm=LLM(model="gpt-4o", tools=[add])
+                    llm=LLM(
+                        model="gpt-4o",
+                        tools=[add],
+                    ),
                 )
 
                 async for response in swarm.stream(
@@ -1397,10 +1402,11 @@ class Swarm:
                 def get_instructions(context: ContextVariables) -> str:
                     return f"Help {context['user_name']} with their task."
 
+
                 agent = Agent(
                     id="helper",
                     instructions=get_instructions,
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 )
 
                 result = await swarm.execute(
