@@ -18,6 +18,7 @@ from .swarm_team import (
     Task,
     TaskDefinition,
     TaskResult,
+    TaskStatus,
     TeamMember,
 )
 
@@ -40,6 +41,7 @@ __all__ = [
     "Task",
     "TaskDefinition",
     "TaskResult",
+    "TaskStatus",
     "TeamMember",
     "ToolCallResult",
     "ToolMessage",

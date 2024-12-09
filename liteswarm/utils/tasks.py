@@ -32,7 +32,7 @@ def create_plan_with_tasks(task_types: list[type[Task]]) -> type[Plan]:
             ```
     """
     plan_schema_name = Plan.__name__
-    task_schemas: Any = union([task.model_json_schema() for task in task_types])
+    task_schemas: Any = union(task_types)
 
     return change_field_type(
         model_type=Plan,

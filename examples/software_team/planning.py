@@ -6,7 +6,7 @@
 
 from liteswarm.core import Swarm
 from liteswarm.experimental import LitePlanningAgent, PlanningAgent
-from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition
+from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition, TaskStatus
 
 from .types import FlutterTask, SoftwarePlan
 from .utils import dump_json, find_json_tag
@@ -115,9 +115,15 @@ def build_planning_agent_system_prompt(context: ContextVariables) -> str:
                 type="flutter_feature",
                 id="<task_id>",
                 title="<task_title>",
+                description="<task_description>",
+                status=TaskStatus.PENDING,
+                assignee=None,
+                dependencies=[],
+                metadata=None,
                 feature_type="<feature_type>",
             ),
-        ]
+        ],
+        metadata=None,
     )
 
     return PLANNING_AGENT_SYSTEM_PROMPT.format(
