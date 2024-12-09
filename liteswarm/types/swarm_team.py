@@ -9,7 +9,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal, Protocol, TypeAlias, TypeVar, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent
@@ -522,6 +522,47 @@ class TeamMember(BaseModel):
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
     )
+
+    @field_serializer("task_types")
+    def serialize_task_types(self, task_types: list[type[Task]]) -> list[str]:
+        """Serialize task type classes to their string identifiers.
+
+        This serializer is crucial for proper JSON serialization of TeamMember objects
+        since task_types contains Pydantic model classes which cannot be directly serialized.
+        Instead, we extract each task type's string identifier (e.g., "code_review" for
+        ReviewTask) using the get_task_type() class method.
+
+        Args:
+            task_types: List of Task subclass types that this member can handle.
+
+        Returns:
+            List of task type string identifiers (e.g., ["code_review", "test"]).
+
+        Examples:
+            Serialization process:
+                ```python
+                class ReviewTask(Task):
+                    type: Literal["code_review"]
+                    # ...
+
+
+                class TestTask(Task):
+                    type: Literal["test"]
+                    # ...
+
+
+                member = TeamMember(
+                    id="reviewer",
+                    agent=review_agent,
+                    task_types=[ReviewTask, TestTask],
+                )
+
+                # When serializing TeamMember:
+                serialized = member.model_dump_json()
+                # task_types will be serialized as: ["code_review", "test"]
+                ```
+        """
+        return [task_type.get_task_type() for task_type in task_types]
 
 
 class TaskResult(BaseModel):
