@@ -497,7 +497,7 @@ dependencies = [
     { name = "pydantic" },
 ]
 
-[package.dev-dependencies]
+[package.optional-dependencies]
 dev = [
     { name = "mypy" },
     { name = "ruff" },
@@ -509,15 +509,11 @@ requires-dist = [
     { name = "griffe", specifier = ">=1.5.1" },
     { name = "json-repair", specifier = ">=0.30.2" },
     { name = "litellm", specifier = ">=1.52.2" },
+    { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13.0" },
     { name = "orjson", specifier = ">=3.10.11" },
     { name = "pydantic", specifier = ">=2.9.2" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.13.0" },
-    { name = "ruff", specifier = ">=0.7.3" },
-    { name = "typing-extensions", specifier = ">=4.12.2" },
+    { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7.3" },
+    { name = "typing-extensions", marker = "extra == 'dev'", specifier = ">=4.12.2" },
 ]
 
 [[package]]
