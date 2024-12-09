@@ -401,13 +401,13 @@ class ToolResult(BaseModel):
     """
 
     content: Any
-    """Content of the tool output."""
+    """Content of the tool result. Must be JSON serializable."""
 
     agent: Agent | None = None
-    """New agent to switch to."""
+    """Optional agent to switch to."""
 
     context_variables: ContextVariables | None = None
-    """Context updates to apply."""
+    """Optional context updates to apply."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
