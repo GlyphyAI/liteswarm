@@ -140,15 +140,15 @@ class LitePlanningAgent(PlanningAgent):
             response_format: Optional plan response format.
             response_repair_agent: Optional custom response repair agent.
         """
+        # Internal state (private)
+        self._task_registry = TaskRegistry(task_definitions)
+
         # Public properties
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
         self.prompt_template = prompt_template or self._default_planning_prompt_template()
         self.response_format = response_format or self._default_planning_response_format()
         self.response_repair_agent = response_repair_agent or self._default_response_repair_agent()
-
-        # Internal state (private)
-        self._task_registry = TaskRegistry(task_definitions)
 
     def _default_response_repair_agent(self) -> ResponseRepairAgent:
         """Create the default response repair agent for handling invalid planning responses.
