@@ -18,7 +18,7 @@ from liteswarm.experimental.swarm_team.response_repair import (
     ResponseRepairAgent,
 )
 from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHandler
-from liteswarm.types.result import Result
+from liteswarm.types.exceptions import TaskExecutionError
 from liteswarm.types.swarm import ContextVariables
 from liteswarm.types.swarm_team import (
     Artifact,
@@ -32,6 +32,7 @@ from liteswarm.types.swarm_team import (
     TaskStatus,
     TeamMember,
 )
+from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.typing import is_callable, is_subtype
 
 
@@ -330,7 +331,7 @@ class SwarmTeam:
         task: Task,
         task_definition: TaskDefinition,
         task_context: ContextVariables,
-    ) -> Result[TaskResult]:
+    ) -> TaskResult:
         """Process agent response into task result.
 
         Attempts to parse and validate the response according to the task's
@@ -428,7 +429,7 @@ class SwarmTeam:
                 timestamp=datetime.now(),
             )
 
-            return Result(value=task_result)
+            return task_result
 
         try:
             output = self._parse_response(
@@ -444,34 +445,25 @@ class SwarmTeam:
                 assignee=assignee,
             )
 
-            return Result(value=task_result)
+            return task_result
 
         except ValidationError as validation_error:
-            repair_result = await self.response_repair_agent.repair_response(
+            repaired_response = await self.response_repair_agent.repair_response(
                 agent=assignee.agent,
                 response=response,
-                response_format=task_definition.task_response_format,
+                response_format=response_format,
                 validation_error=validation_error,
                 context=task_context,
             )
 
-            if repair_result.error:
-                return Result(error=repair_result.error)
-
-            if not repair_result.value:
-                return Result(error=ValueError("No content in repair response"))
-
             task_result = TaskResult(
                 task=task,
                 content=response,
-                output=repair_result.value,
+                output=repaired_response,
                 assignee=assignee,
             )
 
-            return Result(value=task_result)
-
-        except Exception as e:
-            return Result(error=ValueError(f"Invalid task output: {e}"))
+            return task_result
 
     def _select_matching_member(self, task: Task) -> TeamMember | None:
         """Select best team member for task.
@@ -524,7 +516,7 @@ class SwarmTeam:
         self,
         prompt: str,
         context: ContextVariables | None = None,
-    ) -> Result[Plan]:
+    ) -> Plan:
         """Create a task execution plan from a natural language prompt.
 
         Uses a planning agent to analyze the prompt, break it down into tasks,
@@ -564,8 +556,8 @@ class SwarmTeam:
             context=self._context,
         )
 
-        if self.stream_handler and result.value:
-            await self.stream_handler.on_plan_created(result.value)
+        if self.stream_handler:
+            await self.stream_handler.on_plan_created(result)
 
         return result
 
@@ -664,17 +656,16 @@ class SwarmTeam:
         current_context = context
 
         while True:
-            plan_result = await self.create_plan(current_prompt, current_context)
-            if plan_result.error:
+            try:
+                plan = await self.create_plan(current_prompt, current_context)
+            except Exception as e:
                 artifact = Artifact(
                     id=f"artifact_{len(self._artifacts) + 1}",
                     status=ArtifactStatus.FAILED,
-                    error=plan_result.error,
+                    error=e,
                 )
                 self._artifacts.append(artifact)
                 return artifact
-
-            plan = plan_result.unwrap("No plan found")
 
             if feedback_handler:
                 result = await feedback_handler.handle(plan, current_prompt, current_context)
@@ -729,20 +720,18 @@ class SwarmTeam:
         self._artifacts.append(artifact)
 
         try:
+            log_verbose(f"Executing plan: {plan.tasks}", level="DEBUG")
             while next_tasks := plan.get_next_tasks():
+                log_verbose(f"Executing tasks: {next_tasks}", level="DEBUG")
                 for task in next_tasks:
-                    result = await self.execute_task(task)
-                    if result.error:
+                    try:
+                        task_result = await self.execute_task(task)
+                    except Exception as e:
                         artifact.status = ArtifactStatus.FAILED
-                        artifact.error = result.error
+                        artifact.error = e
                         return artifact
 
-                    if result.value:
-                        artifact.task_results.append(result.value)
-                    else:
-                        artifact.status = ArtifactStatus.FAILED
-                        artifact.error = ValueError(f"Failed to execute task {task.id}")
-                        return artifact
+                    artifact.task_results.append(task_result)
 
             artifact.status = ArtifactStatus.COMPLETED
 
@@ -756,7 +745,7 @@ class SwarmTeam:
             artifact.error = error
             return artifact
 
-    async def execute_task(self, task: Task) -> Result[TaskResult]:
+    async def execute_task(self, task: Task) -> TaskResult:
         """Execute a single task using an appropriate team member.
 
         Handles the complete task lifecycle:
@@ -793,55 +782,60 @@ class SwarmTeam:
                         print(f"Findings: {task_result.output.issues}")
                 ```
         """
-        assignee = self._select_matching_member(task)
-        if not assignee:
-            return Result(error=ValueError(f"No team member found for task type '{task.type}'"))
+        try:
+            assignee = self._select_matching_member(task)
+            if not assignee:
+                raise ValueError(f"No team member found for task type '{task.type}'")
 
-        if self.stream_handler:
-            await self.stream_handler.on_task_started(task)
+            if self.stream_handler:
+                await self.stream_handler.on_task_started(task)
 
-        task.status = TaskStatus.IN_PROGRESS
-        task.assignee = assignee.agent.id
+            task.status = TaskStatus.IN_PROGRESS
+            task.assignee = assignee.agent.id
 
-        task_definition = self._task_registry.get_task_definition(task.type)
-        if not task_definition:
-            task.status = TaskStatus.FAILED
-            return Result(error=ValueError(f"No TaskDefinition found for task type '{task.type}'"))
+            task_definition = self._task_registry.get_task_definition(task.type)
+            if not task_definition:
+                task.status = TaskStatus.FAILED
+                raise ValueError(f"No TaskDefinition found for task type '{task.type}'")
 
-        task_context = self._build_task_context(task)
-        task_instructions = self._prepare_instructions(
-            task=task,
-            task_definition=task_definition,
-            task_context=task_context,
-        )
+            task_context = self._build_task_context(task)
+            task_instructions = self._prepare_instructions(
+                task=task,
+                task_definition=task_definition,
+                task_context=task_context,
+            )
 
-        result = await self.swarm.execute(
-            agent=assignee.agent,
-            prompt=task_instructions,
-            context_variables=task_context,
-        )
+            result = await self.swarm.execute(
+                agent=assignee.agent,
+                prompt=task_instructions,
+                context_variables=task_context,
+            )
 
-        if not result.content:
-            task.status = TaskStatus.FAILED
-            return Result(error=ValueError("The agent did not return any content"))
+            if not result.content:
+                raise ValueError("The agent did not return any content")
 
-        task_result = await self._process_response(
-            response=result.content,
-            assignee=assignee,
-            task=task,
-            task_definition=task_definition,
-            task_context=task_context,
-        )
-
-        if task_result.success():
             task.status = TaskStatus.COMPLETED
-        else:
+            task_result = await self._process_response(
+                response=result.content,
+                assignee=assignee,
+                task=task,
+                task_definition=task_definition,
+                task_context=task_context,
+            )
+
+            if self.stream_handler:
+                await self.stream_handler.on_task_completed(task)
+
+            return task_result
+
+        except Exception as e:
             task.status = TaskStatus.FAILED
-
-        if self.stream_handler:
-            await self.stream_handler.on_task_completed(task)
-
-        return task_result
+            raise TaskExecutionError(
+                f"Failed to execute task: {task.title}",
+                task=task,
+                assignee=assignee if "assignee" in locals() else None,
+                original_error=e,
+            ) from e
 
     def get_artifacts(self) -> list[Artifact]:
         """Get all execution artifacts.
