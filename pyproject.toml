@@ -1,6 +1,6 @@
 [project]
 name = "liteswarm"
-version = "0.1.0"
+version = "0.1.1"
 description = "A lightweight framework for building AI agent systems"
 readme = "README.md"
 license = {file = "LICENSE"}
