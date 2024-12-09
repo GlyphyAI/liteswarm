@@ -36,50 +36,102 @@ from liteswarm.utils.typing import is_callable, is_subtype
 
 
 class SwarmTeam:
-    """Orchestrates a team of specialized agents for task execution.
+    """Experimental framework for orchestrating complex agent workflows.
 
-    Manages agent teams that can execute different types of tasks, handling planning,
-    execution, and result tracking.
+    SwarmTeam provides a two-phase approach to task execution:
+
+    1. Planning Phase: Analyzes prompts to create structured plans
+       - Uses planning agent to break down work into tasks
+       - Validates task types and dependencies
+       - Supports interactive feedback loop
+       - Can use OpenAI-compatible schemas or custom formats
+
+    2. Execution Phase: Executes tasks with specialized agents
+       - Assigns tasks to capable team members
+       - Handles structured inputs/outputs via framework-level parsing
+       - Tracks execution state
+       - Produces artifacts with results
+
+    The framework supports both OpenAI-compatible structured outputs and custom
+    formats through its two-layer parsing system. Users can choose to:
+    - Use OpenAI-compatible schemas for direct LLM structured outputs
+    - Use custom formats with framework-level parsing
+    - Combine both approaches for robust validation
 
     Examples:
-        Define task types and team members:
+        Create a team for code review:
             ```python
-            # Define task and output schemas
+            # 1. Define task type (OpenAI-compatible in this example)
             class ReviewTask(Task):
+                type: Literal["code_review"]  # Discriminator
                 pr_url: str
                 review_type: str
 
 
+            # 2. Create task definition with structured output
             class ReviewOutput(BaseModel):
                 issues: list[str]
                 approved: bool
 
 
-            # Create task definition
             review_def = TaskDefinition(
                 task_schema=ReviewTask,
-                task_instructions="Review {task.pr_url}",
-                task_response_format=ReviewOutput,
+                task_instructions="Review {task.pr_url} focusing on {task.review_type}",
+                task_response_format=ReviewOutput,  # Framework-level parsing
             )
 
-            # Create team member
-            reviewer = TeamMember(
-                id="reviewer-1",
-                agent=Agent(id="review-gpt", llm=LLM(model="gpt-4o")),
-                task_types=[ReviewTask],
+            # 3. Create specialized agent
+            review_agent = Agent(
+                id="reviewer",
+                instructions="You are a code reviewer.",
+                llm=LLM(
+                    model="gpt-4o",
+                    response_format=ReviewOutput,  # Optional LLM-level format
+                ),
             )
 
-            # Create and use team
+            # 4. Create team member
+            members = [
+                TeamMember(
+                    id="senior-reviewer",
+                    agent=review_agent,
+                    task_types=[ReviewTask],
+                ),
+            ]
+
+            # 5. Create team
+            swarm = Swarm()
             team = SwarmTeam(
                 swarm=swarm,
-                members=[reviewer],
+                members=members,
                 task_definitions=[review_def],
             )
 
-            # Execute workflow
-            plan = await team.create_plan("Review PR #123")
-            results = await team.execute_plan(plan.unwrap())
+            # 6. Execute workflow
+            artifact = await team.execute(
+                prompt="Review PR #123 for security issues",
+                context=ContextVariables(
+                    pr_url="github.com/org/repo/123",
+                    review_type="security",
+                ),
+            )
+
+            # 7. Process structured results
+            if artifact.status == ArtifactStatus.COMPLETED:
+                for result in artifact.task_results:
+                    output = result.output  # ReviewOutput instance
+                    assert isinstance(output, ReviewOutput)
+                    print(f"Review by: {result.assignee.id}")
+                    print(f"Issues: {output.issues}")
+                    print(f"Approved: {output.approved}")
             ```
+
+    Note:
+        This is an experimental agent orchestration feature that demonstrates:
+        - Two-layer structured output handling (LLM-level and Framework-level)
+        - Complex workflow orchestration
+        - Team-based task execution
+        - OpenAI-compatible schemas
     """
 
     def __init__(  # noqa: PLR0913
@@ -161,9 +213,16 @@ class SwarmTeam:
             Basic context:
                 ```python
                 task = Task(
-                    id="review-1",
+                    # Base Task required fields
                     type="review",
+                    id="review-1",
                     title="Review PR",
+                    description="Review the PR for security issues",
+                    status=TaskStatus.PENDING,
+                    assignee=None,
+                    dependencies=[],
+                    metadata=None,
+                    # Additional fields from task definition
                     pr_url="github.com/org/repo/123",
                 )
                 context = team._build_task_context(task)
@@ -378,7 +437,17 @@ class SwarmTeam:
                     approved: bool
 
 
-                task = Task(id="review-1", type="review", title="Review PR")
+                task = Task(
+                    # Base Task required fields
+                    type="code_review",
+                    id="review-1",
+                    title="Review PR",
+                    description="Review code changes",
+                    status=TaskStatus.PENDING,
+                    assignee=None,
+                    dependencies=[],
+                    metadata=None,
+                )
                 assignee = TeamMember(
                     id="reviewer-1",
                     agent=Agent(id="review-gpt"),
@@ -779,8 +848,16 @@ class SwarmTeam:
                 try:
                     task_result = await team.execute_task(
                         ReviewTask(
+                            # Base Task required fields
+                            type="code_review",  # Must match Literal
                             id="review-1",
                             title="Security review of auth changes",
+                            description="Review PR for security vulnerabilities",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=[],
+                            metadata=None,
+                            # ReviewTask specific fields
                             pr_url="github.com/org/repo/123",
                             review_type="security",
                         )
