@@ -227,6 +227,7 @@ class Task(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
     @classmethod
@@ -349,6 +350,7 @@ class Plan(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
     def validate_dependencies(self) -> list[str]:
