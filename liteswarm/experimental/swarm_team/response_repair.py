@@ -28,10 +28,10 @@ class ResponseRepairAgent(Protocol):
         self,
         agent: Agent,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel] | None,
+        response_format: PydanticResponseFormat[PydanticModel],
         validation_error: ValidationError,
         context: ContextVariables,
-    ) -> Result[PydanticModel]:
+    ) -> PydanticModel:
         """Repair an invalid response to match the expected format.
 
         The repair process should attempt to fix the invalid response while maintaining
@@ -141,9 +141,9 @@ class LiteResponseRepairAgent:
     def _parse_response(
         self,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel] | None,
+        response_format: PydanticResponseFormat[PydanticModel],
         context: ContextVariables,
-    ) -> Result[PydanticModel]:
+    ) -> PydanticModel:
         """Parse and validate a response string against the expected format.
 
         Attempts to parse the response string using the provided format. If the
@@ -187,16 +187,10 @@ class LiteResponseRepairAgent:
             assert isinstance(result.value, ReviewOutput)
             ```
         """
-        if not response_format:
-            return Result(value=response)
+        if is_callable(response_format):
+            return response_format(response, context)
 
-        try:
-            if is_callable(response_format):
-                return Result(value=response_format(response, context))
-            return Result(value=response_format.model_validate_json(response))
-        except Exception as e:
-            log_verbose(f"Error parsing response: {e}", level="ERROR")
-            return Result(error=e)
+        return response_format.model_validate_json(response)
 
     async def _regenerate_last_user_message(
         self,
@@ -257,10 +251,10 @@ class LiteResponseRepairAgent:
         self,
         agent: Agent,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel] | None,
+        response_format: PydanticResponseFormat[PydanticModel],
         validation_error: ValidationError,
         context: ContextVariables,
-    ) -> Result[PydanticModel]:
+    ) -> PydanticModel:
         """Attempt to repair an invalid response by regenerating it.
 
         If a response is invalid, we remove it and ask the agent to try again
