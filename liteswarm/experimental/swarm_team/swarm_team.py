@@ -255,7 +255,8 @@ class SwarmTeam:
 
         Raises:
             TypeError: If output doesn't match schema.
-            ValidationError: If content is invalid and cannot be repaired.
+            ValidationError: If content is invalid.
+            ValueError: If response format is invalid.
 
         Examples:
             Parse with model schema:
@@ -265,34 +266,46 @@ class SwarmTeam:
                     approved: bool
 
 
-                response = '''
-                {
-                    "issues": ["Security risk in auth", "Missing tests"],
-                    "approved": false
-                }
-                '''
-                output = team._parse_response(
-                    response=response,
-                    response_format=ReviewOutput,
-                    task_context=context,
-                )
-                # Returns ReviewOutput instance
+                try:
+                    response = '''
+                    {
+                        "issues": ["Security risk in auth", "Missing tests"],
+                        "approved": false
+                    }
+                    '''
+                    output = team._parse_response(
+                        response=response,
+                        response_format=ReviewOutput,
+                        task_context=context,
+                    )
+                    print(output.model_dump())
+                except ValidationError as e:
+                    print(f"Invalid response format: {e}")
                 ```
 
             Parse with custom function:
                 ```python
                 def parse_review(content: str, context: ContextVariables) -> ReviewOutput:
-                    # Custom parsing logic
-                    data = json.loads(content)
-                    return ReviewOutput(**data)
+                    try:
+                        # Custom parsing logic
+                        data = json.loads(content)
+                        return ReviewOutput(
+                            issues=data["issues"],
+                            approved=data["approved"],
+                        )
+                    except (json.JSONDecodeError, KeyError) as e:
+                        raise ValidationError(f"Failed to parse review: {e}")
 
 
-                output = team._parse_response(
-                    response=response,
-                    response_format=parse_review,
-                    task_context=context,
-                )
-                # Returns ReviewOutput instance via custom parser
+                try:
+                    output = team._parse_response(
+                        response='{"issues": [], "approved": true}',
+                        response_format=parse_review,
+                        task_context=context,
+                    )
+                    print(output.model_dump())
+                except ValidationError as e:
+                    print(f"Failed to parse with custom function: {e}")
                 ```
 
             With json_repair:
@@ -304,12 +317,15 @@ class SwarmTeam:
                     approved: false  # Missing quotes
                 }
                 '''
-                output = team._parse_response(
-                    response=response,
-                    response_format=ReviewOutput,
-                    task_context=context,
-                )
-                # Still returns valid ReviewOutput
+                try:
+                    output = team._parse_response(
+                        response=response,
+                        response_format=ReviewOutput,
+                        task_context=context,
+                    )
+                    print(output.model_dump())
+                except ValidationError as e:
+                    print(f"Failed to repair JSON: {e}")
                 ```
         """
         if is_callable(response_format):
@@ -346,9 +362,11 @@ class SwarmTeam:
             task_context: Execution context.
 
         Returns:
-            Result containing either:
-                - Task result with validated output
-                - Error if parsing fails and cannot be recovered
+            Task result with validated output.
+
+        Raises:
+            ValidationError: If response cannot be parsed and repair fails.
+            ResponseRepairError: If response repair attempts fail.
 
         Examples:
             Successful execution:
@@ -369,37 +387,18 @@ class SwarmTeam:
                     task_response_format=ReviewOutput,
                 )
 
-                response = '{"issues": [], "approved": true}'
-                result = await team._process_response(
-                    response=response,
-                    assignee=assignee,
-                    task=task,
-                    task_definition=task_def,
-                    task_context=context,
-                )
-                # Returns Result with TaskResult containing:
-                # - task details
-                # - assignee info
-                # - parsed ReviewOutput
-                ```
-
-            With response repair:
-                ```python
-                # Invalid JSON that needs repair
-                response = '''
-                {
-                    issues: ["Missing tests"]  # Missing quotes
-                    'approved': false,  # Extra comma
-                }
-                '''
-                result = await team._process_response(
-                    response=response,
-                    assignee=assignee,
-                    task=task,
-                    task_definition=task_def,
-                    task_context=context,
-                )
-                # Returns repaired and validated TaskResult
+                try:
+                    response = '{"issues": [], "approved": true}'
+                    task_result = await team._process_response(
+                        response=response,
+                        assignee=assignee,
+                        task=task,
+                        task_definition=task_def,
+                        task_context=context,
+                    )
+                    print(f"Task completed: {task_result.output}")
+                except (ValidationError, ResponseRepairError) as e:
+                    print(f"Failed to process response: {e}")
                 ```
 
             Without response format:
@@ -409,14 +408,14 @@ class SwarmTeam:
                     task_response_format=None,  # No format specified
                 )
                 response = "Task completed successfully"
-                result = await team._process_response(
+                task_result = await team._process_response(
                     response=response,
                     assignee=assignee,
                     task=task,
                     task_definition=task_def,
                     task_context=context,
                 )
-                # Returns TaskResult with raw content
+                print(task_result.content)  # Raw response content
                 ```
         """
         response_format = task_definition.task_response_format
@@ -527,25 +526,34 @@ class SwarmTeam:
             context: Optional variables for plan customization (e.g., URLs, paths).
 
         Returns:
-            Result containing either:
-                - A structured plan with ordered tasks.
-                - Error if plan creation or validation fails.
+            A structured plan with ordered tasks.
+
+        Raises:
+            PlanValidationError: If plan creation or validation fails.
+            ResponseParsingError: If the planning response cannot be parsed.
 
         Examples:
             Basic usage:
                 ```python
-                result = await team.create_plan("Review and test PR #123")
+                try:
+                    plan = await team.create_plan("Review and test PR #123")
+                    print(f"Created plan with {len(plan.tasks)} tasks")
+                except PlanValidationError as e:
+                    print(f"Invalid plan: {e}")
                 ```
 
             With additional context:
                 ```python
-                result = await team.create_plan(
-                    prompt="Review authentication changes in PR #123",
-                    context=ContextVariables(
-                        pr_url="github.com/org/repo/123",
-                        focus_areas=["security", "performance"],
-                    ),
-                )
+                try:
+                    plan = await team.create_plan(
+                        prompt="Review authentication changes in PR #123",
+                        context=ContextVariables(
+                            pr_url="github.com/org/repo/123",
+                            focus_areas=["security", "performance"],
+                        ),
+                    )
+                except (PlanValidationError, ResponseParsingError) as e:
+                    print(f"Planning failed: {e}")
                 ```
         """
         if context:
@@ -758,28 +766,30 @@ class SwarmTeam:
             task: Task to execute, must match a registered task type.
 
         Returns:
-            Result containing either:
-                - Task execution result with outputs.
-                - Error if execution fails or no capable member found.
+            Task execution result with outputs.
+
+        Raises:
+            TaskExecutionError: If execution fails or no capable member is found.
+            ValueError: If no task definition is found or agent returns no content.
 
         Examples:
             Execute a review task:
                 ```python
-                result = await team.execute_task(
-                    ReviewTask(
-                        id="review-1",
-                        title="Security review of auth changes",
-                        pr_url="github.com/org/repo/123",
-                        review_type="security",
+                try:
+                    task_result = await team.execute_task(
+                        ReviewTask(
+                            id="review-1",
+                            title="Security review of auth changes",
+                            pr_url="github.com/org/repo/123",
+                            review_type="security",
+                        )
                     )
-                )
-
-                if result.value:
-                    task_result = result.value
                     print(f"Reviewer: {task_result.assignee.id}")
                     print(f"Status: {task_result.task.status}")
                     if task_result.output:
                         print(f"Findings: {task_result.output.issues}")
+                except TaskExecutionError as e:
+                    print(f"Task execution failed: {e}")
                 ```
         """
         try:
