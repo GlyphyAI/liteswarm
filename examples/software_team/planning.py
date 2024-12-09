@@ -115,9 +115,15 @@ def build_planning_agent_system_prompt(context: ContextVariables) -> str:
                 type="flutter_feature",
                 id="<task_id>",
                 title="<task_title>",
+                description="<task_description>",
+                status=TaskStatus.PENDING,
+                assignee=None,
+                dependencies=[],
+                metadata=None,
                 feature_type="<feature_type>",
             ),
-        ]
+        ],
+        metadata=None,
     )
 
     return PLANNING_AGENT_SYSTEM_PROMPT.format(
