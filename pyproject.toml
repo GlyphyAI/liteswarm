@@ -47,6 +47,9 @@ dev = [
     "typing-extensions>=4.12.2",
 ]
 
+[tool.setuptools.package-data]
+"liteswarm" = ["py.typed"]
+
 [tool.ruff]
 show-fixes = true
 line-length = 100
