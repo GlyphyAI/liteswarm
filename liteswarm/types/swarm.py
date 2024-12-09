@@ -417,9 +417,36 @@ class ToolResult(BaseModel):
 
 
 class ToolCallResult(BaseModel):
-    """Base class for tool call results.
+    """Internal base class for tool call results.
 
-    Provides common structure for all tool execution results.
+    This is an internal class used by the framework to handle tool execution results.
+    It should not be used directly in user code. For wrapping tool results in your
+    application code, use the ToolResult class instead.
+
+    The ToolCallResult hierarchy (ToolCallMessageResult, ToolCallAgentResult,
+    ToolCallFailureResult) is designed for internal event processing and should only
+    be referenced in generic event handlers if needed.
+
+    For public API usage:
+        - Use ToolResult to wrap your tool's return values
+        - Use ToolResult when you need to switch agents or update context
+        - See ToolResult documentation for examples
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        class ToolEventHandler:
+            async def handle_tool_call(self, result: ToolCallResult):
+                if isinstance(result, ToolCallMessageResult):
+                    # Process message result
+                    pass
+                elif isinstance(result, ToolCallAgentResult):
+                    # Process agent switch
+                    pass
+                elif isinstance(result, ToolCallFailureResult):
+                    # Handle failure
+                    pass
+        ```
     """
 
     tool_call: ChatCompletionDeltaToolCall
@@ -432,27 +459,29 @@ class ToolCallResult(BaseModel):
 
 
 class ToolCallMessageResult(ToolCallResult):
-    """Result of a tool call that produced a message.
+    """Internal class for tool call results that produced a message.
 
-    Used for tools that return data or text responses, optionally
+    This is an internal class used by the framework to handle tool message results.
+    It should not be used directly in user code. For wrapping tool results in your
+    application code, use the ToolResult class instead.
+
+    Used internally for tools that return data or text responses, optionally
     with context updates.
 
-    Examples:
-        Tool response with context:
-            ```python
-            result = ToolCallMessageResult(
-                tool_call=calc_call,
-                message=Message(
-                    role="tool",
-                    content="42",
-                    tool_call_id="calc_1",
-                ),
-                context_variables=ContextVariables(
-                    last_result=42,
-                    calculation_type="simple",
-                ),
-            )
-            ```
+    For public API usage:
+        - Use ToolResult to wrap your tool's return values
+        - See ToolResult documentation for examples
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        async def handle_tool_message(result: ToolCallMessageResult):
+            # Process the tool's message
+            message = result.message
+            if result.context_variables:
+                # Apply context updates
+                pass
+        ```
     """
 
     message: Message
@@ -463,32 +492,32 @@ class ToolCallMessageResult(ToolCallResult):
 
 
 class ToolCallAgentResult(ToolCallResult):
-    """Result of a tool call that produced a new agent.
+    """Internal class for tool call results that produced a new agent.
 
-    Used for agent-switching tools that return a new agent with
+    This is an internal class used by the framework to handle agent switching.
+    It should not be used directly in user code. For switching agents in your
+    application code, use the ToolResult class instead.
+
+    Used internally for agent-switching tools that return a new agent with
     optional transition message and context.
 
-    Examples:
-        Switch to expert agent:
-            ```python
-            result = ToolCallAgentResult(
-                tool_call=switch_call,
-                agent=Agent(
-                    id="math-expert",
-                    instructions="You are a math expert.",
-                    llm=LLM(model="gpt-4o"),
-                ),
-                message=Message(
-                    role="tool",
-                    content="Switching to math expert",
-                    tool_call_id="switch_1",
-                ),
-                context_variables=ContextVariables(
-                    expertise="mathematics",
-                    difficulty="advanced",
-                ),
-            )
-            ```
+    For public API usage:
+        - Use ToolResult to switch agents or update context
+        - See ToolResult documentation for examples
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        async def handle_agent_switch(result: ToolCallAgentResult):
+            # Switch to new agent
+            new_agent = result.agent
+            if result.message:
+                # Handle transition message
+                pass
+            if result.context_variables:
+                # Apply context updates
+                pass
+        ```
     """
 
     agent: Agent
@@ -502,18 +531,28 @@ class ToolCallAgentResult(ToolCallResult):
 
 
 class ToolCallFailureResult(ToolCallResult):
-    """Result of a failed tool call.
+    """Internal class for failed tool call results.
 
-    Captures errors during tool execution for proper handling.
+    This is an internal class used by the framework to handle tool execution failures.
+    It should not be used directly in user code. For handling tool errors in your
+    application code, use standard Python exception handling instead.
 
-    Examples:
-        Handle tool failure:
-            ```python
-            result = ToolCallFailureResult(
-                tool_call=failed_call,
-                error=ValueError("Invalid input: negative number"),
-            )
-            ```
+    Used internally to capture errors during tool execution for proper framework-level
+    handling.
+
+    For public API usage:
+        - Use try/except blocks to handle tool errors
+        - See tool function documentation for specific exceptions
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        async def handle_tool_failure(result: ToolCallFailureResult):
+            # Log the error
+            logger.error(f"Tool failed: {result.error}")
+            # Update execution state
+            execution.mark_failed(result.tool_call.id)
+        ```
     """
 
     error: Exception
