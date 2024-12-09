@@ -125,8 +125,11 @@ class SwarmTeam:
     # MARK: Internal Helpers
     # ================================================
 
-    def _get_team_capabilities(self) -> dict[str, list[str]]:
+    def _get_team_capabilities(self, members: list[TeamMember]) -> dict[str, list[str]]:
         """Map task types to capable team members.
+
+        Args:
+            members: Team members to consider when determining capabilities.
 
         Returns:
             Dict mapping task types to member IDs.
@@ -139,7 +142,7 @@ class SwarmTeam:
                 ```
         """
         capabilities: dict[str, list[str]] = defaultdict(list[str])
-        for member in self.members.values():
+        for member in members:
             for task_type in member.task_types:
                 capabilities[task_type.get_task_type()].append(member.agent.id)
 
