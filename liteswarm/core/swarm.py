@@ -8,6 +8,7 @@ import asyncio
 import copy
 from collections import deque
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import litellm
 import orjson
@@ -19,7 +20,6 @@ from pydantic import BaseModel
 from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from liteswarm.core.summarizer import LiteSummarizer, Summarizer
 from liteswarm.types.exceptions import CompletionError, ContextLengthError
-from liteswarm.types.result import Result
 from liteswarm.types.swarm import (
     Agent,
     AgentResponse,
@@ -35,11 +35,12 @@ from liteswarm.types.swarm import (
     ToolCallMessageResult,
     ToolCallResult,
     ToolMessage,
+    ToolResult,
 )
 from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
-from liteswarm.utils.misc import safe_get_attr
+from liteswarm.utils.misc import parse_content, safe_get_attr
 from liteswarm.utils.retry import retry_with_exponential_backoff
 from liteswarm.utils.typing import is_subtype
 from liteswarm.utils.unwrap import unwrap_instructions
@@ -190,6 +191,125 @@ class Swarm:
     # MARK: Tool Processing
     # ================================================
 
+    def _parse_tool_call_result(
+        self,
+        tool_call: ChatCompletionDeltaToolCall,
+        result: Any,
+    ) -> ToolCallResult:
+        """Parse a tool's return value into an internal result representation.
+
+        Converts various tool return types into appropriate internal result objects
+        for framework processing. The method handles three main cases:
+        1. Direct Agent returns for immediate agent switching
+        2. ToolResult objects for complex tool responses
+        3. Simple return values that become message content
+
+        This is an internal method that bridges the public tool API (using ToolResult)
+        with the framework's internal processing (using ToolCallResult hierarchy).
+
+        Args:
+            tool_call: The original tool call that produced this result.
+            result: The raw return value from the tool function, which can be:
+                - An Agent instance for direct agent switching.
+                - A ToolResult for complex responses with context/agent updates.
+                - Any JSON-serializable value for simple responses.
+
+        Returns:
+            An internal ToolCallResult subclass instance:
+            - ToolCallAgentResult for agent switches.
+            - ToolCallMessageResult for data responses.
+            - Content is always properly formatted for conversation.
+
+        Examples:
+            Agent switching:
+                ```python
+                # Internal processing of agent switch
+                result = self._parse_tool_call_result(
+                    tool_call=call,
+                    result=Agent(id="expert", instructions="You are an expert"),
+                )
+                assert isinstance(result, ToolCallAgentResult)
+                assert result.agent.id == "expert"
+                ```
+
+            Complex tool result:
+                ```python
+                # Internal processing of tool result with context
+                result = self._parse_tool_call_result(
+                    tool_call=call,
+                    result=ToolResult(
+                        content=42,
+                        context_variables=ContextVariables(last_result=42),
+                    ),
+                )
+                assert isinstance(result, ToolCallMessageResult)
+                assert result.message.content == "42"
+                assert result.context_variables["last_result"] == 42
+                ```
+
+            Simple value:
+                ```python
+                # Internal processing of direct return
+                result = self._parse_tool_call_result(
+                    tool_call=call,
+                    result="Calculation complete",
+                )
+                assert isinstance(result, ToolCallMessageResult)
+                assert result.message.content == "Calculation complete"
+                ```
+
+        Notes:
+            - This is an internal method used by the framework
+            - Tool functions should return ToolResult instances
+            - See ToolResult documentation for the public API
+        """
+        match result:
+            case Agent() as agent:
+                return ToolCallAgentResult(
+                    tool_call=tool_call,
+                    agent=agent,
+                    message=Message(
+                        role="tool",
+                        content=f"Switched to agent {agent.id}",
+                        tool_call_id=tool_call.id,
+                    ),
+                )
+
+            case ToolResult() as tool_output:
+                content = parse_content(tool_output.content)
+
+                if tool_output.agent:
+                    return ToolCallAgentResult(
+                        tool_call=tool_call,
+                        agent=tool_output.agent,
+                        message=Message(
+                            role="tool",
+                            content=content,
+                            tool_call_id=tool_call.id,
+                        ),
+                        context_variables=tool_output.context_variables,
+                    )
+
+                return ToolCallMessageResult(
+                    tool_call=tool_call,
+                    message=Message(
+                        role="tool",
+                        content=content,
+                        tool_call_id=tool_call.id,
+                    ),
+                    context_variables=tool_output.context_variables,
+                )
+
+            case _:
+                return ToolCallMessageResult(
+                    tool_call=tool_call,
+                    message=Message(
+                        role="tool",
+                        content=parse_content(result),
+                        tool_call_id=tool_call.id,
+                    ),
+                )
+
     async def _process_tool_call(
         self,
         agent: Agent,
@@ -234,62 +354,14 @@ class Swarm:
             if function_has_parameter(function_tool, "context_variables"):
                 args = {**args, "context_variables": context_variables}
 
-            match function_tool(**args):
-                case Agent() as agent:
-                    tool_call_result = ToolCallAgentResult(
-                        tool_call=tool_call,
-                        agent=agent,
-                        message=Message(
-                            role="tool",
-                            content=f"Switched to agent {agent.id}",
-                            tool_call_id=tool_call.id,
-                        ),
-                    )
+            tool_call_result = self._parse_tool_call_result(
+                tool_call=tool_call,
+                result=function_tool(**args),
+            )
 
-                case Result() as result:
-                    content = orjson.dumps(result.value).decode() if result.value else None
-
-                    if result.error:
-                        tool_call_result = ToolCallFailureResult(
-                            tool_call=tool_call,
-                            error=result.error,
-                        )
-                    elif result.agent:
-                        content = content or f"Switched to agent {result.agent.id}"
-                        tool_call_result = ToolCallAgentResult(
-                            tool_call=tool_call,
-                            agent=result.agent,
-                            message=Message(
-                                role="tool",
-                                content=content,
-                                tool_call_id=tool_call.id,
-                            ),
-                            context_variables=result.context_variables,
-                        )
-                    else:
-                        tool_call_result = ToolCallMessageResult(
-                            tool_call=tool_call,
-                            message=Message(
-                                role="tool",
-                                content=content or "",
-                                tool_call_id=tool_call.id,
-                            ),
-                            context_variables=result.context_variables,
-                        )
-
-                case _ as content:
-                    tool_call_result = ToolCallMessageResult(
-                        tool_call=tool_call,
-                        message=Message(
-                            role="tool",
-                            content=orjson.dumps(content).decode(),
-                            tool_call_id=tool_call.id,
-                        ),
-                    )
-
-        except Exception as e:
-            await self.stream_handler.on_error(e, agent)
-            tool_call_result = ToolCallFailureResult(tool_call=tool_call, error=e)
+        except Exception as error:
+            await self.stream_handler.on_error(error, agent)
+            tool_call_result = ToolCallFailureResult(tool_call=tool_call, error=error)
 
         return tool_call_result
 
@@ -1192,13 +1264,18 @@ class Swarm:
                 def get_instructions(context: ContextVariables) -> str:
                     return f"Help {context['user_name']} with math."
 
+
                 def add(a: float, b: float, context_variables: ContextVariables) -> float:
                     return a + b
+
 
                 agent = Agent(
                     id="math",
                     instructions=get_instructions,
-                    llm=LLM(model="gpt-4o", tools=[add])
+                    llm=LLM(
+                        model="gpt-4o",
+                        tools=[add],
+                    ),
                 )
 
                 async for response in swarm.stream(
@@ -1325,10 +1402,11 @@ class Swarm:
                 def get_instructions(context: ContextVariables) -> str:
                     return f"Help {context['user_name']} with their task."
 
+
                 agent = Agent(
                     id="helper",
                     instructions=get_instructions,
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 )
 
                 result = await swarm.execute(

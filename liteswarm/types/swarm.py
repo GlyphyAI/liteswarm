@@ -6,7 +6,7 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Literal, TypeAlias
+from typing import Any, Literal, TypeAlias
 
 from litellm.types.utils import (
     ChatCompletionAudioResponse,
@@ -59,16 +59,10 @@ class Message(BaseModel):
         Create different message types:
             ```python
             # System instructions
-            system_msg = Message(
-                role="system",
-                content="You are a helpful assistant."
-            )
+            system_msg = Message(role="system", content="You are a helpful assistant.")
 
             # User input
-            user_msg = Message(
-                role="user",
-                content="Calculate 2 + 2"
-            )
+            user_msg = Message(role="user", content="Calculate 2 + 2")
 
             # Assistant response with tool
             assistant_msg = Message(
@@ -77,17 +71,13 @@ class Message(BaseModel):
                 tool_calls=[
                     ChatCompletionDeltaToolCall(
                         id="calc_1",
-                        function={"name": "add", "arguments": '{"a": 2, "b": 2}'}
+                        function={"name": "add", "arguments": '{"a": 2, "b": 2}'},
                     )
-                ]
+                ],
             )
 
             # Tool result
-            tool_msg = Message(
-                role="tool",
-                content="4",
-                tool_call_id="calc_1"
-            )
+            tool_msg = Message(role="tool", content="4", tool_call_id="calc_1")
             ```
     """
 
@@ -126,7 +116,7 @@ class ToolMessage(BaseModel):
                 message=Message(
                     role="tool",
                     content="4",
-                    tool_call_id="calc_1"
+                    tool_call_id="calc_1",
                 )
             )
             ```
@@ -137,17 +127,17 @@ class ToolMessage(BaseModel):
                 message=Message(
                     role="tool",
                     content="Switching to expert",
-                    tool_call_id="switch_1"
+                    tool_call_id="switch_1",
                 ),
                 agent=Agent(
                     id="math-expert",
                     instructions="You are a math expert.",
-                    llm=LLM(model="gpt-4o")
+                    llm=LLM(model="gpt-4o"),
                 ),
                 context_variables=ContextVariables(
                     specialty="mathematics",
-                    confidence=0.9
-                )
+                    confidence=0.9,
+                ),
             )
             ```
     """
@@ -177,17 +167,14 @@ class Delta(BaseModel):
         Different types of updates:
             ```python
             # Content chunk
-            content_delta = Delta(
-                role="assistant",
-                content="Hello, "
-            )
+            content_delta = Delta(role="assistant", content="Hello, ")
 
             # Tool call start
             tool_delta = Delta(
                 tool_calls=[
                     ChatCompletionDeltaToolCall(
                         id="calc_1",
-                        function={"name": "add", "arguments": '{"a": 2'}
+                        function={"name": "add", "arguments": '{"a": 2'},
                     )
                 ]
             )
@@ -197,7 +184,7 @@ class Delta(BaseModel):
                 tool_calls=[
                     ChatCompletionDeltaToolCall(
                         id="calc_1",
-                        function={"name": "add", "arguments": ', "b": 2}'}
+                        function={"name": "add", "arguments": ', "b": 2}'},
                     )
                 ]
             )
@@ -253,7 +240,7 @@ class ResponseCost(BaseModel):
             ```python
             cost = ResponseCost(
                 prompt_tokens_cost=0.001,  # $0.001 for input
-                completion_tokens_cost=0.002  # $0.002 for output
+                completion_tokens_cost=0.002,  # $0.002 for output
             )
             total = cost.prompt_tokens_cost + cost.completion_tokens_cost
             ```
@@ -328,10 +315,11 @@ class Agent(BaseModel):
                     Language: {context.get('language')}.
                 '''
 
+
             agent = Agent(
                 id="expert",
                 instructions=get_instructions,
-                llm=LLM(model="gpt-4o")
+                llm=LLM(model="gpt-4o"),
             )
             ```
     """
@@ -354,10 +342,111 @@ class Agent(BaseModel):
     )
 
 
-class ToolCallResult(BaseModel):
-    """Base class for tool call results.
+class ToolResult(BaseModel):
+    """Public API wrapper for tool execution results.
 
-    Provides common structure for all tool execution results.
+    This class is part of the public API and should be used to wrap results from
+    your tool functions. It allows you to:
+    - Return data from your tools
+    - Switch to a different agent
+    - Update context variables
+
+    The content must be JSON serializable to be used as a tool result. For complex
+    return types, consider serializing them to a JSON-compatible format.
+
+    Examples:
+        Simple tool result:
+            ```python
+            # In your tool function
+            def calculate(a: int, b: int) -> ToolResult:
+                result = a + b
+                return ToolResult(content=result)
+            ```
+
+        Tool result with context updates:
+            ```python
+            def fetch_data(url: str) -> ToolResult:
+                data = requests.get(url).json()
+                return ToolResult(
+                    content=data["summary"],
+                    context_variables=ContextVariables(
+                        full_data=data,
+                        last_updated=datetime.now().isoformat(),
+                    ),
+                )
+            ```
+
+        Agent switching with context:
+            ```python
+            def analyze_complexity(code: str) -> ToolResult:
+                if "machine learning" in code:
+                    return ToolResult(
+                        content="Switching to ML expert",
+                        agent=Agent(
+                            id="ml-expert",
+                            instructions="You are an ML expert.",
+                            llm=LLM(model="gpt-4o"),
+                        ),
+                        context_variables=ContextVariables(
+                            domain="machine_learning",
+                            complexity="high",
+                        ),
+                    )
+                return ToolResult(content="Standard code review needed")
+            ```
+
+    Note:
+        This is the recommended way to return results from your tool functions.
+        Do not use internal classes like ToolCallResult and its subclasses.
+    """
+
+    content: Any
+    """Content of the tool result. Must be JSON serializable."""
+
+    agent: Agent | None = None
+    """Optional agent to switch to."""
+
+    context_variables: ContextVariables | None = None
+    """Optional context updates to apply."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+        extra="forbid",
+    )
+
+
+class ToolCallResult(BaseModel):
+    """Internal base class for tool call results.
+
+    This is an internal class used by the framework to handle tool execution results.
+    It should not be used directly in user code. For wrapping tool results in your
+    application code, use the ToolResult class instead.
+
+    The ToolCallResult hierarchy (ToolCallMessageResult, ToolCallAgentResult,
+    ToolCallFailureResult) is designed for internal event processing and should only
+    be referenced in generic event handlers if needed.
+
+    For public API usage:
+        - Use ToolResult to wrap your tool's return values
+        - Use ToolResult when you need to switch agents or update context
+        - See ToolResult documentation for examples
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        class ToolEventHandler:
+            async def handle_tool_call(self, result: ToolCallResult):
+                if isinstance(result, ToolCallMessageResult):
+                    # Process message result
+                    pass
+                elif isinstance(result, ToolCallAgentResult):
+                    # Process agent switch
+                    pass
+                elif isinstance(result, ToolCallFailureResult):
+                    # Handle failure
+                    pass
+        ```
     """
 
     tool_call: ChatCompletionDeltaToolCall
@@ -370,27 +459,29 @@ class ToolCallResult(BaseModel):
 
 
 class ToolCallMessageResult(ToolCallResult):
-    """Result of a tool call that produced a message.
+    """Internal class for tool call results that produced a message.
 
-    Used for tools that return data or text responses, optionally
+    This is an internal class used by the framework to handle tool message results.
+    It should not be used directly in user code. For wrapping tool results in your
+    application code, use the ToolResult class instead.
+
+    Used internally for tools that return data or text responses, optionally
     with context updates.
 
-    Examples:
-        Tool response with context:
-            ```python
-            result = ToolCallMessageResult(
-                tool_call=calc_call,
-                message=Message(
-                    role="tool",
-                    content="42",
-                    tool_call_id="calc_1"
-                ),
-                context_variables=ContextVariables(
-                    last_result=42,
-                    calculation_type="simple"
-                )
-            )
-            ```
+    For public API usage:
+        - Use ToolResult to wrap your tool's return values
+        - See ToolResult documentation for examples
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        async def handle_tool_message(result: ToolCallMessageResult):
+            # Process the tool's message
+            message = result.message
+            if result.context_variables:
+                # Apply context updates
+                pass
+        ```
     """
 
     message: Message
@@ -401,32 +492,32 @@ class ToolCallMessageResult(ToolCallResult):
 
 
 class ToolCallAgentResult(ToolCallResult):
-    """Result of a tool call that produced a new agent.
+    """Internal class for tool call results that produced a new agent.
 
-    Used for agent-switching tools that return a new agent with
+    This is an internal class used by the framework to handle agent switching.
+    It should not be used directly in user code. For switching agents in your
+    application code, use the ToolResult class instead.
+
+    Used internally for agent-switching tools that return a new agent with
     optional transition message and context.
 
-    Examples:
-        Switch to expert agent:
-            ```python
-            result = ToolCallAgentResult(
-                tool_call=switch_call,
-                agent=Agent(
-                    id="math-expert",
-                    instructions="You are a math expert.",
-                    llm=LLM(model="gpt-4o")
-                ),
-                message=Message(
-                    role="tool",
-                    content="Switching to math expert",
-                    tool_call_id="switch_1"
-                ),
-                context_variables=ContextVariables(
-                    expertise="mathematics",
-                    difficulty="advanced"
-                )
-            )
-            ```
+    For public API usage:
+        - Use ToolResult to switch agents or update context
+        - See ToolResult documentation for examples
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        async def handle_agent_switch(result: ToolCallAgentResult):
+            # Switch to new agent
+            new_agent = result.agent
+            if result.message:
+                # Handle transition message
+                pass
+            if result.context_variables:
+                # Apply context updates
+                pass
+        ```
     """
 
     agent: Agent
@@ -440,18 +531,28 @@ class ToolCallAgentResult(ToolCallResult):
 
 
 class ToolCallFailureResult(ToolCallResult):
-    """Result of a failed tool call.
+    """Internal class for failed tool call results.
 
-    Captures errors during tool execution for proper handling.
+    This is an internal class used by the framework to handle tool execution failures.
+    It should not be used directly in user code. For handling tool errors in your
+    application code, use standard Python exception handling instead.
 
-    Examples:
-        Handle tool failure:
-            ```python
-            result = ToolCallFailureResult(
-                tool_call=failed_call,
-                error=ValueError("Invalid input: negative number")
-            )
-            ```
+    Used internally to capture errors during tool execution for proper framework-level
+    handling.
+
+    For public API usage:
+        - Use try/except blocks to handle tool errors
+        - See tool function documentation for specific exceptions
+
+    Internal framework usage only:
+        ```python
+        # Framework internal processing
+        async def handle_tool_failure(result: ToolCallFailureResult):
+            # Log the error
+            logger.error(f"Tool failed: {result.error}")
+            # Update execution state
+            execution.mark_failed(result.tool_call.id)
+        ```
     """
 
     error: Exception
@@ -470,15 +571,11 @@ class CompletionResponse(BaseModel):
             response = CompletionResponse(
                 delta=Delta(content="Hello"),
                 finish_reason=None,
-                usage=Usage(
-                    prompt_tokens=10,
-                    completion_tokens=1,
-                    total_tokens=11
-                ),
+                usage=Usage(prompt_tokens=10, completion_tokens=1, total_tokens=11),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.0001,
-                    completion_tokens_cost=0.0002
-                )
+                    completion_tokens_cost=0.0002,
+                ),
             )
             ```
     """
@@ -518,8 +615,8 @@ class AgentResponse(BaseModel):
                 usage=Usage(prompt_tokens=10, completion_tokens=2),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.0001,
-                    completion_tokens_cost=0.0002
-                )
+                    completion_tokens_cost=0.0002,
+                ),
             )
             ```
     """
@@ -562,15 +659,15 @@ class ConversationState(BaseModel):
                 agent=current_agent,
                 agent_messages=[  # Current context
                     Message(role="user", content="Hello"),
-                    Message(role="assistant", content="Hi")
+                    Message(role="assistant", content="Hi"),
                 ],
                 agent_queue=[backup_agent],  # Queued agents
                 messages=[],  # Full history
                 usage=Usage(total_tokens=100),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.001,
-                    completion_tokens_cost=0.002
-                )
+                    completion_tokens_cost=0.002,
+                ),
             )
             ```
     """

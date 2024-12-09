@@ -15,7 +15,7 @@ from liteswarm.experimental.swarm_team.response_repair import (
     LiteResponseRepairAgent,
     ResponseRepairAgent,
 )
-from liteswarm.types import Result
+from liteswarm.types.exceptions import PlanValidationError, ResponseParsingError
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PromptTemplate, TaskDefinition
@@ -54,13 +54,13 @@ class PlanningAgent(Protocol):
                     self,
                     prompt: str,
                     context: ContextVariables | None = None,
-                ) -> Result[Plan]:
+                ) -> Plan:
                     # Analyze prompt and create tasks
                     tasks = [
                         Task(id="task-1", title="First step"),
                         Task(id="task-2", title="Second step", dependencies=["task-1"]),
                     ]
-                    return Result(value=Plan(tasks=tasks))
+                    return Plan(tasks=tasks)
             ```
     """
 
@@ -68,7 +68,7 @@ class PlanningAgent(Protocol):
         self,
         prompt: str,
         context: ContextVariables | None = None,
-    ) -> Result[Plan]:
+    ) -> Plan:
         """Create a plan from the given prompt and context.
 
         Args:
@@ -76,7 +76,11 @@ class PlanningAgent(Protocol):
             context: Optional additional context variables.
 
         Returns:
-            Result containing either a valid Plan or an error.
+            A valid Plan object.
+
+        Raises:
+            PlanValidationError: If the plan fails validation or has invalid dependencies.
+            ResponseParsingError: If the response cannot be parsed into a valid plan.
         """
         ...
 
@@ -110,7 +114,7 @@ class LitePlanningAgent(PlanningAgent):
             )
 
             # Create plan
-            result = await planner.create_plan(
+            plan = await planner.create_plan(
                 prompt="Review PR #123",
                 context=ContextVariables(pr_url="github.com/org/repo/123"),
             )
@@ -168,7 +172,7 @@ class LitePlanningAgent(PlanningAgent):
             Custom repair agent:
                 ```python
                 class CustomRepairAgent(ResponseRepairAgent):
-                    async def repair_response(self, ...) -> Result[Plan]:
+                    async def repair_response(self, ...) -> Plan:
                         # Custom repair logic
                         pass
 
@@ -269,7 +273,7 @@ class LitePlanningAgent(PlanningAgent):
         task_types = [td.task_schema for td in task_definitions]
         return create_plan_with_tasks(task_types)
 
-    def _validate_plan(self, plan: Plan) -> Result[Plan]:
+    def _validate_plan(self, plan: Plan) -> Plan:
         """Validate a plan against task registry and dependency rules.
 
         Checks that all tasks are registered and that the dependency graph is
@@ -279,9 +283,11 @@ class LitePlanningAgent(PlanningAgent):
             plan: Plan to validate.
 
         Returns:
-            Result containing either:
-                - Valid Plan if all checks pass
-                - Error with validation failure details
+            The validated Plan if all checks pass.
+
+        Raises:
+            PlanValidationError: If the plan contains unknown task types or has invalid
+                dependencies.
 
         Examples:
             Valid plan:
@@ -292,15 +298,14 @@ class LitePlanningAgent(PlanningAgent):
                         Task(id="2", type="test", title="Run tests", dependencies=["1"]),
                     ]
                 )
-                result = planner._validate_plan(plan)
-                assert result.value == plan  # Plan is valid
+                validated_plan = planner._validate_plan(plan)  # Returns plan if valid
                 ```
 
             Unknown task type:
                 ```python
                 plan = Plan(tasks=[Task(id="1", type="unknown", title="Invalid task")])
-                result = planner._validate_plan(plan)
-                assert result.error  # ValueError: Unknown task type
+                # Raises PlanValidationError: Unknown task type
+                planner._validate_plan(plan)
                 ```
 
             Invalid dependencies:
@@ -311,18 +316,18 @@ class LitePlanningAgent(PlanningAgent):
                         Task(id="2", type="test", title="Task 2", dependencies=["1"]),
                     ]
                 )
-                result = planner._validate_plan(plan)
-                assert result.error  # ValueError: Cyclic dependencies
+                # Raises PlanValidationError: Invalid task dependencies
+                planner._validate_plan(plan)
                 ```
         """
         for task in plan.tasks:
             if not self._task_registry.contains_task_type(task.type):
-                return Result(error=ValueError(f"Unknown task type: {task.type}"))
+                raise PlanValidationError(f"Unknown task type: {task.type}")
 
         if errors := plan.validate_dependencies():
-            return Result(error=ValueError("\n".join(errors)))
+            raise PlanValidationError("Invalid task dependencies", validation_errors=errors)
 
-        return Result(value=plan)
+        return plan
 
     async def _parse_response(
         self,
@@ -346,6 +351,7 @@ class LitePlanningAgent(PlanningAgent):
         Raises:
             ValueError: If response format is invalid.
             ValidationError: If response cannot be parsed into Plan.
+            ResponseParsingError: If there are other errors during parsing.
 
         Examples:
             Parse with schema:
@@ -425,7 +431,7 @@ class LitePlanningAgent(PlanningAgent):
         agent: Agent,
         response: str,
         context: ContextVariables,
-    ) -> Result[Plan]:
+    ) -> Plan:
         """Process and validate a planning response.
 
         Attempts to parse and validate the response according to the response
@@ -438,9 +444,11 @@ class LitePlanningAgent(PlanningAgent):
             context: Context for parsing and repair.
 
         Returns:
-            Result containing either:
-                - Valid Plan if parsing and validation succeed
-                - Error if response cannot be parsed or repaired
+            A valid Plan object.
+
+        Raises:
+            PlanValidationError: If the plan fails validation even after repair.
+            ResponseParsingError: If the response cannot be parsed into a valid plan.
 
         Examples:
             Successful processing:
@@ -457,12 +465,12 @@ class LitePlanningAgent(PlanningAgent):
                     ]
                 }
                 '''
-                result = await planner._process_planning_result(
+                plan = await planner._process_planning_result(
                     agent=agent,
                     response=response,
                     context=context,
                 )
-                # Returns Result with valid Plan
+                # Returns valid Plan
                 ```
 
             With response repair:
@@ -478,7 +486,7 @@ class LitePlanningAgent(PlanningAgent):
                     ]
                 }
                 '''
-                result = await planner._process_planning_result(
+                plan = await planner._process_planning_result(
                     agent=agent,
                     response=response,
                     context=context,
@@ -499,52 +507,46 @@ class LitePlanningAgent(PlanningAgent):
                     ]
                 }
                 '''
-                result = await planner._process_planning_result(
+                # Raises PlanValidationError: Unknown task type
+                plan = await planner._process_planning_result(
                     agent=agent,
                     response=response,
                     context=context,
                 )
-                assert result.error  # ValueError: Unknown task type
                 ```
         """
-        response_format = self.response_format
-        if not response_format:
-            return Result(value=response)
-
         try:
             plan = await self._parse_response(
                 response=response,
-                response_format=response_format,
+                response_format=self.response_format,
                 context=context,
             )
 
             return self._validate_plan(plan)
 
         except ValidationError as validation_error:
-            repair_result = await self.response_repair_agent.repair_response(
+            repaired_response = await self.response_repair_agent.repair_response(
                 agent=agent,
                 response=response,
-                response_format=response_format,
+                response_format=self.response_format,
                 validation_error=validation_error,
                 context=context,
             )
 
-            if repair_result.error:
-                return repair_result
-
-            if not repair_result.value:
-                return Result(error=ValueError("No content in repair response"))
-
-            return self._validate_plan(repair_result.value)
+            return self._validate_plan(repaired_response)
 
         except Exception as e:
-            return Result(error=e)
+            raise ResponseParsingError(
+                f"Error processing plan response: {e}",
+                response=response,
+                original_error=e,
+            ) from e
 
     async def create_plan(
         self,
         prompt: str,
         context: ContextVariables | None = None,
-    ) -> Result[Plan]:
+    ) -> Plan:
         """Create a plan from the given prompt and context.
 
         Args:
@@ -552,24 +554,27 @@ class LitePlanningAgent(PlanningAgent):
             context: Optional additional context variables.
 
         Returns:
-            Result containing either a valid Plan or an error.
+            A valid Plan object.
+
+        Raises:
+            PlanValidationError: If the generated plan fails validation or has invalid
+                dependencies.
+            ResponseParsingError: If the agent response cannot be parsed into a valid plan.
 
         Examples:
             Basic planning:
                 ```python
-                result = await planner.create_plan(
+                plan = await planner.create_plan(
                     prompt="Review and test the authentication changes in PR #123"
                 )
-                if result.value:
-                    plan = result.value
-                    print(f"Created plan with {len(plan.tasks)} tasks")
-                    for task in plan.tasks:
-                        print(f"- {task.title} ({task.type})")
+                print(f"Created plan with {len(plan.tasks)} tasks")
+                for task in plan.tasks:
+                    print(f"- {task.title} ({task.type})")
                 ```
 
             With context:
                 ```python
-                result = await planner.create_plan(
+                plan = await planner.create_plan(
                     prompt="Review the security changes",
                     context=ContextVariables(
                         pr_url="github.com/org/repo/123",
@@ -582,7 +587,7 @@ class LitePlanningAgent(PlanningAgent):
 
             Complex workflow:
                 ```python
-                result = await planner.create_plan(
+                plan = await planner.create_plan(
                     prompt=\"\"\"
                     Review and deploy the new payment integration:
                     1. Review code changes
@@ -598,29 +603,30 @@ class LitePlanningAgent(PlanningAgent):
                         monitoring_metrics=["latency", "error_rate"]
                     )
                 )
-                if result.value:
-                    plan = result.value
-                    # Plan will have tasks for each step with proper dependencies
-                    # - Code review task
-                    # - Security testing task (depends on review)
-                    # - Payment testing tasks (depend on security)
-                    # - Deployment task (depends on tests)
-                    # - Monitoring task (depends on deployment)
+                # Plan will have tasks for each step with proper dependencies
+                # - Code review task
+                # - Security testing task (depends on review)
+                # - Payment testing tasks (depend on security)
+                # - Deployment task (depends on tests)
+                # - Monitoring task (depends on deployment)
                 ```
 
             Error handling:
                 ```python
-                result = await planner.create_plan(prompt="Review the changes")
-                if result.error:
-                    if "Unknown task type" in str(result.error):
+                try:
+                    plan = await planner.create_plan(prompt="Review the changes")
+                except PlanValidationError as e:
+                    if "Unknown task type" in str(e):
                         print("Plan contains unsupported task types")
-                    elif "Cyclic dependencies" in str(result.error):
+                    elif "Invalid task dependencies" in str(e):
                         print("Plan has invalid task dependencies")
                     else:
-                        print(f"Planning failed: {result.error}")
+                        print(f"Plan validation failed: {e}")
+                except ResponseParsingError as e:
+                    print(f"Failed to parse planning response: {e}")
                 else:
-                    plan = result.value
                     # Use the plan
+                    pass
                 ```
 
             Custom template:
@@ -631,7 +637,7 @@ class LitePlanningAgent(PlanningAgent):
                     prompt_template=lambda p, c: f"{p} for {c.get('project')}",
                     task_definitions=[review_def, test_def],
                 )
-                result = await planner.create_plan(
+                plan = await planner.create_plan(
                     prompt="Review the changes",
                     context=ContextVariables(project="Payment API"),
                 )
@@ -649,11 +655,8 @@ class LitePlanningAgent(PlanningAgent):
             context_variables=context,
         )
 
-        if not result.content:
-            return Result(error=ValueError("Failed to create plan"))
-
         return await self._process_planning_result(
             agent=self.agent,
-            response=result.content,
+            response=result.content or "",
             context=context,
         )

@@ -64,7 +64,7 @@ def print_artifact(artifact: Artifact) -> None:
     """Print a detailed, well-formatted view of an execution artifact."""
     print("\n" + "=" * 50)
     print(f"🏷  Artifact ID: {artifact.id}")
-    print(f"📊 Status: {get_status_emoji(artifact.status)} {artifact.status}")
+    print(f"📊 Status: {get_status_emoji(artifact.status.value)} {artifact.status}")
     print("=" * 50 + "\n")
 
     if artifact.error:
@@ -80,7 +80,7 @@ def print_artifact(artifact: Artifact) -> None:
         print(f"├─ ID: {task_result.task.id}")
         print(f"├─ Type: {task_result.task.type}")
         print(f"├─ Title: {task_result.task.title}")
-        print(f"├─ Status: {get_status_emoji(task_result.task.status)} {task_result.task.status}")
+        print(f"├─ Status: {get_status_emoji(task_result.task.status.value)} {task_result.task.status}")  # fmt: off
         print(f"└─ Executed by: 🤖 {agent_id}\n")
 
         if task_result.output:
