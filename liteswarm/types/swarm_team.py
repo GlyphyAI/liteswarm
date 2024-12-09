@@ -221,8 +221,8 @@ class Task(BaseModel):
     dependencies: list[str] = Field(default_factory=list)
     """IDs of tasks that must complete first."""
 
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    """Additional task-specific data."""
+    metadata: dict[str, Any] | None
+    """Optional task-specific metadata."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -343,8 +343,8 @@ class Plan(BaseModel):
     tasks: Sequence[Task]
     """Tasks in this plan."""
 
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    """Additional plan metadata."""
+    metadata: dict[str, Any] | None
+    """Optional plan metadata."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -515,8 +515,8 @@ class TeamMember(BaseModel):
     task_types: list[type[Task]]
     """Task types this member can handle."""
 
-    metadata: dict[str, Any] = Field(default_factory=dict)
-    """Additional member metadata."""
+    metadata: dict[str, Any] | None = None
+    """Optional member metadata."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
