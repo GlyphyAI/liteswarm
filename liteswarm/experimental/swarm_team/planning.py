@@ -44,7 +44,8 @@ class PlanningAgent(Protocol):
     """Protocol for agents that create task plans.
 
     Defines the interface for planning agents that can analyze prompts and create
-    structured plans with tasks and dependencies.
+    structured plans with tasks and dependencies. The plans must be OpenAI-compatible
+    for structured outputs.
 
     Examples:
         Create a custom planner:
@@ -57,10 +58,31 @@ class PlanningAgent(Protocol):
                 ) -> Plan:
                     # Analyze prompt and create tasks
                     tasks = [
-                        Task(id="task-1", title="First step"),
-                        Task(id="task-2", title="Second step", dependencies=["task-1"]),
+                        Task(
+                            # Base Task required fields
+                            type="review",  # Must match Literal in task definition
+                            id="task-1",
+                            title="First step",
+                            description="Review code changes",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=[],
+                            metadata=None,
+                        ),
+                        Task(
+                            # Base Task required fields
+                            type="test",
+                            id="task-2",
+                            title="Second step",
+                            description="Run test suite",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=["task-1"],  # Depends on review
+                            metadata=None,
+                        ),
                     ]
-                    return Plan(tasks=tasks)
+                    # Create plan with all required fields
+                    return Plan(tasks=tasks, metadata=None)
             ```
     """
 
@@ -89,36 +111,60 @@ class LitePlanningAgent(PlanningAgent):
     """LLM-based implementation of the planning protocol.
 
     Uses an LLM agent to analyze requirements and generate structured plans,
-    validating them against task definitions.
+    validating them against task definitions. The framework supports two approaches
+    to structured outputs that can be used independently or together:
 
-    Examples:
-        Create and use a planner:
-            ```python
-            # Define task types
-            class ReviewTask(Task):
-                pr_url: str
-                review_type: str
+    1. Framework-level Parsing:
+       - Response is parsed using response_format (Pydantic model or parser function)
+       - Works with any LLM provider
+       - Can be combined with LLM-level formats for guaranteed schema validation
+
+    Example:
+           ```python
+           def parse_plan(content: str, context: ContextVariables) -> Plan:
+               # Custom parsing logic for any response format
+               return Plan(...)
 
 
-            # Create task definitions
-            review_def = TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions="Review {task.pr_url}",
-            )
+           agent = LitePlanningAgent(
+               swarm=swarm,
+               response_format=parse_plan,
+           )
+           ```
 
-            # Initialize planner
-            planner = LitePlanningAgent(
-                swarm=swarm,
-                agent=Agent(id="planner", llm=LLM(model="gpt-4o")),
-                task_definitions=[review_def],
-            )
+    2. LLM-level Schema:
+       - Uses provider's native structured output support (e.g., OpenAI)
+       - Requires OpenAI-compatible schemas (no defaults, simple types)
+       - Can be combined with framework-level parsing for additional validation
 
-            # Create plan
-            plan = await planner.create_plan(
-                prompt="Review PR #123",
-                context=ContextVariables(pr_url="github.com/org/repo/123"),
-            )
-            ```
+    Example:
+           ```python
+           class ReviewPlan(Plan):  # OpenAI-compatible
+               tasks: list[ReviewTask]
+               metadata: dict[str, Any] | None
+
+
+           agent = LitePlanningAgent(
+               swarm=swarm,
+               agent=Agent(
+                   llm=LLM(
+                       model="gpt-4o",
+                       response_format=ReviewPlan,  # LLM enforces schema
+                   ),
+               ),
+               response_format=ReviewPlan,  # Framework validates result
+           )
+           ```
+
+    Note:
+        The two approaches can be used together for robust schema handling:
+        - LLM-level ensures valid JSON output format
+        - Framework-level provides additional validation and parsing
+        - Base Task and Plan classes support both approaches
+        - Custom schemas must maintain OpenAI compatibility if using both:
+          - No default values
+          - Simple JSON-serializable types
+          - Discriminated unions (no oneOf)
     """
 
     def __init__(  # noqa: PLR0913
@@ -164,8 +210,8 @@ class LitePlanningAgent(PlanningAgent):
         Examples:
             Basic usage:
                 ```python
-                planner = LitePlanningAgent(swarm=swarm)
-                repair_agent = planner._default_response_repair_agent()
+                planning_agent = LitePlanningAgent(swarm=swarm)
+                repair_agent = planning_agent._default_response_repair_agent()
                 assert isinstance(repair_agent, LiteResponseRepairAgent)
                 ```
 
@@ -176,7 +222,7 @@ class LitePlanningAgent(PlanningAgent):
                         # Custom repair logic
                         pass
 
-                planner = LitePlanningAgent(
+                planning_agent = LitePlanningAgent(
                     swarm=swarm,
                     response_repair_agent=CustomRepairAgent(),
                 )
@@ -194,7 +240,7 @@ class LitePlanningAgent(PlanningAgent):
         Examples:
             Create default agent:
                 ```python
-                agent = planner._default_planning_agent()
+                agent = planning_agent._default_planning_agent()
                 # Returns Agent with:
                 # - id: "agent-planner"
                 # - model: "gpt-4o"
@@ -203,10 +249,10 @@ class LitePlanningAgent(PlanningAgent):
 
             Use in planner:
                 ```python
-                planner = LitePlanningAgent(swarm=swarm)
+                planning_agent = LitePlanningAgent(swarm=swarm)
                 # Automatically creates default agent if none provided
-                assert planner.agent.id == "agent-planner"
-                assert planner.agent.llm.model == "gpt-4o"
+                assert planning_agent.agent.id == "agent-planner"
+                assert planning_agent.agent.llm.model == "gpt-4o"
                 ```
         """
         return Agent(
@@ -224,7 +270,7 @@ class LitePlanningAgent(PlanningAgent):
         Examples:
             Default template:
                 ```python
-                template = planner._default_planning_prompt_template()
+                template = planning_agent._default_planning_prompt_template()
                 prompt = template("Create a plan", context={})
                 assert prompt == "Create a plan"  # Returns raw prompt
                 ```
@@ -235,7 +281,7 @@ class LitePlanningAgent(PlanningAgent):
                     return f"{prompt} for {context.get('project_name')}"
 
 
-                planner = LitePlanningAgent(swarm=swarm, prompt_template=custom_template)
+                planning_agent = LitePlanningAgent(swarm=swarm, prompt_template=custom_template)
                 # Will format prompts with project name
                 ```
         """
@@ -251,8 +297,8 @@ class LitePlanningAgent(PlanningAgent):
             Default format:
                 ```python
                 # With review and test task types
-                planner = LitePlanningAgent(swarm=swarm, task_definitions=[review_def, test_def])
-                format = planner._default_planning_response_format()
+                planning_agent = LitePlanningAgent(swarm=swarm, task_definitions=[review_def, test_def])
+                format = planning_agent._default_planning_response_format()
                 # Returns Plan schema that accepts:
                 # - ReviewTask
                 # - TestTask
@@ -265,7 +311,7 @@ class LitePlanningAgent(PlanningAgent):
                     return Plan(tasks=[...])
 
 
-                planner = LitePlanningAgent(swarm=swarm, response_format=parse_plan)
+                planning_agent = LitePlanningAgent(swarm=swarm, response_format=parse_plan)
                 # Will use custom parser instead of schema
                 ```
         """
@@ -294,30 +340,84 @@ class LitePlanningAgent(PlanningAgent):
                 ```python
                 plan = Plan(
                     tasks=[
-                        Task(id="1", type="review", title="Review code"),
-                        Task(id="2", type="test", title="Run tests", dependencies=["1"]),
-                    ]
+                        Task(
+                            # Base Task required fields
+                            type="review",
+                            id="1",
+                            title="Review code",
+                            description="Review PR changes",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=[],
+                            metadata=None,
+                        ),
+                        Task(
+                            # Base Task required fields
+                            type="test",
+                            id="2",
+                            title="Run tests",
+                            description="Run test suite",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=["1"],
+                            metadata=None,
+                        ),
+                    ],
+                    metadata=None,
                 )
                 validated_plan = planner._validate_plan(plan)  # Returns plan if valid
                 ```
 
             Unknown task type:
                 ```python
-                plan = Plan(tasks=[Task(id="1", type="unknown", title="Invalid task")])
+                plan = Plan(
+                    tasks=[
+                        Task(
+                            type="unknown",  # Unknown type
+                            id="1",
+                            title="Invalid task",
+                            description="This will fail",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=[],
+                            metadata=None,
+                        )
+                    ],
+                    metadata=None,
+                )
+                planning_agent._validate_plan(plan)
                 # Raises PlanValidationError: Unknown task type
-                planner._validate_plan(plan)
                 ```
 
             Invalid dependencies:
                 ```python
                 plan = Plan(
                     tasks=[
-                        Task(id="1", type="review", title="Task 1", dependencies=["2"]),
-                        Task(id="2", type="test", title="Task 2", dependencies=["1"]),
-                    ]
+                        Task(
+                            type="review",
+                            id="1",
+                            title="Task 1",
+                            description="First task",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=["2"],  # Circular dependency
+                            metadata=None,
+                        ),
+                        Task(
+                            type="test",
+                            id="2",
+                            title="Task 2",
+                            description="Second task",
+                            status=TaskStatus.PENDING,
+                            assignee=None,
+                            dependencies=["1"],  # Circular dependency
+                            metadata=None,
+                        ),
+                    ],
+                    metadata=None,
                 )
+                planning_agent._validate_plan(plan)
                 # Raises PlanValidationError: Invalid task dependencies
-                planner._validate_plan(plan)
                 ```
         """
         for task in plan.tasks:
@@ -360,12 +460,17 @@ class LitePlanningAgent(PlanningAgent):
                 {
                     "tasks": [
                         {
-                            "id": "1",
                             "type": "review",
+                            "id": "1",
                             "title": "Review PR",
-                            "dependencies": []
+                            "description": "Review code changes",
+                            "status": "pending",
+                            "assignee": null,
+                            "dependencies": [],
+                            "metadata": null
                         }
-                    ]
+                    ],
+                    "metadata": null
                 }
                 '''
                 plan = await planner._parse_response(
@@ -406,7 +511,7 @@ class LitePlanningAgent(PlanningAgent):
                     ]
                 }
                 '''
-                plan = await planner._parse_response(
+                plan = await planning_agent._parse_response(
                     response=response,
                     response_format=Plan,
                     context=context,
@@ -457,12 +562,17 @@ class LitePlanningAgent(PlanningAgent):
                 {
                     "tasks": [
                         {
-                            "id": "1",
                             "type": "review",
+                            "id": "1",
                             "title": "Review PR",
-                            "dependencies": []
+                            "description": "Review code changes",
+                            "status": "pending",
+                            "assignee": null,
+                            "dependencies": [],
+                            "metadata": null
                         }
-                    ]
+                    ],
+                    "metadata": null
                 }
                 '''
                 plan = await planner._process_planning_result(
@@ -508,7 +618,7 @@ class LitePlanningAgent(PlanningAgent):
                 }
                 '''
                 # Raises PlanValidationError: Unknown task type
-                plan = await planner._process_planning_result(
+                plan = await planning_agent._process_planning_result(
                     agent=agent,
                     response=response,
                     context=context,
@@ -564,7 +674,7 @@ class LitePlanningAgent(PlanningAgent):
         Examples:
             Basic planning:
                 ```python
-                plan = await planner.create_plan(
+                plan = await planning_agent.create_plan(
                     prompt="Review and test the authentication changes in PR #123"
                 )
                 print(f"Created plan with {len(plan.tasks)} tasks")
@@ -574,7 +684,7 @@ class LitePlanningAgent(PlanningAgent):
 
             With context:
                 ```python
-                plan = await planner.create_plan(
+                plan = await planning_agent.create_plan(
                     prompt="Review the security changes",
                     context=ContextVariables(
                         pr_url="github.com/org/repo/123",
@@ -587,7 +697,7 @@ class LitePlanningAgent(PlanningAgent):
 
             Complex workflow:
                 ```python
-                plan = await planner.create_plan(
+                plan = await planning_agent.create_plan(
                     prompt=\"\"\"
                     Review and deploy the new payment integration:
                     1. Review code changes
@@ -614,7 +724,7 @@ class LitePlanningAgent(PlanningAgent):
             Error handling:
                 ```python
                 try:
-                    plan = await planner.create_plan(prompt="Review the changes")
+                    plan = await planning_agent.create_plan(prompt="Review the changes")
                 except PlanValidationError as e:
                     if "Unknown task type" in str(e):
                         print("Plan contains unsupported task types")
@@ -632,12 +742,12 @@ class LitePlanningAgent(PlanningAgent):
             Custom template:
                 ```python
                 # With custom prompt template
-                planner = LitePlanningAgent(
+                planning_agent = LitePlanningAgent(
                     swarm=swarm,
                     prompt_template=lambda p, c: f"{p} for {c.get('project')}",
                     task_definitions=[review_def, test_def],
                 )
-                plan = await planner.create_plan(
+                plan = await planning_agent.create_plan(
                     prompt="Review the changes",
                     context=ContextVariables(project="Payment API"),
                 )
