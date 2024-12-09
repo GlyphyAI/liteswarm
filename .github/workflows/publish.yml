@@ -16,9 +16,11 @@ jobs:
     - name: Install dependencies
       run: |
         pip install uv
+        uv pip install build twine
     - name: Build package
-      run: uv build
+      run: uv pip build
     - name: Publish package
       env:
-        UV_PUBLISH_TOKEN: ${{ secrets.PYPI_TOKEN }}
-      run: uv publish
+        TWINE_USERNAME: __token__
+        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
+      run: twine upload dist/*
