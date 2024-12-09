@@ -209,16 +209,16 @@ class Task(BaseModel):
     title: str
     """Short descriptive title of the task."""
 
-    description: str | None = None
+    description: str | None
     """Optional detailed description."""
 
-    status: TaskStatus = TaskStatus.PENDING
-    """Current execution status."""
+    status: TaskStatus
+    """Current execution status. New tasks start as pending."""
 
-    assignee: str | None = None
-    """ID of the assigned team member."""
+    assignee: str | None
+    """ID of the team member assigned to the task. New tasks are not assigned."""
 
-    dependencies: list[str] = Field(default_factory=list)
+    dependencies: list[str]
     """IDs of tasks that must complete first."""
 
     metadata: dict[str, Any] | None
