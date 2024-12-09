@@ -9,7 +9,7 @@ from typing import Protocol
 from pydantic import ValidationError
 
 from liteswarm.core.swarm import Swarm
-from liteswarm.types.result import Result
+from liteswarm.types.exceptions import ResponseRepairError
 from liteswarm.types.swarm import Agent, ContextVariables
 from liteswarm.types.swarm_team import PydanticModel, PydanticResponseFormat
 from liteswarm.utils.logging import log_verbose
@@ -196,7 +196,7 @@ class LiteResponseRepairAgent:
         self,
         agent: Agent,
         context: ContextVariables,
-    ) -> Result[str]:
+    ) -> str:
         """Regenerate a response for the last user message in history.
 
         Removes the failed response, gets the last user message, and tries again.
@@ -228,12 +228,12 @@ class LiteResponseRepairAgent:
         """
         last_assistant_message = self.swarm.pop_last_message()
         if not last_assistant_message:
-            return Result(error=ValueError("No message to regenerate"))
+            raise ResponseRepairError("No message to regenerate")
 
         last_user_message = self.swarm.pop_last_message()
         if not last_user_message or last_user_message.role != "user":
             self.swarm.append_message(last_assistant_message)
-            return Result(error=ValueError("No user message found to regenerate"))
+            raise ResponseRepairError("No user message found to regenerate")
 
         try:
             result = await self.swarm.execute(
@@ -241,11 +241,20 @@ class LiteResponseRepairAgent:
                 prompt=last_user_message.content or "",
                 context_variables=context,
             )
-            return Result(value=result.content)
+
+            if not result.content:
+                raise ValueError("No response content")
+
+            return result.content
+
         except Exception as e:
             self.swarm.append_message(last_user_message)
             self.swarm.append_message(last_assistant_message)
-            return Result(error=e)
+            raise ResponseRepairError(
+                f"Failed to regenerate response: {e}",
+                response=last_user_message.content,
+                original_error=e,
+            ) from e
 
     async def repair_response(
         self,
@@ -297,44 +306,40 @@ class LiteResponseRepairAgent:
                     print(f"Failed to repair: {result.error}")
             ```
         """
-        try:
-            for attempt in range(1, self.max_attempts + 1):
+        for attempt in range(1, self.max_attempts + 1):
+            try:
                 log_verbose(f"Repair attempt {attempt}/{self.max_attempts}")
-
-                regeneration_result = await self._regenerate_last_user_message(
+                regenerated_response = await self._regenerate_last_user_message(
                     agent=agent,
                     context=context,
                 )
+            except Exception as e:
+                log_verbose(f"Failed to regenerate response: {e}", level="ERROR")
+                continue
 
-                if regeneration_result.failure():
-                    log_verbose(f"Regeneration failed: {regeneration_result.error}", level="ERROR")
-                    continue
+            try:
+                log_verbose(f"Parsing response: {regenerated_response}")
+                parsed_response = self._parse_response(
+                    response=regenerated_response,
+                    response_format=response_format,
+                    context=context,
+                )
+            except ValidationError as e:
+                log_verbose(f"Failed to parse response: {e}", level="ERROR")
+                continue
+            except Exception as e:
+                log_verbose(f"Failed to parse response: {e}", level="ERROR")
+                raise ResponseRepairError(
+                    f"Failed to parse response: {e}",
+                    response=regenerated_response,
+                    original_error=e,
+                ) from e
 
-                regenerated_response = regeneration_result.value
-                if not regenerated_response:
-                    continue
+            log_verbose(f"Parsed response: {parsed_response.model_dump_json()}")
+            return parsed_response
 
-                if response_format:
-                    log_verbose(f"Parsing response: {regenerated_response}")
-                    parsed_response = self._parse_response(
-                        response=regenerated_response,
-                        response_format=response_format,
-                        context=context,
-                    )
-
-                    if parsed_response.failure():
-                        log_verbose(f"Parsing failed: {parsed_response.error}", level="ERROR")
-                        continue
-
-                    log_verbose(f"Parsed response: {parsed_response.model_dump_json()}")
-                    return parsed_response
-                else:
-                    return Result(value=regenerated_response)
-
-        except Exception as e:
-            log_verbose(f"Repair failed with error: {e}", level="ERROR")
-            return Result(error=e)
-
-        return Result(
-            error=ValueError(f"Failed to get valid response after {self.max_attempts} attempts")
+        raise ResponseRepairError(
+            f"Failed to get valid response after {self.max_attempts} attempts",
+            response=response,
+            original_error=validation_error,
         )
