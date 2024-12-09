@@ -412,6 +412,7 @@ class ToolResult(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
