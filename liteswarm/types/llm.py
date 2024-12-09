@@ -140,12 +140,9 @@ class ResponseSchema(BaseModel):
                     "required": ["approved", "comments"],
                     "properties": {
                         "approved": {"type": "boolean"},
-                        "comments": {
-                            "type": "array",
-                            "items": {"type": "string"}
-                        }
-                    }
-                }
+                        "comments": {"type": "array", "items": {"type": "string"}},
+                    },
+                },
             )
             ```
     """
@@ -254,7 +251,7 @@ class LLM(BaseModel):
             llm = LLM(
                 model="gpt-4o",
                 max_tokens=1000,
-                temperature=0.7
+                temperature=0.7,
             )
             ```
 
@@ -264,20 +261,15 @@ class LLM(BaseModel):
                 approved: bool
                 comments: list[str]
 
+
             llm = LLM(
                 model="gpt-4o",
-                tools=[
-                    search_docs,
-                    analyze_code,
-                    run_tests
-                ],
+                tools=[search_docs, analyze_code, run_tests],
                 tool_choice="auto",
                 parallel_tool_calls=True,
                 response_format=ReviewOutput,
                 temperature=0.7,
-                stream_options=StreamOptions(
-                    include_usage=True
-                )
+                stream_options=StreamOptions(include_usage=True),
             )
             ```
     """
@@ -390,16 +382,13 @@ class LLM(BaseModel):
                     value: int
                     details: str
 
+
                 llm = LLM(response_format=Output)
                 ```
 
             Dict format:
                 ```python
-                llm = LLM(
-                    response_format={
-                        "type": "json_object"
-                    }
-                )
+                llm = LLM(response_format={"type": "json_object"})
                 ```
         """
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):
@@ -426,9 +415,7 @@ class LLM(BaseModel):
                 llm = LLM(
                     model="gpt-4o",
                     temperature=0.7,
-                    litellm_kwargs={
-                        "custom_option": "value"
-                    }
+                    litellm_kwargs={"custom_option": "value"},
                 )
                 ```
 
@@ -439,7 +426,7 @@ class LLM(BaseModel):
                     temperature=0.7,
                     litellm_kwargs={
                         "temperature": 0.5  # Raises ValueError
-                    }
+                    },
                 )
                 ```
         """
