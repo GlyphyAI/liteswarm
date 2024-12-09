@@ -5,10 +5,14 @@
 # https://opensource.org/licenses/MIT.
 
 import asyncio
+import json
 import os
 
+from pydantic import BaseModel
+
 from liteswarm.core import Swarm
-from liteswarm.types import LLM, Agent, ContextVariables, Result
+from liteswarm.types import LLM, Agent, ContextVariables
+from liteswarm.types.swarm import ToolResult
 from liteswarm.utils import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
@@ -38,44 +42,44 @@ async def instructions_example() -> None:
     print(result.messages[-1].content)
 
 
-async def tool_call_example() -> None:
-    def greet(language: str, context_variables: ContextVariables) -> Result[str]:
+async def agent_switching_example() -> None:
+    def greet(language: str, context_variables: ContextVariables) -> ToolResult:
+        """Greet the user in the specified language encoded as a language code like 'en' or 'es'."""
         user_name: str = context_variables.get("user_name", "John")
-        greeting = "Hola" if language.lower() == "spanish" else "Hello"
-        print(f"{greeting}, {user_name}!")
+        greeting = "Hola" if language.lower() == "es" else "Hello"
 
-        return Result(
-            value="Done",
+        return ToolResult(
+            content=f"{greeting}, {user_name}!",
             context_variables=ContextVariables(language=language),
         )
 
     def speak_instructions(context_variables: ContextVariables) -> str:
-        print(f"Speak instructions: {context_variables}")
-        language: str = context_variables.get("language", "English")
-        return f"Speak with the user in {language} and ask them how they are doing."
+        language: str = context_variables.get("language", "en")
+        return f"Speak with the user in {language} language and ask them how they are doing."
 
     speak_agent = Agent(
         id="speak_agent",
         instructions=speak_instructions,
-        llm=LLM(
-            model="gpt-4o-mini",
-            litellm_kwargs={"drop_params": True},
-        ),
+        llm=LLM(model="gpt-4o-mini"),
     )
 
-    def switch_to_speak_agent() -> Result[Agent]:
+    def switch_to_speak_agent() -> ToolResult:
         """Switch to the speak agent."""
-        return Result(agent=speak_agent)
+        return ToolResult(
+            content="Switched to speak agent",
+            agent=speak_agent,
+        )
 
     welcome_agent = Agent(
         id="welcome_agent",
-        instructions="You are a welcome agent that greets the user. "
-        "Switch to the speak agent after greeting the user.",
+        instructions=(
+            "You are a welcome agent that greets the user. "
+            "Switch to the speak agent after greeting the user."
+        ),
         llm=LLM(
             model="gpt-4o-mini",
             tools=[greet, switch_to_speak_agent],
             parallel_tool_calls=False,
-            litellm_kwargs={"drop_params": True},
         ),
     )
 
@@ -86,10 +90,88 @@ async def tool_call_example() -> None:
         context_variables=ContextVariables(user_name="John"),
     )
 
-    print(result.messages)
+    messages = [msg.model_dump() for msg in result.messages]
+    print(json.dumps(messages, indent=2, ensure_ascii=False))
+
+
+async def error_handling_example() -> None:
+    def fetch_weather(city: str) -> str:
+        """Fetch the weather for a city."""
+        if city == "Orgrimmar":
+            raise ValueError("Please specify a valid city.")
+
+        return f"The weather in {city} is nice."
+
+    agent = Agent(
+        id="weather_agent",
+        instructions="Fetch the weather for a city. Always use the specified city.",
+        llm=LLM(
+            model="gpt-4o-mini",
+            tools=[fetch_weather],
+            temperature=0.0,
+        ),
+    )
+
+    swarm = Swarm(include_usage=True)
+    result = await swarm.execute(
+        agent=agent,
+        prompt="What is the weather in Orgrimmar?",
+    )
+
+    print(result.messages[-1].content)
+
+
+async def pydantic_example() -> None:
+    class User(BaseModel):
+        id: str
+        name: str
+        age: int
+
+    def fetch_user_info(user_id: str) -> User:
+        """Fetch user info for a user."""
+        return User(id=user_id, name="John", age=27)
+
+    agent = Agent(
+        id="user_info_agent",
+        instructions="Fetch user info for a user.",
+        llm=LLM(
+            model="gpt-4o-mini",
+            tools=[fetch_user_info],
+            temperature=0.0,
+        ),
+    )
+
+    swarm = Swarm(include_usage=True)
+    result = await swarm.execute(
+        agent=agent,
+        prompt="What is the name of a user with id 1?",
+    )
+
+    print(result.messages[-1].content)
+
+
+async def run_selected_example() -> None:
+    """Prompt the user to select an example to run."""
+    print("Select an example to run:")
+    print("1. Instructions")
+    print("2. Agent switching")
+    print("3. Error handling")
+    print("4. Pydantic output")
+    choice = input("Enter the number of the example to run: ")
+
+    match choice:
+        case "1":
+            await instructions_example()
+        case "2":
+            await agent_switching_example()
+        case "3":
+            await error_handling_example()
+        case "4":
+            await pydantic_example()
+        case _:
+            print(f"Invalid choice: {choice}")
 
 
 if __name__ == "__main__":
     enable_logging()
-    asyncio.run(instructions_example())
-    asyncio.run(tool_call_example())
+    asyncio.run(run_selected_example())
