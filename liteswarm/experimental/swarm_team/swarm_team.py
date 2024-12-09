@@ -101,6 +101,14 @@ class SwarmTeam:
             response_repair_agent: Optional custom response repair agent.
             stream_handler: Optional event stream handler.
         """
+        # Internal state (private)
+        self._task_registry = TaskRegistry(task_definitions)
+        self._artifacts: list[Artifact] = []
+        self._team_capabilities = self._get_team_capabilities(members)
+        self._context: ContextVariables = ContextVariables(
+            team_capabilities=self._team_capabilities,
+        )
+
         # Public properties
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
@@ -111,14 +119,6 @@ class SwarmTeam:
         )
         self.response_repair_agent = response_repair_agent or LiteResponseRepairAgent(
             swarm=self.swarm,
-        )
-
-        # Internal state (private)
-        self._task_registry = TaskRegistry(task_definitions)
-        self._artifacts: list[Artifact] = []
-        self._team_capabilities = self._get_team_capabilities()
-        self._context: ContextVariables = ContextVariables(
-            team_capabilities=self._team_capabilities,
         )
 
     # ================================================
