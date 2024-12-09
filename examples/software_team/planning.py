@@ -6,7 +6,7 @@
 
 from liteswarm.core import Swarm
 from liteswarm.experimental import LitePlanningAgent, PlanningAgent
-from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition
+from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition, TaskStatus
 
 from .types import FlutterTask, SoftwarePlan
 from .utils import dump_json, find_json_tag
