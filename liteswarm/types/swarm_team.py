@@ -173,31 +173,67 @@ class TaskStatus(str, Enum):
 
 
 class Task(BaseModel):
-    """Base class for defining task schemas in a SwarmTeam workflow.
+    """Base class for defining task schemas for structured LLM responses.
 
     Tasks are the fundamental units of work in a SwarmTeam. Each task has a type
-    that determines its schema and execution requirements.
+    that determines its schema and execution requirements. The schema is designed
+    to be OpenAI-compatible for direct structured outputs, so it avoids features
+    like default values.
 
     Examples:
-        Define a custom task type:
+        Define an OpenAI-compatible task type:
             ```python
             class DataProcessingTask(Task):
+                # Discriminator field for OpenAI schema
                 type: Literal["data_processing"]
+                # Required fields without defaults
                 input_file: str
-                batch_size: int = 100
-                output_format: str = "json"
+                batch_size: int
+                output_format: str
             ```
 
-        Create a task instance:
+        Create a task instance (in code):
             ```python
             task = DataProcessingTask(
+                # Base Task required fields - all must be provided
+                type="data_processing",  # Must match Literal
                 id="process-1",
                 title="Process customer data",
                 description="Process Q1 customer data",
+                status=TaskStatus.PENDING,
+                assignee=None,
+                dependencies=[],
+                metadata=None,
+                # DataProcessingTask required fields
                 input_file="data/customers_q1.csv",
-                metadata={"priority": "high"},
+                batch_size=100,
+                output_format="json",
             )
             ```
+
+        LLM response format:
+            ```json
+            {
+                "type": "data_processing",
+                "id": "process-1",
+                "title": "Process customer data",
+                "description": "Process Q1 customer data",
+                "status": "pending",
+                "assignee": null,
+                "dependencies": [],
+                "metadata": null,
+                "input_file": "data/customers_q1.csv",
+                "batch_size": 100,
+                "output_format": "json"
+            }
+            ```
+
+    Note:
+        When subclassing Task, ensure OpenAI compatibility by:
+        - Using only required fields without defaults
+        - Using Literal types for discriminators
+        - Avoiding complex Pydantic features
+        - Using simple types that serialize to JSON
     """
 
     type: str
@@ -315,30 +351,73 @@ class TaskDefinition(BaseModel):
 
 
 class Plan(BaseModel):
-    """Plan consisting of ordered tasks with dependencies.
+    """Schema for LLM-generated execution plans with ordered tasks.
 
     Organizes tasks into a workflow, managing their dependencies and
-    tracking execution status.
+    tracking execution status. The schema is designed to be OpenAI-compatible
+    for direct structured outputs, supporting both framework-level and LLM-level
+    response parsing.
 
     Examples:
-        Create a simple plan:
+        Define an OpenAI-compatible plan type:
             ```python
-            plan = Plan(
+            class ReviewPlan(Plan):
+                # All fields are required without defaults
+                tasks: list[ReviewTask]  # Specific task type
+                metadata: dict[str, Any] | None  # From base Plan
+            ```
+
+        Create a plan instance (in code):
+            ```python
+            plan = ReviewPlan(
+                # Base Plan required fields
                 tasks=[
                     ReviewTask(
+                        # Base Task required fields - all must be provided
+                        type="code_review",  # Must match Literal
                         id="review-1",
                         title="Review PR #123",
+                        description="Security review of auth changes",
+                        status=TaskStatus.PENDING,
+                        assignee=None,
+                        dependencies=[],
+                        metadata=None,
+                        # ReviewTask specific fields
                         pr_url="github.com/org/repo/123",
-                    ),
-                    TestTask(
-                        id="test-1",
-                        title="Test changes",
-                        dependencies=["review-1"],
+                        review_type="security",
                     ),
                 ],
-                metadata={"priority": "high"},
+                metadata=None,  # Required field from base Plan
             )
             ```
+
+        LLM response format:
+            ```json
+            {
+                "tasks": [
+                    {
+                        "type": "code_review",
+                        "id": "review-1",
+                        "title": "Review PR #123",
+                        "description": "Security review of auth changes",
+                        "status": "pending",
+                        "assignee": null,
+                        "dependencies": [],
+                        "metadata": null,
+                        "pr_url": "github.com/org/repo/123",
+                        "review_type": "security"
+                    }
+                ],
+                "metadata": null
+            }
+            ```
+
+    Note:
+        When subclassing Plan, ensure OpenAI compatibility by:
+        - Using only required fields without defaults
+        - Using Literal types for discriminators
+        - Avoiding complex Pydantic features
+        - Using simple types that serialize to JSON
     """
 
     tasks: Sequence[Task]
