@@ -1,8 +1,29 @@
 [project]
 name = "liteswarm"
 version = "0.1.0"
-description = "Add your description here"
+description = "A lightweight framework for building AI agent systems"
 readme = "README.md"
+license = {file = "LICENSE"}
+authors = [{name = "Evgenii Mozharovskii", email = "eugene@glyphy.ai"}]
+keywords = [
+    "ai",
+    "agents",
+    "llm",
+    "swarm",
+    "multi-agent",
+    "agent-systems",
+    "agent-orchestration",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
 requires-python = ">=3.11"
 dependencies = [
     "griffe>=1.5.1",
@@ -12,7 +33,14 @@ dependencies = [
     "pydantic>=2.9.2",
 ]
 
-[dependency-groups]
+[project.urls]
+homepage = "https://github.com/GlyphyAI/liteswarm"
+repository = "https://github.com/GlyphyAI/liteswarm"
+documentation = "https://github.com/GlyphyAI/liteswarm#readme"
+bug-tracker = "https://github.com/GlyphyAI/liteswarm/issues"
+changelog = "https://github.com/GlyphyAI/liteswarm/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
 dev = [
     "mypy>=1.13.0",
     "ruff>=0.7.3",
