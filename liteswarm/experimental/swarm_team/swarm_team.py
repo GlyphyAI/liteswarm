@@ -5,7 +5,6 @@
 # https://opensource.org/licenses/MIT.
 
 from collections import defaultdict
-from datetime import datetime
 
 import json_repair
 from pydantic import BaseModel, ValidationError
@@ -425,7 +424,6 @@ class SwarmTeam:
                 task=task,
                 content=response,
                 assignee=assignee,
-                timestamp=datetime.now(),
             )
 
             return task_result
