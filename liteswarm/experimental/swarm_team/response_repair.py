@@ -53,15 +53,17 @@ class ResponseRepairAgent(Protocol):
                 for response generation or validation.
 
         Returns:
-            Result containing either the repaired response that matches the format,
-            or an error if repair was not possible. The success case will contain
-            a properly validated instance of the response format model.
+            A properly validated instance of the response format model.
+
+        Raises:
+            ResponseRepairError: If the response cannot be repaired.
 
         Example:
             ```python
             class ReviewOutput(BaseModel):
                 issues: list[str]
                 approved: bool
+
 
             class SimpleRepairAgent(ResponseRepairAgent):
                 async def repair_response(
@@ -71,15 +73,10 @@ class ResponseRepairAgent(Protocol):
                     response_format: PydanticResponseFormat[ReviewOutput],
                     validation_error: ValidationError,
                     context: ContextVariables,
-                ) -> Result[ReviewOutput]:
-                    try:
-                        # Simple repair strategy: add quotes to values
-                        fixed = response.replace("true", '"true"')
-                        return Result(
-                            value=response_format.model_validate_json(fixed)
-                        )
-                    except Exception as e:
-                        return Result(error=e)
+                ) -> ReviewOutput:
+                    # Simple repair strategy: add quotes to values
+                    fixed = response.replace("true", '"true"')
+                    return response_format.model_validate_json(fixed)
             ```
         """
         ...
@@ -98,20 +95,23 @@ class LiteResponseRepairAgent:
             issues: list[str]
             approved: bool
 
+
         swarm = Swarm()
         repair_agent = LiteResponseRepairAgent(swarm)
 
         # Invalid response missing quotes
         response = "{issues: [Missing tests], approved: false}"
-        result = await repair_agent.repair_response(
-            agent=review_agent,
-            response=response,
-            response_format=ReviewOutput,
-            validation_error=error,
-            context=context,
-        )
-        if result.success():
-            print(result.value.model_dump())  # Fixed response
+        try:
+            output = await repair_agent.repair_response(
+                agent=review_agent,
+                response=response,
+                response_format=ReviewOutput,
+                validation_error=error,
+                context=context,
+            )
+            print(output.model_dump())  # Fixed response
+        except ResponseRepairError as e:
+            print(f"Failed to repair: {e}")
         ```
     """
 
@@ -156,19 +156,26 @@ class LiteResponseRepairAgent:
             context: Context variables for dynamic resolution.
 
         Returns:
-            Result containing either the parsed response or an error.
+            The parsed and validated response object.
+
+        Raises:
+            ValidationError: If the response fails format validation.
+            ValueError: If the response format is invalid.
 
         Example:
             ```python
             # With BaseModel format
             format = ReviewOutput
-            result = agent._parse_response(
-                '{"issues": [], "approved": true}',
-                format,
-                context,
-            )
-            assert result.success()
-            assert isinstance(result.value, ReviewOutput)
+            try:
+                output = agent._parse_response(
+                    '{"issues": [], "approved": true}',
+                    format,
+                    context,
+                )
+                assert isinstance(output, ReviewOutput)
+            except ValidationError:
+                print("Invalid response format")
+
 
             # With callable format
             def parse(content: str, ctx: dict) -> ReviewOutput:
@@ -178,13 +185,16 @@ class LiteResponseRepairAgent:
                     approved=data["approved"],
                 )
 
-            result = agent._parse_response(
-                '{"issues": [], "approved": true}',
-                parse,
-                context,
-            )
-            assert result.success()
-            assert isinstance(result.value, ReviewOutput)
+
+            try:
+                output = agent._parse_response(
+                    '{"issues": [], "approved": true}',
+                    parse,
+                    context,
+                )
+                assert isinstance(output, ReviewOutput)
+            except ValidationError:
+                print("Failed to parse response")
             ```
         """
         if is_callable(response_format):
@@ -207,7 +217,10 @@ class LiteResponseRepairAgent:
             context: Execution context.
 
         Returns:
-            Result containing either the new response content or an error.
+            The new response content.
+
+        Raises:
+            ResponseRepairError: If regeneration fails or no messages are found.
 
         Example:
             ```python
@@ -215,15 +228,15 @@ class LiteResponseRepairAgent:
             swarm.append_message(Message(role="user", content="Review this code"))
             swarm.append_message(Message(role="assistant", content="Invalid JSON"))
 
-            # Regenerate response
-            result = await agent._regenerate_last_user_message(
-                review_agent,
-                context,
-            )
-            if result.success():
-                print(result.value)  # New valid response
-            else:
-                print(f"Failed: {result.error}")
+            try:
+                # Regenerate response
+                new_response = await agent._regenerate_last_user_message(
+                    review_agent,
+                    context,
+                )
+                print(new_response)  # New valid response
+            except ResponseRepairError as e:
+                print(f"Failed to regenerate: {e}")
             ```
         """
         last_assistant_message = self.swarm.pop_last_message()
@@ -278,7 +291,10 @@ class LiteResponseRepairAgent:
             context: Execution context.
 
         Returns:
-            Result containing either a repaired response or an error.
+            A repaired and validated response object.
+
+        Raises:
+            ResponseRepairError: If repair fails after maximum attempts or other errors occur.
 
         Example:
             ```python
@@ -286,24 +302,24 @@ class LiteResponseRepairAgent:
                 issues: list[str]
                 approved: bool
 
+
             # Invalid response
             response = "{issues: [], approved: invalid}"
             try:
                 ReviewOutput.model_validate_json(response)
             except ValidationError as e:
-                result = await repair_agent.repair_response(
-                    agent=review_agent,
-                    response=response,
-                    response_format=ReviewOutput,
-                    validation_error=e,
-                    context=context,
-                )
-                if result.success():
-                    output = result.value
+                try:
+                    output = await repair_agent.repair_response(
+                        agent=review_agent,
+                        response=response,
+                        response_format=ReviewOutput,
+                        validation_error=e,
+                        context=context,
+                    )
                     assert isinstance(output, ReviewOutput)
                     print(f"Fixed: {output.model_dump()}")
-                else:
-                    print(f"Failed to repair: {result.error}")
+                except ResponseRepairError as e:
+                    print(f"Failed to repair: {e}")
             ```
         """
         for attempt in range(1, self.max_attempts + 1):
