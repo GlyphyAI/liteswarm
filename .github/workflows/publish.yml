@@ -16,9 +16,9 @@ jobs:
     - name: Install dependencies
       run: |
         pip install uv
-        uv pip install build twine
+        uv pip install --system build twine
     - name: Build package
-      run: uv pip build
+      run: uv pip build --system
     - name: Publish package
       env:
         TWINE_USERNAME: __token__
