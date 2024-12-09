@@ -40,15 +40,29 @@ Examples:
             )
         ```
 
-    Complex result tool:
+    Agent switching with context updates:
         ```python
-        def process_data(data: dict) -> Result[dict]:
-            \"\"\"Process data with error handling.\"\"\"
-            try:
-                result = transform_data(data)
-                return Result(value=result)
-            except ValueError as e:
-                return Result(error=e)
+        def switch_to_expert(domain: str) -> ToolResult:
+            \"\"\"Switch to domain expert.\"\"\"
+            return ToolResult(
+                content="Switching to expert",
+                agent=Agent(
+                    id=f"{domain}-expert",
+                    instructions=f"You are a {domain} expert.",
+                    llm=LLM(model="gpt-4o")
+                ),
+                context_variables=ContextVariables(specialty=domain),
+            )
+        ```
+
+    Error handling:
+        ```python
+        def fetch_weather(location: str) -> dict[str, Any]:
+            \"\"\"Fetch weather data.\"\"\"
+            if location == "":
+                raise ValueError("Location is required")
+
+            return f"Weather in {location}: 20C"
         ```
 """
 
