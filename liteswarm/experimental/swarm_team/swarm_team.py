@@ -157,9 +157,6 @@ class SwarmTeam:
         self._task_registry = TaskRegistry(task_definitions)
         self._artifacts: list[Artifact] = []
         self._team_capabilities = self._get_team_capabilities(members)
-        self._context: ContextVariables = ContextVariables(
-            team_capabilities=self._team_capabilities,
-        )
 
         # Public properties
         self.swarm = swarm
@@ -200,11 +197,16 @@ class SwarmTeam:
 
         return capabilities
 
-    def _build_task_context(self, task: Task) -> ContextVariables:
+    def _build_task_context(
+        self,
+        task: Task,
+        context: ContextVariables | None = None,
+    ) -> ContextVariables:
         """Build context for task execution.
 
         Args:
             task: Task being executed.
+            context: Optional context to extend.
 
         Returns:
             Context with task details and history.
@@ -225,28 +227,35 @@ class SwarmTeam:
                     # Additional fields from task definition
                     pr_url="github.com/org/repo/123",
                 )
-                context = team._build_task_context(task)
+                context = ContextVariables(pr_url="github.com/org/repo/123")
+                task_context = team._build_task_context(task, context)
                 # Returns ContextVariables with:
                 # - task details as dict
                 # - execution history
                 # - team capabilities
+                # - provided context
                 ```
 
             Access context values:
                 ```python
-                context = team._build_task_context(task)
-                task_data = context.get("task")  # Get task details
-                artifacts = context.get("artifacts")  # Get previous results
-                capabilities = context.get("team_capabilities")  # Get team info
+                context = ContextVariables(tool="myTool")
+                task_context = team._build_task_context(task, context)
+                task_data = task_context.get("task")  # Get task details
+                artifacts = task_context.get("artifacts")  # Get previous results
+                capabilities = task_context.get("team_capabilities")  # Get team info
+                tool = task_context.get("tool")  # Get provided context
                 ```
         """
-        context = ContextVariables(
-            task=task.model_dump(),
+        task_context = ContextVariables(
+            task=task,
             artifacts=self._artifacts,
-            **self._context,
+            team_capabilities=self._team_capabilities,
         )
 
-        return context
+        if context:
+            task_context.update(context)
+
+        return task_context
 
     def _prepare_instructions(
         self,
@@ -598,7 +607,7 @@ class SwarmTeam:
 
         Args:
             prompt: Natural language description of work to be done.
-            context: Optional variables for plan customization (e.g., URLs, paths).
+            context: Optional context for plan customization (e.g., URLs, paths).
 
         Returns:
             A structured plan with ordered tasks.
@@ -611,7 +620,8 @@ class SwarmTeam:
             Basic usage:
                 ```python
                 try:
-                    plan = await team.create_plan("Review and test PR #123")
+                    context = ContextVariables()
+                    plan = await team.create_plan("Review and test PR #123", context)
                     print(f"Created plan with {len(plan.tasks)} tasks")
                 except PlanValidationError as e:
                     print(f"Invalid plan: {e}")
@@ -620,23 +630,21 @@ class SwarmTeam:
             With additional context:
                 ```python
                 try:
+                    context = ContextVariables(
+                        pr_url="github.com/org/repo/123",
+                        focus_areas=["security", "performance"],
+                    )
                     plan = await team.create_plan(
                         prompt="Review authentication changes in PR #123",
-                        context=ContextVariables(
-                            pr_url="github.com/org/repo/123",
-                            focus_areas=["security", "performance"],
-                        ),
+                        context=context,
                     )
                 except (PlanValidationError, ResponseParsingError) as e:
                     print(f"Planning failed: {e}")
                 ```
         """
-        if context:
-            self._context.update(context)
-
         result = await self.planning_agent.create_plan(
             prompt=prompt,
-            context=self._context,
+            context=context,
         )
 
         if self.stream_handler:
@@ -659,7 +667,7 @@ class SwarmTeam:
 
         Args:
             prompt: Natural language description of work to be done.
-            context: Optional variables for plan customization.
+            context: Optional context for plan customization and task execution.
             feedback_handler: Optional handler for reviewing and refining plans
                 before execution.
 
@@ -669,9 +677,10 @@ class SwarmTeam:
         Examples:
             Basic execution:
                 ```python
+                context = ContextVariables(pr_url="github.com/org/repo/123")
                 artifact = await team.execute(
                     prompt="Review and test PR #123",
-                    context=ContextVariables(pr_url="github.com/org/repo/123"),
+                    context=context,
                 )
                 if artifact.status == ArtifactStatus.FAILED:
                     print(f"Execution failed: {artifact.error}")
@@ -725,12 +734,13 @@ class SwarmTeam:
                         return None
 
 
+                context = ContextVariables(
+                    tech_stack={"framework": "Django"},
+                    security_requirements=["2FA", "OAuth"],
+                )
                 artifact = await team.execute(
                     prompt="Implement authentication",
-                    context=ContextVariables(
-                        tech_stack={"framework": "Django"},
-                        security_requirements=["2FA", "OAuth"],
-                    ),
+                    context=context,
                     feedback_handler=TaskLimitValidator(max_tasks=3),
                 )
                 ```
@@ -756,9 +766,13 @@ class SwarmTeam:
                     current_prompt, current_context = result
                     continue
 
-            return await self.execute_plan(plan)
+            return await self.execute_plan(plan, current_context)
 
-    async def execute_plan(self, plan: Plan) -> Artifact:
+    async def execute_plan(
+        self,
+        plan: Plan,
+        context: ContextVariables | None = None,
+    ) -> Artifact:
         """Execute a plan by running all its tasks in dependency order.
 
         Manages the complete execution lifecycle:
@@ -769,6 +783,7 @@ class SwarmTeam:
 
         Args:
             plan: Plan with tasks to execute.
+            context: Optional context for task execution.
 
         Returns:
             An execution artifact that includes:
@@ -780,12 +795,13 @@ class SwarmTeam:
         Examples:
             Create and execute a plan:
                 ```python
-                plan_result = await team.create_plan("Review PR #123")
+                context = ContextVariables(pr_url="github.com/org/repo/123")
+                plan_result = await team.create_plan("Review PR #123", context)
                 if plan_result.error:
                     print(f"Planning failed: {plan_result.error}")
                     return  # or raise
 
-                artifact = await team.execute_plan(plan_result.value)
+                artifact = await team.execute_plan(plan_result.value, context)
 
                 if artifact.status == ArtifactStatus.FAILED:
                     print(f"Execution failed: {artifact.error}")
@@ -808,7 +824,7 @@ class SwarmTeam:
                 log_verbose(f"Executing tasks: {next_tasks}", level="DEBUG")
                 for task in next_tasks:
                     try:
-                        task_result = await self.execute_task(task)
+                        task_result = await self.execute_task(task, context)
                     except Exception as e:
                         artifact.status = ArtifactStatus.FAILED
                         artifact.error = e
@@ -828,7 +844,11 @@ class SwarmTeam:
             artifact.error = error
             return artifact
 
-    async def execute_task(self, task: Task) -> TaskResult:
+    async def execute_task(
+        self,
+        task: Task,
+        context: ContextVariables | None = None,
+    ) -> TaskResult:
         """Execute a single task using an appropriate team member.
 
         Handles the complete task lifecycle:
@@ -839,6 +859,7 @@ class SwarmTeam:
 
         Args:
             task: Task to execute, must match a registered task type.
+            context: Optional context for task execution.
 
         Returns:
             Task execution result with outputs.
@@ -851,6 +872,7 @@ class SwarmTeam:
             Execute a review task:
                 ```python
                 try:
+                    context = ContextVariables(pr_url="github.com/org/repo/123")
                     task_result = await team.execute_task(
                         ReviewTask(
                             # Base Task required fields
@@ -865,7 +887,8 @@ class SwarmTeam:
                             # ReviewTask specific fields
                             pr_url="github.com/org/repo/123",
                             review_type="security",
-                        )
+                        ),
+                        context=context,
                     )
                     print(f"Reviewer: {task_result.assignee.id}")
                     print(f"Status: {task_result.task.status}")
@@ -891,7 +914,7 @@ class SwarmTeam:
                 task.status = TaskStatus.FAILED
                 raise ValueError(f"No TaskDefinition found for task type '{task.type}'")
 
-            task_context = self._build_task_context(task)
+            task_context = self._build_task_context(task, context)
             task_instructions = self._prepare_instructions(
                 task=task,
                 task_definition=task_definition,
