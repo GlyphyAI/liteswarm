@@ -302,9 +302,9 @@ class TaskDefinition(BaseModel):
         Simple task definition:
             ```python
             task_def = TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions="Review code at {task.pr_url}",
-                task_response_format=ReviewOutput,
+                task_type=ReviewTask,
+                instructions="Review code at {task.pr_url}",
+                response_format=ReviewOutput,
             )
             ```
 
@@ -324,9 +324,9 @@ class TaskDefinition(BaseModel):
 
 
             task_def = TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions=generate_instructions,
-                task_response_format=parse_output,
+                task_type=ReviewTask,
+                instructions=generate_instructions,
+                response_format=parse_output,
             )
             ```
     """
