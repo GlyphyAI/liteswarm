@@ -7,6 +7,7 @@
 from typing import Protocol
 
 import json_repair
+import orjson
 from pydantic import ValidationError
 
 from liteswarm.core.swarm import Swarm
@@ -22,21 +23,81 @@ from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PromptTemplate,
 from liteswarm.utils.tasks import create_plan_with_tasks
 from liteswarm.utils.typing import is_callable, is_subtype
 
-AGENT_PLANNER_INSTRUCTIONS = """
-You are a task planning specialist.
+PLANNING_INSTRUCTIONS = """
+You are an expert task planning specialist with deep experience in breaking down complex work into efficient, minimal workflows.
+
+IMPORTANT: The most effective plans typically have around 3 tasks. While more tasks are allowed when necessary, strive to keep plans concise and focused.
 
 Your role is to:
-1. Break down complex requests into clear, actionable tasks.
-2. Ensure tasks have appropriate dependencies.
-3. Create tasks that match the provided task types.
-4. Consider team capabilities when planning.
+1. Analyze requests and identify the core essential tasks (aim for ~3 tasks when possible)
+2. Combine related work into larger, meaningful tasks
+3. Create precise, well-scoped tasks that match the available task types
+4. Consider team capabilities and workload when planning
+5. Ensure each task has clear success criteria
 
-Each task must include:
-- A clear title and description.
-- The appropriate task type.
-- Any dependencies on other tasks.
+Each task must have:
+1. A descriptive title that clearly states the goal
+2. A comprehensive description explaining:
+   - What needs to be done (including subtasks if needed)
+   - How to verify completion
+   - Any important constraints or requirements
+3. The correct task type from available options
+4. Dependencies that enable parallel execution while maintaining correctness
+5. Fields that are specified in the response format for the task type
 
-Follow the output format specified in the prompt to create your plan.
+Best practices to follow:
+- Aim for around 3 well-defined tasks when possible
+- Make each task larger and more comprehensive
+- Combine related work into single tasks
+- Include subtasks in descriptions rather than creating separate tasks
+- Enable parallel execution where possible
+- Include clear verification steps
+- Use consistent naming conventions
+
+Follow the response format schema exactly as specified in the prompt.
+""".strip()
+
+PLANNING_PROMPT_TEMPLATE = """
+You need to create an efficient execution plan for the following request:
+
+<user_request>
+{PROMPT}
+</user_request>
+
+Important context to consider:
+
+<context>
+{CONTEXT}
+</context>
+
+Analysis steps:
+1. Understand the core requirements and aim for around 3 essential tasks.
+2. Combine related work into larger, comprehensive tasks.
+3. Include subtasks within task descriptions rather than creating separate tasks.
+4. Organize tasks for parallel execution where possible.
+5. Ensure each task has clear success criteria.
+
+Your response must be a JSON object exactly matching this schema:
+
+<response_format>
+{RESPONSE_FORMAT}
+</response_format>
+
+Response requirements:
+1. Return ONLY the JSON object, no other text.
+2. Follow the schema exactly - no extra fields.
+3. Start with '{{' and end with '}}'.
+4. Use valid JSON syntax without wrapping in code blocks.
+5. Include all required fields for each task.
+
+Task best practices:
+1. Use clear, action-oriented titles.
+2. Write comprehensive descriptions that include subtasks.
+3. Set correct dependencies for parallel execution.
+4. Choose appropriate task types.
+5. Aim for around 3 well-defined tasks.
+
+Remember: Your plan will be executed by a team of specialized agents. The most effective plans typically have around 3 comprehensive tasks. Include subtasks in descriptions rather than creating separate tasks.
 """.strip()
 
 
@@ -257,35 +318,43 @@ class LitePlanningAgent(PlanningAgent):
         """
         return Agent(
             id="agent-planner",
-            instructions=AGENT_PLANNER_INSTRUCTIONS,
+            instructions=PLANNING_INSTRUCTIONS,
             llm=LLM(model="gpt-4o"),
         )
 
     def _default_planning_prompt_template(self) -> PromptTemplate:
         """Create the default prompt template.
 
+        Creates a template that guides the agent to create efficient plans with
+        comprehensive tasks. The template includes the request, context, and
+        response format requirements.
+
         Returns:
-            Simple template that uses raw prompt.
+            Template function that formats prompts with context.
 
-        Examples:
-            Default template:
-                ```python
-                template = planning_agent._default_planning_prompt_template()
-                prompt = template("Create a plan", context={})
-                assert prompt == "Create a plan"  # Returns raw prompt
-                ```
-
-            Custom template:
-                ```python
-                def custom_template(prompt: str, context: ContextVariables) -> str:
-                    return f"{prompt} for {context.get('project_name')}"
-
-
-                planning_agent = LitePlanningAgent(swarm=swarm, prompt_template=custom_template)
-                # Will format prompts with project name
-                ```
+        Example:
+            ```python
+            template = planning_agent._default_planning_prompt_template()
+            prompt = template(
+                "Review and deploy changes",
+                context=ContextVariables(pr_url="github.com/org/repo/123"),
+            )
+            ```
         """
-        return lambda prompt, _: prompt
+
+        def default_template_builder(prompt: str, context: ContextVariables) -> str:
+            if is_subtype(self.response_format, Plan):
+                response_format = orjson.dumps(self.response_format.model_json_schema()).decode()
+            else:
+                response_format = None
+
+            return PLANNING_PROMPT_TEMPLATE.format(
+                PROMPT=prompt,
+                CONTEXT=context,
+                RESPONSE_FORMAT=response_format,
+            )
+
+        return default_template_builder
 
     def _default_planning_response_format(self) -> PlanResponseFormat:
         """Create the default plan response format.
@@ -316,7 +385,7 @@ class LitePlanningAgent(PlanningAgent):
                 ```
         """
         task_definitions = self._task_registry.get_task_definitions()
-        task_types = [td.task_schema for td in task_definitions]
+        task_types = [td.task_type for td in task_definitions]
         return create_plan_with_tasks(task_types)
 
     def _validate_plan(self, plan: Plan) -> Plan:
