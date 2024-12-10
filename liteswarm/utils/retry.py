@@ -8,8 +8,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from litellm.exceptions import RateLimitError, ServiceUnavailableError
-
 from liteswarm.types.exceptions import CompletionError
 from liteswarm.utils.logging import log_verbose
 
@@ -104,7 +102,7 @@ async def retry_with_exponential_backoff(
     for attempt in range(max_retries + 1):
         try:
             return await operation()
-        except (RateLimitError, ServiceUnavailableError) as e:
+        except Exception as e:
             last_error = e
             if attempt == max_retries:
                 break
