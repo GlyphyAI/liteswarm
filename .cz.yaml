@@ -1,0 +1,27 @@
+commitizen:
+  name: cz_conventional_commits
+  tag_format: $version
+  version: 0.1.1
+  version_files:
+    - pyproject.toml:version
+    - CITATION.cff:version
+  changelog:
+    template: keep-a-changelog
+    start_rev: 0.1.0
+    unreleased_version: Unreleased
+    sections:
+      - type: feat
+        name: Added
+      - type: fix
+        name: Fixed
+      - type: change
+        name: Changed
+      - type: deprecate
+        name: Deprecated
+      - type: remove
+        name: Removed
+      - type: security
+        name: Security
+    incremental: true
+    changelog_file: CHANGELOG.md
+    bump_message: "bump: version $current_version → $new_version"
