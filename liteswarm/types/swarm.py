@@ -687,6 +687,9 @@ class ConversationState(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     """Complete conversation history."""
 
+    context_variables: ContextVariables | None = None
+    """Current context variables."""
+
     usage: Usage | None = None
     """Total token usage."""
 
