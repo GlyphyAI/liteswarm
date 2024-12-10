@@ -8,8 +8,6 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
-from litellm.exceptions import RateLimitError, ServiceUnavailableError
-
 from liteswarm.types.exceptions import CompletionError
 from liteswarm.utils.logging import log_verbose
 
@@ -56,11 +54,9 @@ async def retry_with_exponential_backoff(
                 response = await api.request()
                 return response.json()
 
+
             try:
-                result = await retry_with_exponential_backoff(
-                    make_api_call,
-                    max_retries=3
-                )
+                result = await retry_with_exponential_backoff(make_api_call, max_retries=3)
             except CompletionError as e:
                 print(f"API call failed: {e}")
             ```
@@ -72,12 +68,13 @@ async def retry_with_exponential_backoff(
                     raise ServiceUnavailableError("Server busy")
                 return "success"
 
+
             result = await retry_with_exponential_backoff(
                 unstable_operation,
                 max_retries=5,
                 initial_delay=0.1,
                 max_delay=5.0,
-                backoff_factor=3.0
+                backoff_factor=3.0,
             )
             # Retries with delays: 0.1s, 0.3s, 0.9s, 2.7s, 5.0s
             ```
@@ -91,10 +88,11 @@ async def retry_with_exponential_backoff(
                     # Will be caught and retried with backoff
                     raise
 
+
             response = await retry_with_exponential_backoff(
                 rate_limited_call,
                 max_retries=3,
-                initial_delay=2.0  # Start with longer delay
+                initial_delay=2.0,  # Start with longer delay
             )
             ```
     """
@@ -104,7 +102,7 @@ async def retry_with_exponential_backoff(
     for attempt in range(max_retries + 1):
         try:
             return await operation()
-        except (RateLimitError, ServiceUnavailableError) as e:
+        except Exception as e:
             last_error = e
             if attempt == max_retries:
                 break
@@ -125,6 +123,11 @@ async def retry_with_exponential_backoff(
 
     if last_error:
         error_type = last_error.__class__.__name__
+        log_verbose(
+            f"Operation failed after {max_retries + 1} attempts: {error_type}",
+            level="ERROR",
+        )
+
         raise CompletionError(
             f"Operation failed after {max_retries + 1} attempts: {error_type}",
             last_error,
