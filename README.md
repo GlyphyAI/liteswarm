@@ -796,15 +796,13 @@ Follow the [Conventional Commits](https://www.conventionalcommits.org/) specific
 If you use LiteSwarm in your research or project, please cite our work:
 
 ```bibtex
-@software{liteswarm2024,
-  title = {LiteSwarm: A Lightweight Framework for Building AI Agent Systems},
-  author = {Evgenii Mozharovskii and {GlyphyAI}},
-  year = {2024},
-  url = {https://github.com/glyphyai/liteswarm},
-  note = {An extensible framework for building AI agent systems with a focus on 
-          structured interactions, LLM-agnostic design, and composable architecture. 
-          Features include multi-agent orchestration, structured outputs, and 
-          provider-agnostic response parsing.}
+@software{mozharovskii_2024_liteswarm,
+    title = {{LiteSwarm: A Lightweight Framework for Building AI Agent Systems}},
+    author = {Mozharovskii, Evgenii and {GlyphyAI}},
+    year = {2024},
+    url = {https://github.com/glyphyai/liteswarm},
+    license = {MIT},
+    version = {0.1.1}
 }
 ```
 
