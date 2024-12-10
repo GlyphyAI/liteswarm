@@ -45,6 +45,7 @@ dev = [
     "mypy>=1.13.0",
     "ruff>=0.7.3",
     "typing-extensions>=4.12.2",
+    "commitizen>=4.1.0",
 ]
 
 [tool.setuptools.package-data]
@@ -111,4 +112,13 @@ python_version = "3.11"
 ignore_missing_imports = true
 plugins = [
     "pydantic.mypy",
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.1.1"
+tag_format = "$version"
+version_files = [
+    "pyproject.toml:version",
+    "CITATION.cff:version"
 ]
