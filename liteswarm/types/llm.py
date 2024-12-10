@@ -11,6 +11,7 @@ from litellm import (
     ChatCompletionAudioParam,
     ChatCompletionModality,
     ChatCompletionPredictionContentParam,
+    ModelConfig,
 )
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from typing_extensions import TypedDict
@@ -352,10 +353,25 @@ class LLM(BaseModel):
     litellm_kwargs: dict[str, Any] | None = None
     """Additional LiteLLM options."""
 
+    base_url: str | None = None
+    """Base URL for API requests."""
+
+    api_version: str | None = None
+    """API version string."""
+
+    api_key: str | None = None
+    """API authentication key."""
+
+    model_list: list[ModelConfig] | None = None
+    """List of available model configurations."""
+
+    extra_headers: dict[str, Any] | None = None
+    """Additional HTTP headers to include in API requests."""
+
     model_config = ConfigDict(
-        extra="forbid",
         use_attribute_docstrings=True,
         arbitrary_types_allowed=True,
+        extra="forbid",
     )
 
     @field_serializer("response_format")
