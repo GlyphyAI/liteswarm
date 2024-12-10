@@ -495,6 +495,7 @@ class SwarmTeam:
             task_result = TaskResult(
                 task=task,
                 content=response,
+                context=task_context,
                 assignee=assignee,
             )
 
@@ -511,6 +512,7 @@ class SwarmTeam:
                 task=task,
                 content=response,
                 output=output,
+                context=task_context,
                 assignee=assignee,
             )
 
@@ -529,6 +531,7 @@ class SwarmTeam:
                 task=task,
                 content=response,
                 output=repaired_response,
+                context=task_context,
                 assignee=assignee,
             )
 
@@ -901,6 +904,9 @@ class SwarmTeam:
 
             if not result.content:
                 raise ValueError("The agent did not return any content")
+
+            if result.context_variables:
+                task_context.update(result.context_variables)
 
             task.status = TaskStatus.COMPLETED
             task_result = await self._process_response(
