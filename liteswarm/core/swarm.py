@@ -1443,6 +1443,7 @@ class Swarm:
             agent_messages=self._agent_messages,
             agent_queue=list(self._agent_queue),
             messages=self._full_history,
+            context_variables=self._context_variables,
             usage=full_usage,
             response_cost=response_cost,
         )

@@ -663,6 +663,10 @@ class ConversationState(BaseModel):
                 ],
                 agent_queue=[backup_agent],  # Queued agents
                 messages=[],  # Full history
+                context_variables=ContextVariables(
+                    user_name="John",
+                    language="English",
+                ),
                 usage=Usage(total_tokens=100),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.001,
@@ -687,6 +691,9 @@ class ConversationState(BaseModel):
     messages: list[Message] = Field(default_factory=list)
     """Complete conversation history."""
 
+    context_variables: ContextVariables | None = None
+    """Current context variables."""
+
     usage: Usage | None = None
     """Total token usage."""
 
@@ -696,4 +703,5 @@ class ConversationState(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )

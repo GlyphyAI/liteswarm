@@ -663,6 +663,7 @@ class TaskResult(BaseModel):
                     comments=["Good error handling", "Well documented"],
                     suggestions=[],
                 ),
+                context=ContextVariables(pr_url="github.com/org/repo/123"),
                 assignee=reviewer,
                 timestamp=datetime.now(),
             )
@@ -682,6 +683,9 @@ class TaskResult(BaseModel):
 
     output: BaseModel | None = None
     """Structured output data."""
+
+    context: ContextVariables | None = None
+    """Context variables for the task."""
 
     assignee: TeamMember | None = None
     """Member who executed the task."""
