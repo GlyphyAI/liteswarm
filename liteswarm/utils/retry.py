@@ -123,6 +123,11 @@ async def retry_with_exponential_backoff(
 
     if last_error:
         error_type = last_error.__class__.__name__
+        log_verbose(
+            f"Operation failed after {max_retries + 1} attempts: {error_type}",
+            level="ERROR",
+        )
+
         raise CompletionError(
             f"Operation failed after {max_retries + 1} attempts: {error_type}",
             last_error,
