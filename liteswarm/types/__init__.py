@@ -6,7 +6,7 @@
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
-from .context import ContextVariables, ReservedContextKey
+from .context import ContextVariables
 from .llm import LLM, AgentTool
 from .misc import JSON, Number
 from .swarm import Agent, AgentInstructions, Delta, Message, ToolCallResult, ToolMessage, ToolResult
@@ -37,7 +37,6 @@ __all__ = [
     "Number",
     "Plan",
     "PlanFeedbackHandler",
-    "ReservedContextKey",
     "Task",
     "TaskDefinition",
     "TaskResult",
