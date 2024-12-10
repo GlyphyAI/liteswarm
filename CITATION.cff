@@ -5,9 +5,19 @@ authors:
     given-names: "Evgenii"
   - name: "GlyphyAI"
 title: "LiteSwarm: A Lightweight Framework for Building AI Agent Systems"
-version: 1.0.0
+version: 0.1.1
 date-released: "2024"
 url: "https://github.com/glyphyai/liteswarm"
-abstract: "A lightweight and fully extensible framework for building AI agent systems with a focus on structured interactions, LLM-agnostic design, and composable architecture. Features include multi-agent orchestration, structured outputs, and provider-agnostic response parsing."
+abstract: "An extensible framework for building AI agent systems with a focus on structured interactions, LLM-agnostic design, and composable architecture. Features include multi-agent orchestration, structured outputs, and provider-agnostic response parsing."
 type: software
 license: MIT
+references:
+  - type: software
+    title: "LiteSwarm: A Lightweight Framework for Building AI Agent Systems"
+    authors:
+      - family-names: "Mozharovskii"
+        given-names: "Evgenii"
+      - name: "GlyphyAI"
+    year: 2024
+    url: "https://github.com/glyphyai/liteswarm"
+    key: liteswarm2024
