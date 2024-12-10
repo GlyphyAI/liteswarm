@@ -17,10 +17,7 @@ from liteswarm.types.swarm import Agent
 PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 """Type variable representing a Pydantic model or its subclass."""
 
-TaskType = TypeVar("TaskType", bound="Task")
-"""Type variable representing a Task or its subclass."""
-
-TaskInstructions: TypeAlias = str | Callable[[TaskType, ContextVariables], str]
+TaskInstructions: TypeAlias = str | Callable[["Task", ContextVariables], str]
 """Instructions for executing a task.
 
 Can be either a static template string or a function that generates instructions
@@ -305,9 +302,9 @@ class TaskDefinition(BaseModel):
         Simple task definition:
             ```python
             task_def = TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions="Review code at {task.pr_url}",
-                task_response_format=ReviewOutput,
+                task_type=ReviewTask,
+                instructions="Review code at {task.pr_url}",
+                response_format=ReviewOutput,
             )
             ```
 
@@ -327,21 +324,21 @@ class TaskDefinition(BaseModel):
 
 
             task_def = TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions=generate_instructions,
-                task_response_format=parse_output,
+                task_type=ReviewTask,
+                instructions=generate_instructions,
+                response_format=parse_output,
             )
             ```
     """
 
-    task_schema: type[Task]
-    """Pydantic model for validating tasks."""
+    task_type: type[Task]
+    """Task schema class for validation and type identification."""
 
-    task_instructions: TaskInstructions
-    """Template or function for generating instructions."""
+    instructions: TaskInstructions
+    """Template or function for generating task instructions."""
 
-    task_response_format: TaskResponseFormat | None = None
-    """Optional schema for parsing responses."""
+    response_format: TaskResponseFormat | None = None
+    """Optional format specification for task responses."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,

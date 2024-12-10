@@ -21,27 +21,31 @@ class TaskRegistry:
                 pr_url: str
                 review_type: str
 
+
             class TestTask(Task):
                 path: str
                 coverage: float
 
+
             # Create and initialize registry
-            registry = TaskRegistry([
-                TaskDefinition(
-                    task_schema=ReviewTask,
-                    task_instructions="Review {task.pr_url}"
-                ),
-                TaskDefinition(
-                    task_schema=TestTask,
-                    task_instructions="Test {task.path} with {task.coverage}% coverage"
-                )
-            ])
+            registry = TaskRegistry(
+                [
+                    TaskDefinition(
+                        task_type=ReviewTask,
+                        instructions="Review {task.pr_url}",
+                    ),
+                    TaskDefinition(
+                        task_type=TestTask,
+                        instructions="Test {task.path} with {task.coverage}% coverage",
+                    ),
+                ]
+            )
 
             # Add another task type
             registry.register_task(
                 TaskDefinition(
-                    task_schema=DeployTask,
-                    task_instructions="Deploy to {task.env}"
+                    task_type=DeployTask,
+                    instructions="Deploy to {task.env}",
                 )
             )
             ```
@@ -68,14 +72,14 @@ class TaskRegistry:
                 ```python
                 registry.register_task(
                     TaskDefinition(
-                        task_schema=AnalysisTask,
-                        task_instructions="Analyze data in {task.path}",
-                        task_response_format=AnalysisOutput
+                        task_type=AnalysisTask,
+                        instructions="Analyze data in {task.path}",
+                        response_format=AnalysisOutput,
                     )
                 )
                 ```
         """
-        self._registry[task_definition.task_schema.get_task_type()] = task_definition
+        self._registry[task_definition.task_type.get_task_type()] = task_definition
 
     def register_tasks(self, task_definitions: list[TaskDefinition]) -> None:
         """Register multiple task definitions.
@@ -86,16 +90,18 @@ class TaskRegistry:
         Examples:
             Register multiple task types:
                 ```python
-                registry.register_tasks([
-                    TaskDefinition(
-                        task_schema=ReviewTask,
-                        task_instructions="Review {task.pr_url}"
-                    ),
-                    TaskDefinition(
-                        task_schema=TestTask,
-                        task_instructions="Test {task.path}"
-                    )
-                ])
+                registry.register_tasks(
+                    [
+                        TaskDefinition(
+                            task_type=ReviewTask,
+                            instructions="Review {task.pr_url}",
+                        ),
+                        TaskDefinition(
+                            task_type=TestTask,
+                            instructions="Test {task.path}",
+                        ),
+                    ]
+                )
                 ```
         """
         for task_definition in task_definitions:
@@ -117,10 +123,10 @@ class TaskRegistry:
             Look up and use a task definition:
                 ```python
                 review_def = registry.get_task_definition("review")
-                task = review_def.task_schema(
+                task = review_def.task_type(
                     id="review-1",
                     title="Review PR #123",
-                    pr_url="github.com/org/repo/123"
+                    pr_url="github.com/org/repo/123",
                 )
                 ```
         """

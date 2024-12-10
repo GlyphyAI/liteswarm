@@ -75,9 +75,9 @@ class SwarmTeam:
 
 
             review_def = TaskDefinition(
-                task_schema=ReviewTask,
-                task_instructions="Review {task.pr_url} focusing on {task.review_type}",
-                task_response_format=ReviewOutput,  # Framework-level parsing
+                task_type=ReviewTask,
+                instructions="Review {task.pr_url} focusing on {task.review_type}",
+                response_format=ReviewOutput,  # Framework-level parsing
             )
 
             # 3. Create specialized agent
@@ -272,8 +272,8 @@ class SwarmTeam:
                 instructions = team._prepare_instructions(
                     task=task,
                     task_definition=TaskDefinition(
-                        task_schema=Task,
-                        task_instructions="Process {task.title}",
+                        task_type=Task,
+                        instructions="Process {task.title}",
                     ),
                     task_context=context,
                 )
@@ -288,14 +288,14 @@ class SwarmTeam:
                 instructions = team._prepare_instructions(
                     task=task,
                     task_definition=TaskDefinition(
-                        task_schema=Task,
-                        task_instructions=generate_instructions,
+                        task_type=Task,
+                        instructions=generate_instructions,
                     ),
                     task_context=context,
                 )
                 ```
         """
-        instructions = task_definition.task_instructions
+        instructions = task_definition.instructions
         return instructions(task, task_context) if callable(instructions) else instructions
 
     def _parse_response(
@@ -454,8 +454,9 @@ class SwarmTeam:
                     task_types=[ReviewTask],
                 )
                 task_def = TaskDefinition(
-                    task_schema=ReviewTask,
-                    task_response_format=ReviewOutput,
+                    task_type=ReviewTask,
+                    instructions="Review {task.pr_url} focusing on {task.review_type}",
+                    response_format=ReviewOutput,
                 )
 
                 try:
@@ -475,8 +476,9 @@ class SwarmTeam:
             Without response format:
                 ```python
                 task_def = TaskDefinition(
-                    task_schema=Task,
-                    task_response_format=None,  # No format specified
+                    task_type=Task,
+                    instructions="Process {task.title}",
+                    response_format=None,  # No format specified
                 )
                 response = "Task completed successfully"
                 task_result = await team._process_response(
@@ -489,7 +491,7 @@ class SwarmTeam:
                 print(task_result.content)  # Raw response content
                 ```
         """
-        response_format = task_definition.task_response_format
+        response_format = task_definition.response_format
 
         if not response_format:
             task_result = TaskResult(

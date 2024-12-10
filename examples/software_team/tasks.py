@@ -240,17 +240,17 @@ def parse_debug_task_response(content: str, context: ContextVariables) -> DebugO
 
 def create_flutter_task_definition() -> TaskDefinition:
     return TaskDefinition(
-        task_schema=FlutterTask,
-        task_instructions=build_flutter_task_prompt,
-        task_response_format=parse_flutter_task_response,
+        task_type=FlutterTask,
+        instructions=build_flutter_task_prompt,
+        response_format=parse_flutter_task_response,
     )
 
 
 def create_debug_task_definition() -> TaskDefinition:
     return TaskDefinition(
-        task_schema=DebugTask,
-        task_instructions=build_debug_task_prompt,
-        task_response_format=parse_debug_task_response,
+        task_type=DebugTask,
+        instructions=build_debug_task_prompt,
+        response_format=parse_debug_task_response,
     )
 
 
