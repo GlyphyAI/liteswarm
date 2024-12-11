@@ -27,17 +27,16 @@ jobs:
           pip install ".[dev]"
 
       # Step 4: Run Linting with Ruff
-      # - name: Run Linting with Ruff
-      #   run: |
-      #     ruff check .
+      - name: Run Linting with Ruff
+        run: |
+          ruff check .
 
       # Step 5: Run Type Checking with MyPy
-      # - name: Run Type Checking with MyPy
-      #   run: |
-      #     mypy .
+      - name: Run Type Checking with MyPy
+        run: |
+          mypy .
 
       # Step 6: (Optional) Run Additional Development Tools
-      # If you have other dev tools like `pytest`, you can install and run them similarly
       # - name: Run Tests with Pytest
       #   run: |
       #     pip install pytest
