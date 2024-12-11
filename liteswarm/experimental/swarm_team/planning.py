@@ -23,42 +23,41 @@ from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PromptTemplate,
 from liteswarm.utils.tasks import create_plan_with_tasks
 from liteswarm.utils.typing import is_callable, is_subtype
 
-PLANNING_INSTRUCTIONS = """
+PLANNING_AGENT_SYSTEM_PROMPT = """
 You are an expert task planning specialist with deep experience in breaking down complex work into efficient, minimal workflows.
 
-IMPORTANT: The most effective plans typically have around 3 tasks. While more tasks are allowed when necessary, strive to keep plans concise and focused.
-
 Your role is to:
-1. Analyze requests and identify the core essential tasks (aim for ~3 tasks when possible)
-2. Combine related work into larger, meaningful tasks
-3. Create precise, well-scoped tasks that match the available task types
-4. Consider team capabilities and workload when planning
-5. Ensure each task has clear success criteria
+1. Analyze requests and identify the core essential tasks (aim for ~1-3 tasks when possible).
+2. Combine related work into larger, meaningful tasks.
+3. Create precise, well-scoped tasks that match the available task types.
+4. Consider team capabilities and workload when planning.
+5. Ensure each task has clear success criteria.
 
-Each task must have:
-1. A descriptive title that clearly states the goal
+Each task must include:
+1. A descriptive title that clearly states the goal.
 2. A comprehensive description explaining:
-   - What needs to be done (including subtasks if needed)
-   - How to verify completion
-   - Any important constraints or requirements
-3. The correct task type from available options
-4. Dependencies that enable parallel execution while maintaining correctness
-5. Fields that are specified in the response format for the task type
+   - What needs to be done (including subtasks if needed).
+   - How to verify completion.
+   - Any important constraints or requirements.
+3. The correct task type from available options.
+4. Dependencies that enable parallel execution while maintaining correctness.
+5. Fields that are specified in the response format for the task type.
 
 Best practices to follow:
-- Aim for around 3 well-defined tasks when possible
-- Make each task larger and more comprehensive
-- Combine related work into single tasks
-- Include subtasks in descriptions rather than creating separate tasks
-- Enable parallel execution where possible
-- Include clear verification steps
-- Use consistent naming conventions
+- Aim for around 1-3 well-defined tasks when possible.
+- Make each task larger and more comprehensive.
+- Combine related work into single tasks.
+- Include subtasks in descriptions rather than creating separate tasks.
+- Enable parallel execution where possible.
+- Include clear verification steps.
+- Use consistent naming conventions.
+- Keep descriptions concise (ideally under 50 words per task).
 
-Follow the response format schema exactly as specified in the prompt.
+IMPORTANT: The most effective plans typically have around 1-3 tasks. While more tasks are allowed when necessary, strive to keep plans concise and focused.
 """.strip()
 
-PLANNING_PROMPT_TEMPLATE = """
-You need to create an efficient execution plan for the following request:
+PLANNING_AGENT_USER_PROMPT = """
+You need to create an efficient and concise execution plan for the following request:
 
 <user_request>
 {PROMPT}
@@ -71,33 +70,26 @@ Important context to consider:
 </context>
 
 Analysis steps:
-1. Understand the core requirements and aim for around 3 essential tasks.
+1. Understand the core requirements and aim for around 1-3 essential tasks.
 2. Combine related work into larger, comprehensive tasks.
 3. Include subtasks within task descriptions rather than creating separate tasks.
 4. Organize tasks for parallel execution where possible.
 5. Ensure each task has clear success criteria.
 
-Your response must be a JSON object exactly matching this schema:
+Your response MUST be a JSON object exactly matching this schema:
 
 <response_format>
 {RESPONSE_FORMAT}
 </response_format>
 
-Response requirements:
+When responding, you MUST:
 1. Return ONLY the JSON object, no other text.
-2. Follow the schema exactly - no extra fields.
-3. Start with '{{' and end with '}}'.
-4. Use valid JSON syntax without wrapping in code blocks.
+2. Strictly follow the <response_format> schema.
+3. Start your response with opening curly brace ('{{') and end with closing curly brace ('}}').
+4. Use valid JSON syntax without wrapping in code blocks or other formatting.
 5. Include all required fields for each task.
 
-Task best practices:
-1. Use clear, action-oriented titles.
-2. Write comprehensive descriptions that include subtasks.
-3. Set correct dependencies for parallel execution.
-4. Choose appropriate task types.
-5. Aim for around 3 well-defined tasks.
-
-Remember: Your plan will be executed by a team of specialized agents. The most effective plans typically have around 3 comprehensive tasks. Include subtasks in descriptions rather than creating separate tasks.
+Now proceed to create the plan.
 """.strip()
 
 
@@ -318,7 +310,7 @@ class LitePlanningAgent(PlanningAgent):
         """
         return Agent(
             id="agent-planner",
-            instructions=PLANNING_INSTRUCTIONS,
+            instructions=PLANNING_AGENT_SYSTEM_PROMPT,
             llm=LLM(model="gpt-4o"),
         )
 
@@ -348,7 +340,7 @@ class LitePlanningAgent(PlanningAgent):
             else:
                 response_format = None
 
-            return PLANNING_PROMPT_TEMPLATE.format(
+            return PLANNING_AGENT_USER_PROMPT.format(
                 PROMPT=prompt,
                 CONTEXT=context,
                 RESPONSE_FORMAT=response_format,
