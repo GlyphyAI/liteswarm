@@ -169,4 +169,4 @@ def create_context_from_project(project: Project) -> ContextVariables:
         context = create_context_from_project(project)
         ```
     """
-    return ContextVariables(**project.model_dump())
+    return ContextVariables(project.model_dump())
