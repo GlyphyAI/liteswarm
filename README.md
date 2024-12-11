@@ -112,59 +112,74 @@ See [litellm's documentation](https://docs.litellm.ai/docs/providers) for a comp
 ### Simple Agent
 
 ```python
+import asyncio
+
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent
 
-# Create an agent
-agent = Agent(
-    id="assistant",
-    instructions="You are a helpful AI assistant.",
-    llm=LLM(
-        model="claude-3-5-haiku-20241022",
-        temperature=0.7,
-    ),
-)
 
-# Create swarm and execute
-swarm = Swarm()
-result = await swarm.execute(
-    agent=agent,
-    prompt="Hello!",
-)
+async def main() -> None:
+    # Create an agent
+    agent = Agent(
+        id="assistant",
+        instructions="You are a helpful AI assistant.",
+        llm=LLM(
+            model="claude-3-5-haiku-20241022",
+            temperature=0.7,
+        ),
+    )
 
-print(result.content)
+    # Create swarm and execute
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent=agent,
+        prompt="Hello!",
+    )
+
+    print(result.content)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Agent with Tools
 
 ```python
+import asyncio
+
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent
 
 
-def calculate_sum(a: int, b: int) -> int:
-    """Calculate the sum of two numbers."""
-    return a + b
+async def main() -> None:
+    def calculate_sum(a: int, b: int) -> int:
+        """Calculate the sum of two numbers."""
+        return a + b
+
+    # Create a math agent with tools
+    agent = Agent(
+        id="math_agent",
+        instructions="Use tools for calculations. Never calculate yourself.",
+        llm=LLM(
+            model="claude-3-5-haiku-20241022",
+            tools=[calculate_sum],
+            tool_choice="auto",
+        ),
+    )
+
+    # Create swarm and execute
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent=agent,
+        prompt="What is 2 + 2?",
+    )
+
+    print(result.content)
 
 
-agent = Agent(
-    id="math_agent",
-    instructions="Use tools for calculations. Never calculate yourself.",
-    llm=LLM(
-        model="claude-3-5-haiku-20241022",
-        tools=[calculate_sum],
-        tool_choice="auto",
-    ),
-)
-
-# Create swarm and execute
-swarm = Swarm()
-result = await swarm.execute(
-    agent=agent,
-    prompt="What is 2 + 2?",
-)
-
-print(result.content)
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ## Advanced Features
@@ -174,40 +189,61 @@ print(result.content)
 Agents can dynamically switch to other agents during execution:
 
 ```python
+import asyncio
+import json
+
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent, ToolResult
 
-# Create specialized agents
-math_agent = Agent(
-    id="math",
-    instructions="You are a math expert.",
-    llm=LLM(model="gpt-4o"),
-)
 
-def switch_to_math() -> ToolResult:
-    """Switch to math agent for calculations."""
-    return ToolResult(
-        content="Switching to math expert",
-        agent=math_agent,
+async def main() -> None:
+    def multiply(a: int, b: int) -> int:
+        """Multiply two numbers."""
+        return a * b
+
+    # Create a math agent with tools
+    math_agent = Agent(
+        id="math",
+        instructions="You are a math expert.",
+        llm=LLM(
+            model="gpt-4o",
+            tools=[multiply],
+            tool_choice="auto",
+        ),
     )
 
-# Create main agent with switching capability
-main_agent = Agent(
-    id="assistant",
-    instructions="Help users and switch to math agent for calculations.",
-    llm=LLM(
-        model="gpt-4o",
-        tools=[switch_to_math],
-        tool_choice="auto",
-    ),
-)
+    def switch_to_math() -> ToolResult:
+        """Switch to math agent for calculations."""
+        return ToolResult(
+            content="Switching to math expert",
+            agent=math_agent,
+        )
 
-# Agent will automatically switch when needed
-swarm = Swarm()
-result = await swarm.execute(
-    agent=main_agent,
-    prompt="What is 234 * 567?",
-)
+    # Create the main agent with switch tool
+    main_agent = Agent(
+        id="assistant",
+        instructions="Help users and switch to math agent for calculations.",
+        llm=LLM(
+            model="gpt-4o",
+            tools=[switch_to_math],
+            tool_choice="auto",
+        ),
+    )
+
+    # Agent will automatically switch when needed
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent=main_agent,
+        prompt="What is 234 * 567?",
+    )
+
+    # Print the full conversation history
+    messages = [m.model_dump(exclude_none=True) for m in result.messages]
+    print(json.dumps(messages, indent=2))
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Agent Teams
@@ -229,6 +265,12 @@ The SwarmTeam class (from `liteswarm.experimental`) provides an experimental fra
 Here's a complete example:
 
 ```python
+import asyncio
+import json
+from typing import Literal
+
+from pydantic import BaseModel
+
 from liteswarm.core import Swarm
 from liteswarm.experimental import SwarmTeam
 from liteswarm.types import (
@@ -244,65 +286,32 @@ from liteswarm.types import (
 )
 
 
-# 1. Define task types
-class ReviewTask(Task):
-    pr_url: str
-    review_type: str  # "security", "performance", etc.
+# 1. Define task types and outputs
+class WriteDocTask(Task):
+    type: Literal["write_documentation"]
+    topic: str
+    target_audience: Literal["beginner", "intermediate", "advanced"]
 
 
-class ImplementTask(Task):
-    feature_name: str
-    requirements: list[str]
+class ReviewDocTask(Task):
+    type: Literal["review_documentation"]
+    content: str
+    criteria: list[str]
 
 
-# 2. Create task definitions with instructions
-review_def = TaskDefinition(
-    task_schema=ReviewTask,
-    task_instructions="Review {task.pr_url} focusing on {task.review_type} aspects.",
-)
-
-implement_def = TaskDefinition(
-    task_schema=ImplementTask,
-    task_instructions="Implement {task.feature_name} following requirements:\n{task.requirements}",
-)
-
-# 3. Create specialized agents
-review_agent = Agent(
-    id="reviewer",
-    instructions="You are a code reviewer focusing on quality and security.",
-    llm=LLM(model="gpt-4o"),
-)
-
-dev_agent = Agent(
-    id="developer",
-    instructions="You are a developer implementing new features.",
-    llm=LLM(model="gpt-4o"),
-)
-
-# 4. Create team members with capabilities
-team_members = [
-    TeamMember(
-        id="senior-reviewer",
-        agent=review_agent,
-        task_types=[ReviewTask],
-    ),
-    TeamMember(
-        id="backend-dev",
-        agent=dev_agent,
-        task_types=[ImplementTask],
-    ),
-]
-
-# 5. Create the team
-swarm = Swarm(include_usage=True)
-team = SwarmTeam(
-    swarm=swarm,
-    members=team_members,
-    task_definitions=[review_def, implement_def],
-)
+class Documentation(BaseModel):
+    content: str
+    examples: list[str]
+    see_also: list[str]
 
 
-# 6. Optional: Add plan feedback handler
+class ReviewFeedback(BaseModel):
+    approved: bool
+    issues: list[str]
+    suggestions: list[str]
+
+
+# 2. (Optional) Create interactive feedback handler
 class InteractiveFeedback(PlanFeedbackHandler):
     async def handle(
         self,
@@ -310,7 +319,6 @@ class InteractiveFeedback(PlanFeedbackHandler):
         prompt: str,
         context: ContextVariables | None,
     ) -> tuple[str, ContextVariables | None] | None:
-        """Allow user to review and modify the plan before execution."""
         print("\nProposed plan:")
         for task in plan.tasks:
             print(f"- {task.title}")
@@ -321,21 +329,143 @@ class InteractiveFeedback(PlanFeedbackHandler):
             return None
 
 
-# 7. Execute workflow with planning
-artifact = await team.execute(
-    prompt="Implement a login feature and review it for security",
-    context=ContextVariables(
-        pr_url="github.com/org/repo/123",
-        security_checklist=["SQL injection", "XSS", "CSRF"],
-    ),
-    feedback_handler=InteractiveFeedback(),
-)
+async def main() -> None:
+    # 3. Create task definitions
+    def build_write_doc_instructions(
+        task: WriteDocTask,
+        context: ContextVariables,
+    ) -> str:
+        return f"""
+        Write a {task.target_audience}-level documentation about {task.topic}.
 
-# 8. Check results
-if artifact.status == ArtifactStatus.COMPLETED:
-    print("Tasks completed:")
-    for result in artifact.task_results:
-        print(f"- {result.task.title}: {result.task.status}")
+        Style Guide from context:
+        {context.style_guide}
+
+        You must return a JSON object that matches the following schema:
+        {json.dumps(Documentation.model_json_schema())}
+        """
+
+    write_doc = TaskDefinition(
+        task_type=WriteDocTask,
+        instructions=build_write_doc_instructions,
+        response_format=Documentation,
+    )
+
+    def build_review_doc_instructions(
+        task: ReviewDocTask,
+        context: ContextVariables,
+    ) -> str:
+        return f"""
+        Review the following documentation:
+        {task.content}
+
+        Review criteria:
+        {task.criteria}
+
+        Style Guide to check against:
+        {context.style_guide}
+
+        You must return a JSON object that matches the following schema:
+        {json.dumps(ReviewFeedback.model_json_schema())}
+        """
+
+    review_doc = TaskDefinition(
+        task_type=ReviewDocTask,
+        instructions=build_review_doc_instructions,
+        response_format=ReviewFeedback,
+    )
+
+    # 4. Create specialized agents
+    writer = Agent(
+        id="tech_writer",
+        instructions="""You are an expert technical writer who creates clear,
+        concise documentation with practical examples.""",
+        llm=LLM(
+            model="gpt-4o",
+            temperature=0.7,
+        ),
+    )
+
+    reviewer = Agent(
+        id="doc_reviewer",
+        instructions="""You are a documentation reviewer who ensures accuracy,
+        clarity, and completeness of technical documentation.""",
+        llm=LLM(
+            model="gpt-4o",
+            temperature=0.3,  # Lower temperature for more consistent reviews
+        ),
+    )
+
+    # 5. Create team members
+    writer_member = TeamMember(
+        id="writer",
+        agent=writer,
+        task_types=[WriteDocTask],
+    )
+
+    reviewer_member = TeamMember(
+        id="reviewer",
+        agent=reviewer,
+        task_types=[ReviewDocTask],
+    )
+
+    # 6. Create swarm team
+    team = SwarmTeam(
+        swarm=Swarm(),
+        members=[writer_member, reviewer_member],
+        task_definitions=[write_doc, review_doc],
+    )
+
+    # 7. Execute the user request
+    artifact = await team.execute(
+        prompt="Create beginner-friendly documentation about Python list comprehensions",
+        context=ContextVariables(
+            style_guide="""
+            - Use simple language
+            - Include practical examples
+            - Link to related topics
+            - Start with basic concepts
+            - Show common patterns
+            """
+        ),
+        feedback_handler=InteractiveFeedback(),
+    )
+
+    # 8. Inspect and print the results
+    if artifact.status == ArtifactStatus.COMPLETED:
+        print("\nDocumentation Team Results:")
+        for result in artifact.task_results:
+            print(f"\nTask: {result.task.type}")
+
+            if not result.output:
+                continue
+
+            match result.output:
+                case Documentation() as doc:
+                    print("\nContent:")
+                    print(doc.content)
+                    print("\nExamples:")
+                    for example in doc.examples:
+                        print(f"• {example}")
+                    print("\nSee Also:")
+                    for ref in doc.see_also:
+                        print(f"• {ref}")
+
+                case ReviewFeedback() as review:
+                    print("\nReview Feedback:")
+                    print(f"Approved: {review.approved}")
+                    if review.issues:
+                        print("\nIssues:")
+                        for issue in review.issues:
+                            print(f"• {issue}")
+                    if review.suggestions:
+                        print("\nSuggestions:")
+                        for suggestion in review.suggestions:
+                            print(f"• {suggestion}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 The SwarmTeam will:
@@ -344,29 +474,140 @@ The SwarmTeam will:
 3. Execute tasks in correct order using capable team members
 4. Produce an artifact containing all results and updates
 
-See `examples/software_team/run.py` for a complete implementation of a development team.
+See the [software_team example](examples/software_team/run.py) for a complete implementation of a development team workflow.
 
 ### Streaming Responses
 
+LiteSwarm supports real-time streaming of responses. Here's a simple example:
+
 ```python
-async for response in swarm.stream(
-    agent=agent,
-    prompt="Generate a long response...",
-):
-    print(response.content, end="", flush=True)
+import asyncio
+
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent
+
+
+async def main():
+    # Create an agent
+    agent = Agent(
+        id="explainer",
+        instructions="You are a helpful assistant that explains concepts clearly.",
+        llm=LLM(
+            model="gpt-4o",
+            temperature=0.7,
+        ),
+    )
+
+    # Create swarm and start streaming
+    swarm = Swarm()
+    async for response in swarm.stream(
+        agent=agent,
+        prompt="Explain Python generators in 3-4 bullet points.",
+    ):
+        content = response.delta.content
+        if content is not None:
+            print(content, end="", flush=True)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Context Variables
 
+Context variables let you pass data between interactions. Here's a simple example:
+
 ```python
-result = await swarm.execute(
-    agent=agent,
-    prompt="Greet the user",
-    context_variables=ContextVariables(
-        user_name="Alice",
-        language="en",
-    ),
-)
+import asyncio
+import json
+
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent, ContextVariables, ToolResult
+
+mock_database = {
+    "alice": {
+        "language": "Python",
+        "experience": "intermediate",
+        "interests": ["web", "data science"],
+    }
+}
+
+
+async def main():
+    def get_user_preferences(user_id: str) -> ToolResult:
+        """Get user preferences from a simulated database."""
+        user_preferences = mock_database.get(user_id, {})
+        return ToolResult(
+            content=f"Found preferences for {user_id}: {user_preferences}",
+            context_variables=ContextVariables(
+                user_preferences=user_preferences,
+                learning_path=[],  # Initialize empty learning path
+            ),
+        )
+
+    def update_learning_path(topic: str, completed: bool = False) -> ToolResult:
+        """Update the user's learning path with a new topic or mark as completed."""
+        return ToolResult(
+            content=f"{'Completed' if completed else 'Added'} topic: {topic}",
+            context_variables=ContextVariables(
+                topic=topic,
+                completed=completed,
+            ),
+        )
+
+    # Create an agent with tools
+    agent = Agent(
+        id="tutor",
+        instructions=lambda context_variables: f"""
+        You are a programming tutor tracking a student's learning journey.
+
+        Current Context:
+        - User ID: {json.dumps(context_variables.get('user_id', 'unknown'))}
+        - User Preferences: {json.dumps(context_variables.get('user_preferences', {}))}
+        - Learning Path: {json.dumps(context_variables.get('learning_path', []))}
+        - Last Topic: {json.dumps(context_variables.get('topic', None))}
+        - Last Topic Completed: {json.dumps(context_variables.get('completed', False))}
+
+        Track their progress and suggest next steps based on their preferences and current progress.
+        """,
+        llm=LLM(
+            model="gpt-4o",
+            tools=[get_user_preferences, update_learning_path],
+            tool_choice="auto",
+            temperature=0.3,
+        ),
+    )
+
+    # Create swarm and execute with initial context
+    swarm = Swarm()
+
+    # First interaction - get user preferences
+    result = await swarm.execute(
+        agent=agent,
+        prompt="Start Alice's learning journey",
+        context_variables=ContextVariables(user_id="alice"),
+    )
+    print("\nInitial Setup:", result.content)
+
+    # Second interaction - suggest first topic
+    result = await swarm.execute(
+        agent=agent,
+        prompt="What should Alice learn first?",
+        context_variables=result.context_variables,
+    )
+    print("\nFirst Topic Suggestion:", result.content)
+
+    # Third interaction - mark progress and get next topic
+    result = await swarm.execute(
+        agent=agent,
+        prompt="Alice completed the first topic. What's next?",
+        context_variables=result.context_variables,
+    )
+    print("\nProgress Update:", result.content)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 ### Structured Outputs
@@ -388,10 +629,18 @@ LiteSwarm provides two layers of structured output handling:
 Using Swarm directly with LLM-level response format:
 
 ```python
+import asyncio
+
 from pydantic import BaseModel
 
-from liteswarm.core.swarm import Swarm
+from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent
+
+CODE_TO_REVIEW = """
+def calculate_sum(a: int, b: int) -> int:
+    \"\"\"Calculate the sum of two numbers.\"\"\"
+    return a - b
+"""
 
 
 class ReviewOutput(BaseModel):
@@ -399,42 +648,46 @@ class ReviewOutput(BaseModel):
     approved: bool
 
 
-agent = Agent(
-    id="reviewer",
-    instructions="Review code and provide structured feedback",
-    llm=LLM(
-        model="gpt-4o",
-        response_format=ReviewOutput,  # Direct OpenAI JSON schema support
-    ),
-)
+async def main() -> None:
+    agent = Agent(
+        id="reviewer",
+        instructions="Review code and provide structured feedback",
+        llm=LLM(
+            model="gpt-4o",
+            response_format=ReviewOutput,  # Direct OpenAI JSON schema support
+        ),
+    )
 
-code = """
-def calculate_sum(a: int, b: int) -> int:
-    \"\"\"Calculate the sum of two numbers.\"\"\"
-    return a - b
-"""
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent=agent,
+        prompt=f"Review the code and provide structured feedback:\n{CODE_TO_REVIEW}",
+    )
 
-swarm = Swarm()
-result = await swarm.execute(
-    agent=agent,
-    prompt=f"Review the code and provide structured feedback:\n{code}",
-)
+    if not result.content:
+        print("Agent failed to produce a response")
+        return
 
-# Currently, the content is the raw JSON output from the LLM,
-# so we need to parse it manually using a response_format Pydantic model.
-output = ReviewOutput.model_validate_json(result.content)
+    # Currently, the content is the raw JSON output from the LLM,
+    # so we need to parse it manually using a response_format Pydantic model.
+    output = ReviewOutput.model_validate_json(result.content)
 
-if output.issues:
-    print("Issues:")
-    for issue in output.issues:
-        print(f"- {issue}")
+    if output.issues:
+        print("Issues:")
+        for issue in output.issues:
+            print(f"- {issue}")
 
-print(f"\nApproved: {output.approved}")
+    print(f"\nApproved: {output.approved}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 Using SwarmTeam with both layers (recommended for complex workflows):
 
 ```python
+import asyncio
 from typing import Literal
 
 from pydantic import BaseModel
@@ -452,15 +705,14 @@ from liteswarm.types import (
     TeamMember,
 )
 
+CODE_TO_REVIEW = """
+def calculate_sum(a: int, b: int) -> int:
+    \"\"\"Calculate the sum of two numbers.\"\"\"
+    return a - bs  # Bug: Typo in variable name and wrong operator
+"""
 
-# Define output schema for code reviews
-class CodeReviewOutput(BaseModel):
-    issues: list[str]
-    approved: bool
-    suggested_fixes: list[str]
 
-
-# Define task type with literal constraints
+# 1. Define data structures for the review process
 class ReviewTask(Task):
     type: Literal["code-review"]
     code: str
@@ -468,132 +720,106 @@ class ReviewTask(Task):
     review_type: Literal["general", "security", "performance"]
 
 
-# Define plan schema for planning agent
+class CodeReviewOutput(BaseModel):
+    issues: list[str]
+    approved: bool
+    suggested_fixes: list[str]
+
+
 class CodeReviewPlan(Plan):
     tasks: list[ReviewTask]
 
 
-# Create dynamic task instructions
-def build_review_task_instructions(task: ReviewTask, context: ContextVariables) -> str:
-    prompt = (
-        "Review the provided code focusing on {task.review_type} aspects.\n"
-        "Code to review:\n{task.code}"
-    )
-    return prompt.format(task=task)
+# 2. Create prompt builders
+def build_review_prompt(prompt: str, context: ContextVariables) -> str:
+    return f"""
+    You're given the following user request:
+    <request>
+    {prompt}
+    </request>
+
+    Here is the code to review:
+    <code language="{context.get('language', '')}" review_type="{context.get('review_type', '')}">
+    {context.get('code', '')}
+    </code>
+
+    Please create a review plan consisting of 1 task.
+    """.strip()
 
 
-# Create task definition with response format
-review_def = TaskDefinition(
-    task_schema=ReviewTask,
-    task_instructions=build_review_task_instructions,
-    # Framework-level: Used to parse and validate responses
-    task_response_format=CodeReviewOutput,
-)
-
-# Create review agent with LLM-level response format
-review_agent = Agent(
-    id="code-reviewer",
-    instructions="You are an expert code reviewer.",
-    llm=LLM(
-        model="gpt-4o",
-        # LLM-level: Direct OpenAI JSON schema support
+async def main() -> None:
+    # 3. Create task definitions
+    review_def = TaskDefinition(
+        task_type=ReviewTask,
+        instructions=lambda task, _: f"""
+        Review the provided code focusing on {task.review_type} aspects.
+        <code language="{task.language}">{task.code}</code>
+        """,
         response_format=CodeReviewOutput,
-    ),
-)
-
-# Create planning agent with LLM-level response format
-planning_agent = Agent(
-    id="planning-agent",
-    instructions="You are a planning agent that creates plans for code review tasks.",
-    llm=LLM(
-        model="gpt-4o",
-        # LLM-level: Direct OpenAI JSON schema support
-        response_format=CodeReviewPlan,
-    ),
-)
-
-
-# Create dynamic planning prompt
-PLANNING_PROMPT_TEMPLATE = """
-User Request:
-<request>{PROMPT}</request>
-
-Code Context:
-<code language="{LANGUAGE}" review_type="{REVIEW_TYPE}">
-{CODE}
-</code>
-
-Please create a review plan consisting of 1 task.
-""".strip()
-
-
-def build_planning_prompt_template(prompt: str, context: ContextVariables) -> str:
-    code = context.get("code", "")
-    language = context.get("language", "")
-    review_type = context.get("review_type", "")
-
-    return PLANNING_PROMPT_TEMPLATE.format(
-        PROMPT=prompt,
-        CODE=code,
-        LANGUAGE=language,
-        REVIEW_TYPE=review_type,
     )
 
+    # 4. Create agents
+    review_agent = Agent(
+        id="code-reviewer",
+        instructions="You are an expert code reviewer.",
+        llm=LLM(model="gpt-4o", response_format=CodeReviewOutput),
+    )
 
-# Create team with both layers of structured outputs
-swarm = Swarm()
-team = SwarmTeam(
-    swarm=swarm,
-    members=[
-        TeamMember(
-            id="senior-reviewer",
-            agent=review_agent,
-            task_types=[ReviewTask],
-        ),
-    ],
-    task_definitions=[review_def],
-    planning_agent=LitePlanningAgent(
+    planning_agent = Agent(
+        id="planning-agent",
+        instructions="You are a planning agent that creates plans for code review tasks.",
+        llm=LLM(model="gpt-4o", response_format=CodeReviewPlan),
+    )
+
+    # 5. Create team members
+    review_member = TeamMember(
+        id="senior-reviewer",
+        agent=review_agent,
+        task_types=[ReviewTask],
+    )
+
+    # 6. Set up swarm team
+    swarm = Swarm()
+    team = SwarmTeam(
         swarm=swarm,
-        agent=planning_agent,
-        prompt_template=build_planning_prompt_template,
+        members=[review_member],
         task_definitions=[review_def],
-        # Framework-level: Used to parse planning responses
-        response_format=CodeReviewPlan,
-    ),
-)
+        planning_agent=LitePlanningAgent(
+            swarm=swarm,
+            agent=planning_agent,
+            prompt_template=build_review_prompt,
+            task_definitions=[review_def],
+            response_format=CodeReviewPlan,
+        ),
+    )
 
-# Execute review
-code = """
-def calculate_sum(a: int, b: int) -> int:
-    \"\"\"Calculate the sum of two numbers.\"\"\"
-    return a - bs
-"""
+    # 7. Execute review request
+    artifact = await team.execute(
+        prompt="Review this Python code",
+        context=ContextVariables(
+            code=CODE_TO_REVIEW,
+            language="python",
+            review_type="general",
+        ),
+    )
 
-artifact = await team.execute(
-    prompt="Review this Python code",
-    context=ContextVariables(
-        code=code,
-        language="python",
-        review_type="general",
-    ),
-)
+    # 8. Show results
+    if artifact.status == ArtifactStatus.COMPLETED:
+        for result in artifact.task_results:
+            if isinstance(result.output, CodeReviewOutput):
+                assert result.assignee is not None
+                print(f"\nReview by: {result.assignee.id}")
+                print("\nIssues found:")
+                for issue in result.output.issues:
+                    print(f"- {issue}")
+                print("\nSuggested fixes:")
+                for fix in result.output.suggested_fixes:
+                    print(f"- {fix}")
+                print(f"\nApproved: {result.output.approved}")
 
-# Access structured output
-if artifact.status == ArtifactStatus.COMPLETED:
-    for result in artifact.task_results:
-        # Output is automatically parsed into CodeReviewOutput
-        output = result.output
-        if not isinstance(output, CodeReviewOutput):
-            raise TypeError(f"Unexpected output type: {type(output)}")
 
-        print(f"\nReview by: {result.assignee.id}")
-        print("\nIssues found:")
-        for issue in output.issues:
-            print(f"- {issue}")
-        print("\nSuggested fixes:")
-        for fix in output.suggested_fixes:
-            print(f"- {fix}")
-        print(f"\nApproved: {output.approved}")
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 This example demonstrates:
@@ -604,7 +830,7 @@ This example demonstrates:
    - OpenAI will enforce JSON schema at generation time
 
 2. **Framework-level Format** (Provider-agnostic):
-   - `task_response_format=CodeReviewOutput` in task definition
+   - `response_format=CodeReviewOutput` in task definition
    - `response_format=CodeReviewPlan` in planning agent
    - Framework handles parsing, validation, and repair
 
@@ -615,7 +841,7 @@ The two-layer approach ensures:
 - Fallback to prompt-based formatting
 - Response repair capabilities
 
-See `examples/structured_outputs/run.py` for more examples of different structured output strategies.
+See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for more examples of different structured output strategies.
 
 > **Note about OpenAI Structured Outputs**
 > 
@@ -643,7 +869,7 @@ See `examples/structured_outputs/run.py` for more examples of different structur
 >   - Restoring objects from OpenAI responses
 >   - Handling schema transformations
 >
-> See `examples/structured_outputs/strategies/openai_pydantic.py` for practical examples of using these utilities.
+> See [examples/structured_outputs/strategies/openai_pydantic.py](examples/structured_outputs/strategies/openai_pydantic.py) for practical examples of using these utilities.
 >
 > Remember: Base `Task` and `Plan` are OpenAI-compatible, but maintaining compatibility in subclasses is the user's responsibility if OpenAI structured outputs are needed.
 
@@ -677,7 +903,7 @@ See `examples/structured_outputs/run.py` for more examples of different structur
 
 3. Use context variables for dynamic behavior:
    ```python
-   def get_instructions(context: ContextVariables) -> str:
+   def build_instructions(context: ContextVariables) -> str:
        return f"Help {context['user_name']} with {context['task']}"
    ```
 
@@ -685,30 +911,39 @@ See `examples/structured_outputs/run.py` for more examples of different structur
    ```python
    class MyStreamHandler(SwarmStreamHandler):
        async def on_stream(self, delta: Delta, agent: Agent) -> None:
-           print(delta.content, end="")
+           print(delta.content, end="", flush=True)
    ```
 
 ## Examples
 
-The framework includes several example applications in the `examples/` directory:
+The framework includes several example applications in the [examples/](examples/) directory:
 
-- **Basic REPL** (`examples/repl/run.py`): Simple interactive chat interface showing basic agent usage
-- **Calculator** (`examples/calculator/run.py`): Tool usage and agent switching with a math-focused agent
-- **Mobile App Team** (`examples/mobile_app/run.py`): Complex team of agents (PM, Designer, Engineer, QA) building a Flutter app
-- **Parallel Research** (`examples/parallel_research/run.py`): Parallel tool execution for efficient data gathering
-- **Structured Outputs** (`examples/structured_outputs/run.py`): Different strategies for parsing structured agent responses
-- **Software Team** (`examples/software_team/run.py`): Complete development team with planning, review, and implementation capabilities
+- **Basic REPL** ([examples/repl/run.py](examples/repl/run.py)): Simple interactive chat interface showing basic agent usage
+- **Calculator** ([examples/calculator/run.py](examples/calculator/run.py)): Tool usage and agent switching with a math-focused agent
+- **Mobile App Team** ([examples/mobile_app/run.py](examples/mobile_app/run.py)): Complex team of agents (PM, Designer, Engineer, QA) building a Flutter app
+- **Parallel Research** ([examples/parallel_research/run.py](examples/parallel_research/run.py)): Parallel tool execution for efficient data gathering
+- **Structured Outputs** ([examples/structured_outputs/run.py](examples/structured_outputs/run.py)): Different strategies for parsing structured agent responses
+- **Software Team** ([examples/software_team/run.py](examples/software_team/run.py)): Complete development team with planning, review, and implementation capabilities
 
 Each example demonstrates different aspects of the framework:
 ```bash
 # Run the REPL example
 python -m examples.repl.run
 
+# Run the calculator example
+python -m examples.calculator.run
+
 # Try the mobile app team
 python -m examples.mobile_app.run
 
+# Run the parallel research example
+python -m examples.parallel_research.run
+
 # Experiment with structured outputs
 python -m examples.structured_outputs.run
+
+# Run the software team example
+python -m examples.software_team.run
 ```
 
 ## Contributing
