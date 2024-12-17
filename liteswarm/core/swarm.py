@@ -1375,3 +1375,54 @@ class Swarm:
             usage=full_usage,
             response_cost=response_cost,
         )
+    def cleanup(self, clear_history: bool = False) -> None:
+        """Clean up swarm state and reset agents.
+
+        Performs a complete cleanup of the swarm's internal state, including:
+        - Resetting active agent to idle state
+        - Clearing the agent queue
+        - Resetting all queued agents to idle state
+        - Clearing context variables
+        - Optionally clearing conversation history
+
+        This method is useful for:
+        - Preparing the swarm for a new conversation
+        - Cleaning up resources after errors
+        - Resetting state between independent executions
+        - Managing memory usage in long-running applications
+
+        Args:
+            clear_history: Whether to clear the conversation history.
+                If True, removes all stored messages. Defaults to False.
+
+        Notes:
+            - Agent states are reset to IDLE
+            - Context variables are cleared
+            - Agent queue is emptied
+            - History clearing is optional to allow for conversation continuity
+
+        Examples:
+            Basic cleanup:
+                ```python
+                # Reset swarm state but keep history
+                swarm.cleanup()
+                ```
+
+            Complete reset:
+                ```python
+                # Reset everything including history
+                swarm.cleanup(clear_history=True)
+                ```
+        """
+        if self._active_agent:
+            self._active_agent.state = AgentState.IDLE
+            self._active_agent = None
+
+        for agent in self._agent_queue:
+            agent.state = AgentState.IDLE
+
+        self._agent_queue.clear()
+        self._context_variables.clear()
+
+        if clear_history:
+            self.memory.clear_history()
