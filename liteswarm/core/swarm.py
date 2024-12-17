@@ -687,28 +687,21 @@ class Swarm:
             CompletionError: If completion fails after exhausting retries.
             ContextLengthError: If context remains too large after reduction.
         """
+        try:
+            return await self._create_completion(
+                agent=agent,
+                messages=agent_messages,
+            )
+        except ContextWindowExceededError:
+            log_verbose(
+                "Context window exceeded, attempting to reduce context size",
+                level="WARNING",
+            )
 
-        async def get_initial_response() -> CustomStreamWrapper:
-            try:
-                return await self._create_completion(agent=agent, messages=agent_messages)
-            except ContextWindowExceededError:
-                log_verbose(
-                    "Context window exceeded, attempting to reduce context size",
-                    level="WARNING",
-                )
-
-                return await self._retry_completion_with_trimmed_history(
-                    agent=agent,
-                    context_variables=context_variables,
-                )
-
-        return await retry_with_exponential_backoff(
-            get_initial_response,
-            max_retries=self.max_retries,
-            initial_delay=self.initial_retry_delay,
-            max_delay=self.max_retry_delay,
-            backoff_factor=self.backoff_factor,
-        )
+            return await self._retry_completion_with_trimmed_history(
+                agent=agent,
+                context_variables=context_variables,
+            )
 
     async def _process_stream_chunk(
         self,
