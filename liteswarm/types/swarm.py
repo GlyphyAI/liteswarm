@@ -48,6 +48,19 @@ Examples:
         ```
 """
 
+FinishReason: TypeAlias = Literal["stop", "length", "tool_calls", "function_call", "content_filter"]
+"""OpenAI supported finish reasons for streaming responses.
+
+Indicates why the model stopped generating tokens during a streaming response.
+
+Supported finish reasons:
+- stop: Model reached a natural stopping point or hit a provided stop sequence.
+- length: Maximum allowed tokens were reached.
+- tool_calls: Model called a tool.
+- function_call: Deprecated equivalent of tool_calls.
+- content_filter: Content was omitted due to safety or moderation filters.
+"""
+
 
 class Message(BaseModel):
     """Message in a conversation between users, assistants, and tools.
@@ -583,8 +596,8 @@ class CompletionResponse(BaseModel):
     delta: Delta
     """Content update in this chunk."""
 
-    finish_reason: str | None = None
-    """Reason for response completion."""
+    finish_reason: FinishReason | None = None
+    """Reason for response generation stopping."""
 
     usage: Usage | None = None
     """Token usage statistics."""
@@ -624,8 +637,8 @@ class AgentResponse(BaseModel):
     delta: Delta
     """Current content update."""
 
-    finish_reason: str | None = None
-    """Reason for response completion."""
+    finish_reason: FinishReason | None = None
+    """Reason for response generation stopping."""
 
     content: str | None = None
     """Accumulated content so far."""
