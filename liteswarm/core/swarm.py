@@ -1080,34 +1080,29 @@ class Swarm:
     ) -> None:
         """Initialize and set up a new conversation session.
 
-        Prepares the complete conversation environment by:
-        - Setting up message history and context
-        - Configuring initial agent states
-        - Managing conversation continuity
-        - Establishing message sequences
-        - Initializing tracking systems
-
-        The initialization process:
-        - Loads existing messages if provided
-        - Adds initial prompt to history
-        - Sets up active agent state
-        - Ensures proper agent activation
-        - Maintains existing state if continuing
+        Prepares the conversation environment by:
+        - Loading existing messages if provided
+        - Adding initial prompt to history if provided
+        - Setting up initial agent state
+        - Managing agent queue for potential switches
 
         Args:
             agent: Initial agent to handle the conversation.
-                Will be set as the active agent if none exists.
+                Will be set as active agent if none exists,
+                or will be queued if an active agent exists.
             prompt: Optional starting message from the user.
                 Added to history if provided. Defaults to None.
             messages: Optional pre-existing conversation history.
                 Loaded into memory if provided. Defaults to None.
 
+        Raises:
+            SwarmError: If neither prompt nor messages are provided.
+
         Notes:
+            - At least one of prompt or messages must be provided
             - Existing history is preserved if provided
-            - Prompt is added as a user message
-            - Active agent is properly initialized
-            - Agent state is set to ACTIVE
-            - Multiple initializations maintain state
+            - Active agent is set to ACTIVE state
+            - New agents are queued if an active agent exists
         """
         if not messages and not prompt:
             raise SwarmError("Please provide at least one message or prompt")
@@ -1132,33 +1127,25 @@ class Swarm:
     async def _handle_agent_switch(self, switch_count: int) -> bool:
         """Handle transition between agents in the swarm.
 
-        Manages the complete agent switching process, including:
-        - Validating switch limits and conditions
-        - Managing agent queue operations
-        - Updating agent states
-        - Notifying stream handlers
-        - Maintaining conversation continuity
-
-        The switching process follows these steps:
-        - Check switch count against maximum limit
-        - Verify availability of next agent
-        - Update states of previous and next agents
-        - Notify handlers of the transition
-        - Establish new agent as active
+        Manages agent switching by:
+        - Validating switch count against maximum limit
+        - Transitioning from current to next agent in queue
+        - Updating agent states appropriately
+        - Notifying stream handler of the switch
 
         Args:
             switch_count: Current number of agent switches performed.
-                Used to enforce maximum switch limits.
+                Used to enforce maximum switch limit.
 
         Returns:
             True if switch was successful, False otherwise.
 
         Notes:
-            - Switches are limited by max_agent_switches
-            - Previous agent is marked as STALE
-            - Next agent becomes ACTIVE
-            - Queue is updated after successful switch
-            - Stream handler is notified of changes
+            - Enforces max_agent_switches limit
+            - Next agent is taken from front of queue
+            - Previous agent's state remains unchanged
+            - Next agent is set to ACTIVE state
+            - Stream handler is notified of switch
         """
         if switch_count >= self.max_agent_switches:
             log_verbose(
