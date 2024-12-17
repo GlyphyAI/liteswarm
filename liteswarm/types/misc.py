@@ -43,7 +43,7 @@ Examples:
         ```
 """
 
-JSON: TypeAlias = str | bool | Number | list["JSON"] | dict[str, "JSON"] | None
+JSON: TypeAlias = dict[str, Any] | list[Any] | str | float | int | bool | None
 """Type alias for JSON-compatible data structures.
 
 Represents any valid JSON value type:
