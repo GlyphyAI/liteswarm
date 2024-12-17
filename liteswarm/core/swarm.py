@@ -617,15 +617,15 @@ class Swarm:
             CompletionError: If completion fails after all retry attempts.
             ContextLengthError: If context exceeds limits and cannot be reduced.
         """
-        accumulated_content = ""
-        continuation_count = 0
-        current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
-            agent=agent,
-            agent_messages=agent_messages,
-            context_variables=context_variables,
-        )
-
         try:
+            accumulated_content: str = ""
+            continuation_count: int = 0
+            current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
+                agent=agent,
+                agent_messages=agent_messages,
+                context_variables=context_variables,
+            )
+
             while continuation_count < self.max_response_continuations:
                 if not current_stream:
                     break
@@ -654,8 +654,12 @@ class Swarm:
 
         except (CompletionError, ContextLengthError):
             raise
+
         except Exception as e:
-            raise CompletionError("Failed to get completion response", e) from e
+            raise CompletionError(
+                f"Failed to get completion response: {e}",
+                original_error=e,
+            ) from e
 
     async def _get_initial_stream(
         self,
