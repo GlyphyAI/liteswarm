@@ -130,6 +130,7 @@ class Swarm:
     def __init__(  # noqa: PLR0913
         self,
         stream_handler: SwarmStreamHandler | None = None,
+        memory: Memory | None = None,
         summarizer: Summarizer | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
@@ -165,14 +166,12 @@ class Swarm:
         """
         # Internal state (private)
         self._active_agent: Agent | None = None
-        self._agent_messages: list[Message] = []
         self._agent_queue: deque[Agent] = deque()
-        self._full_history: list[Message] = []
-        self._working_history: list[Message] = []
         self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
         self.stream_handler = stream_handler or LiteSwarmStreamHandler()
+        self.memory = memory or LiteMemory()
         self.summarizer = summarizer or LiteSummarizer()
         self.include_usage = include_usage
         self.include_cost = include_cost
@@ -917,64 +916,6 @@ class Swarm:
     # MARK: History Management
     # ================================================
 
-    async def _prepare_agent_context(
-        self,
-        agent: Agent,
-        prompt: str | None = None,
-        context_variables: ContextVariables | None = None,
-    ) -> list[Message]:
-        """Prepare the agent context for execution.
-
-        Builds complete context by combining:
-        - System instructions with variable resolution
-        - Filtered working history for relevance
-        - Optional user prompt for direction
-        - Required metadata for processing
-
-        Args:
-            agent: Agent requiring context preparation.
-            prompt: Optional user message to include.
-            context_variables: Optional context for dynamic resolution.
-
-        Returns:
-            Messages representing the complete agent context.
-        """
-        instructions = unwrap_instructions(agent.instructions, context_variables)
-        history = [msg for msg in self._working_history if msg.role != "system"]
-        messages = [Message(role="system", content=instructions), *history]
-
-        if prompt:
-            messages.append(Message(role="user", content=prompt))
-
-        return messages
-
-    async def _update_working_history(self, agent: Agent) -> None:
-        """Update working history with intelligent management.
-
-        Maintains history quality through multiple mechanisms:
-        - Summarization based on complexity metrics
-        - Token-based trimming when needed
-        - Context limit enforcement
-        - Conversation coherence preservation
-
-        The method prioritizes summarization over trimming when possible,
-        as it better preserves conversation context and meaning.
-
-        Args:
-            agent: Agent providing context limits and settings.
-
-        Notes:
-            - Full history remains preserved for reference
-            - Working history is modified as needed
-            - Summarization is preferred for context preservation
-            - Trimming serves as fallback mechanism
-            - Updates are performed in place
-        """
-        if self.summarizer.needs_summarization(self._working_history):
-            self._working_history = await self.summarizer.summarize_history(self._full_history)
-        elif history_exceeds_token_limit(self._working_history, agent.llm.model):
-            self._working_history = trim_messages(self._full_history, agent.llm.model)
-
     async def _retry_completion_with_trimmed_history(
         self,
         agent: Agent,
@@ -998,14 +939,13 @@ class Swarm:
         Raises:
             ContextLengthError: If context remains too large after reduction.
         """
-        await self._update_working_history(agent)
-
-        reduced_messages = await self._prepare_agent_context(
-            agent=agent,
-            context_variables=context_variables,
-        )
-
         try:
+            await self._trim_working_history(agent.llm.model)
+            reduced_messages = self.memory.create_agent_context(
+                agent=agent,
+                context_variables=context_variables,
+            )
+
             return await self._create_completion(agent, reduced_messages)
         except ContextWindowExceededError as e:
             raise ContextLengthError(
@@ -1014,6 +954,29 @@ class Swarm:
                 current_length=len(reduced_messages),
             ) from e
 
+    async def _trim_working_history(self, model: str) -> None:
+        """Manage working history size through summarization or trimming.
+
+        Maintains history within model context limits by:
+        - First attempting summarization if complexity warrants
+        - Falling back to token-based trimming if needed
+        - Preserving essential conversation context
+
+        Args:
+            model: Model identifier to determine context limits.
+        """
+        messages = self.memory.get_working_history()
+        if self.summarizer.needs_summarization(messages):
+            messages = await self.summarizer.summarize_history(messages)
+            self.memory.set_working_history(messages)
+            log_verbose(f"The working history was summarized for model {model}")
+        elif history_exceeds_token_limit(messages, model):
+            messages = trim_messages(messages, model)
+            self.memory.set_working_history(messages)
+            log_verbose(f"The working history was trimmed for model {model}")
+        else:
+            log_verbose(f"The working history does not exceed token limit for model {model}")
+
     # ================================================
     # MARK: Agent Management
     # ================================================
@@ -1021,9 +984,8 @@ class Swarm:
     async def _initialize_conversation(
         self,
         agent: Agent,
-        prompt: str,
+        prompt: str | None = None,
         messages: list[Message] | None = None,
-        context_variables: ContextVariables | None = None,
     ) -> None:
         """Initialize the conversation state.
 
@@ -1041,52 +1003,52 @@ class Swarm:
             context_variables: Optional context for dynamic resolution.
         """
         if messages:
-            self._full_history = copy.deepcopy(messages)
-            await self._update_working_history(agent)
+            self.memory.set_history(messages)
 
-        self._context_variables = context_variables or ContextVariables()
+        if prompt:
+            self.memory.append_message(Message(role="user", content=prompt))
 
         if self._active_agent is None:
             self._active_agent = agent
             self._active_agent.state = AgentState.ACTIVE
-
-            initial_context = await self._prepare_agent_context(
-                agent=agent,
-                prompt=prompt,
-                context_variables=context_variables,
-            )
-
-            self._full_history = initial_context.copy()
-            self._working_history = initial_context.copy()
-            self._agent_messages = initial_context.copy()
         else:
-            user_message = Message(role="user", content=prompt)
-            self._full_history.append(user_message)
-            self._working_history.append(user_message)
-            self._agent_messages.append(user_message)
+            # We probaby want to queue the agent instead,
+            # but to do so we need to support passing an empty agent
+            # to the stream method.
+            # TODO: implement passing an empty agent to the stream method,
+            #       and then queue the agent instead of setting it as active
+            self._active_agent.state = AgentState.ACTIVE
 
-    async def _handle_agent_switch(
-        self,
-        switch_count: int,
-        prompt: str | None = None,
-        context_variables: ContextVariables | None = None,
-    ) -> bool:
-        """Handle agent switch with proper state management.
+    async def _handle_agent_switch(self, switch_count: int) -> bool:
+        """Handle transition between agents in the swarm.
 
-        Manages complete switch process:
-        - Retrieves next agent from queue
-        - Updates active agent state
-        - Notifies stream handler of change
-        - Preserves conversation context
-        - Maintains execution state
+        Manages the complete agent switching process, including:
+        - Validating switch limits and conditions
+        - Managing agent queue operations
+        - Updating agent states
+        - Notifying stream handlers
+        - Maintaining conversation continuity
+
+        The switching process follows these steps:
+        - Check switch count against maximum limit
+        - Verify availability of next agent
+        - Update states of previous and next agents
+        - Notify handlers of the transition
+        - Establish new agent as active
 
         Args:
-            switch_count: Current switch iteration.
-            prompt: Optional message for new agent.
-            context_variables: Optional context for dynamic resolution.
+            switch_count: Current number of agent switches performed.
+                Used to enforce maximum switch limits.
 
         Returns:
-            True if switch completed successfully, False otherwise.
+            True if switch was successful, False otherwise.
+
+        Notes:
+            - Switches are limited by max_agent_switches
+            - Previous agent is marked as STALE
+            - Next agent becomes ACTIVE
+            - Queue is updated after successful switch
+            - Stream handler is notified of changes
         """
         if switch_count >= self.max_agent_switches:
             log_verbose(
@@ -1098,110 +1060,116 @@ class Swarm:
         if not self._agent_queue:
             return False
 
-        log_verbose(
-            f"Agent switch {switch_count}/{self.max_agent_switches}",
-            level="INFO",
-        )
-
-        next_agent = self._agent_queue.popleft()
-        next_agent.state = AgentState.ACTIVE
+        log_verbose(f"Agent switch {switch_count}/{self.max_agent_switches}")
 
         previous_agent = self._active_agent
+        next_agent = self._agent_queue.popleft()
+        next_agent.state = AgentState.ACTIVE
         self._active_agent = next_agent
-        self._agent_messages = await self._prepare_agent_context(
-            agent=next_agent,
-            prompt=prompt,
-            context_variables=context_variables,
-        )
 
         await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
         return True
 
+    async def _stream_agent_responses(
+        self,
+        iteration_count: int = 0,
+        agent_switch_count: int = 0,
+    ) -> AsyncGenerator[AgentResponse, None]:
+        """Stream responses from active and subsequent agents in the swarm.
+
+        Manages the core response generation loop of the swarm, handling:
+        - Sequential agent responses and transitions
+        - Agent state management and switching
+        - Response generation and streaming
+        - Tool call processing and execution
+        - Message history updates
+
+        The method implements the main processing loop that:
+        - Checks iteration and switch limits
+        - Verifies agent state and handles switches
+        - Creates agent context with history
+        - Processes agent response and tool calls
+        - Updates history and prepares for next iteration
+        - Handles agent state transitions
+
+        Args:
+            iteration_count: Current number of processing iterations.
+                Used to enforce maximum iteration limits. Defaults to 0.
+            agent_switch_count: Number of agent switches performed.
+                Used to enforce maximum switch limits. Defaults to 0.
+
+        Yields:
+            AgentResponse objects containing:
+            - Response content and deltas
+            - Tool calls and their results
+            - Usage statistics if enabled
+            - Cost information if enabled
+
+        Notes:
+            - Processing continues until no active agents remain
+            - Agents can become stale and trigger switches
+            - Empty responses are handled gracefully
+            - The loop respects max_iterations limit
+            - Agent switches respect max_agent_switches limit
+        """
+        while iteration_count < self.max_iterations:
+            iteration_count += 1
+            if not self._active_agent:
+                break
+
+            if self._active_agent.state == AgentState.STALE:
+                agent_switch_count += 1
+                agent_switched = await self._handle_agent_switch(agent_switch_count)
+                if not agent_switched:
+                    log_verbose("No more agents to switch to, stopping")
+                    break
+
+                log_verbose(f"Agent {self._active_agent.id} is stale, switching to next agent")
+            else:
+                log_verbose(f"Agent {self._active_agent.id} is active, processing response")
+
+            agent_messages = self.memory.create_agent_context(
+                agent=self._active_agent,
+                context_variables=self._context_variables,
+            )
+
+            last_agent_response: AgentResponse | None = None
+            async for agent_response in self._process_agent_response(
+                agent=self._active_agent,
+                agent_messages=agent_messages,
+                context_variables=self._context_variables,
+            ):
+                yield agent_response
+                last_agent_response = agent_response
+
+            if not last_agent_response:
+                continue
+
+            if last_agent_response.content or last_agent_response.tool_calls:
+                new_messages = await self._process_assistant_response(
+                    agent=self._active_agent,
+                    content=last_agent_response.content,
+                    context_variables=self._context_variables,
+                    tool_calls=last_agent_response.tool_calls,
+                )
+
+                self.memory.extend_messages(new_messages)
+            else:
+                # We might not want to do this, but it's a good fallback
+                # Please consider removing this if it leads to unexpected behavior
+                self.memory.append_message(Message(role="assistant", content="<empty>"))
+                log_verbose(
+                    "No content was generated, appending empty message",
+                    level="WARNING",
+                )
+
+            if not last_agent_response.tool_calls:
+                self._active_agent.state = AgentState.STALE
+
     # ================================================
     # MARK: Public Interface
     # ================================================
-
-    def get_history(self) -> list[Message]:
-        """Get the complete conversation history.
-
-        Returns a copy of the full conversation history, including all messages
-        from all agents and tools. This history represents the complete state
-        of the conversation from start to finish.
-
-        Returns:
-            List of all messages in chronological order.
-
-        Notes:
-            - Returns a deep copy to prevent external modifications
-            - Includes system messages, user inputs, and agent responses
-            - Contains tool calls and their results
-            - Preserves message order and relationships
-        """
-        return copy.deepcopy(self._full_history)
-
-    def set_history(self, messages: list[Message]) -> None:
-        """Set the conversation history.
-
-        Replaces the current conversation history with the provided messages.
-        This method is useful for restoring a previous conversation state or
-        initializing a new conversation with existing context.
-
-        Args:
-            messages: List of messages to set as the conversation history.
-
-        Notes:
-            - Replaces both full and working history
-            - Creates a deep copy of provided messages
-            - Clears any existing history
-            - Should be called before starting a new conversation
-        """
-        self._full_history = copy.deepcopy(messages)
-        self._working_history = copy.deepcopy(messages)
-
-    def pop_last_message(self) -> Message | None:
-        """Remove and return the last message from the history.
-
-        Removes the most recent message from both the full and working history.
-        This is useful for undoing the last interaction or removing unwanted
-        messages.
-
-        Returns:
-            The last message if history is not empty, None otherwise.
-
-        Notes:
-            - Modifies both full and working history
-            - Returns None if history is empty
-            - Does not affect agent messages or state
-        """
-        if not self._full_history:
-            return None
-
-        last_message = self._full_history.pop()
-        if self._working_history and self._working_history[-1] == last_message:
-            self._working_history.pop()
-
-        return last_message
-
-    def append_message(self, message: Message) -> None:
-        """Append a new message to the conversation history.
-
-        Adds a new message to both the full and working history. This method
-        is useful for manually adding messages to the conversation, such as
-        system announcements or external events.
-
-        Args:
-            message: Message to append to the history.
-
-        Notes:
-            - Adds to both full and working history
-            - Creates a deep copy of the message
-            - Does not trigger history management
-            - Does not affect agent state
-        """
-        message_copy = copy.deepcopy(message)
-        self._full_history.append(message_copy)
-        self._working_history.append(message_copy)
 
     async def stream(
         self,
@@ -1283,63 +1251,26 @@ class Swarm:
                     print(response.content)
                 ```
         """
-        await self._initialize_conversation(
-            agent=agent,
-            prompt=prompt,
-            messages=messages,
-            context_variables=context_variables,
-        )
-
         try:
-            agent_switch_count = 0
-            while self._active_agent or self._agent_queue:
-                if not self._active_agent:
-                    break
+            self._context_variables.update(context_variables or {})
+            await self._initialize_conversation(
+                agent=agent,
+                prompt=prompt,
+                messages=messages,
+            )
 
-                if self._active_agent.state == "stale":
-                    agent_switch_count += 1
-                    agent_switched = await self._handle_agent_switch(
-                        switch_count=agent_switch_count,
-                        context_variables=self._context_variables,
-                    )
-
-                    if not agent_switched:
-                        break
-
-                last_content = ""
-                last_tool_calls: list[ChatCompletionDeltaToolCall] = []
-
-                async for agent_response in self._process_agent_response(
-                    agent=self._active_agent,
-                    agent_messages=self._agent_messages,
-                    context_variables=self._context_variables,
-                ):
-                    yield agent_response
-                    last_content = agent_response.content or ""
-                    last_tool_calls = agent_response.tool_calls
-
-                new_messages = await self._process_assistant_response(
-                    agent=self._active_agent,
-                    content=last_content,
-                    context_variables=self._context_variables,
-                    tool_calls=last_tool_calls,
-                )
-
-                self._full_history.extend(new_messages)
-                self._working_history.extend(new_messages)
-                self._agent_messages.extend(new_messages)
-
-                await self._update_working_history(self._active_agent)
-
-                if not last_tool_calls and not self._agent_queue:
-                    break
+            async for response in self._stream_agent_responses():
+                yield response
 
         except Exception as e:
             await self.stream_handler.on_error(e, self._active_agent)
             raise
 
         finally:
-            await self.stream_handler.on_complete(self._full_history, self._active_agent)
+            await self.stream_handler.on_complete(
+                messages=self.memory.get_full_history(),
+                agent=self._active_agent,
+            )
 
             if cleanup:
                 self._active_agent = None
