@@ -20,6 +20,8 @@ def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
     - Keeping tool results with matching calls
     - Removing orphaned tool calls or results
     - Preserving non-tool messages
+    - Handling multiple tool calls in a single message
+    - Preserving message order and relationships
 
     Args:
         messages: List of conversation messages to filter.
@@ -28,76 +30,152 @@ def filter_tool_call_pairs(messages: list[Message]) -> list[Message]:
         Filtered message list with only complete tool interactions.
 
     Examples:
-        Complete interaction:
+        Single Tool Call with Matching Result:
             ```python
+            # Example 1: Single Tool Call with Matching Result
             messages = [
                 Message(role="user", content="Calculate 2+2"),
                 Message(
                     role="assistant",
+                    content="I will call the 'calculator' tool now.",
                     tool_calls=[
-                        ToolCall(id="call_1", name="calculate")
-                    ]
+                        ToolCall(
+                            id="call_1",
+                            name="calculator",
+                            args={"expression": "2+2"},
+                        )
+                    ],
                 ),
                 Message(
                     role="tool",
                     tool_call_id="call_1",
-                    content="4"
-                )
+                    content="4",
+                ),
+                Message(role="assistant", content="The result is 4."),
             ]
-            filtered = filter_tool_call_pairs(messages)
-            # All messages preserved (complete interaction)
+            filtered = filter_tool_call_pairs2(messages)
+            # All messages are preserved because the tool call "call_1" has a matching result.
             ```
 
-        Orphaned call:
+        Single Tool Call Missing a Result:
             ```python
             messages = [
                 Message(role="user", content="Calculate 2+2"),
                 Message(
                     role="assistant",
+                    content="I will call the 'calculator' tool now.",
                     tool_calls=[
-                        ToolCall(id="call_1", name="calculate")
-                    ]
-                )
-                # No tool result
+                        ToolCall(
+                            id="call_1",
+                            name="calculator",
+                            args={"expression": "2+2"},
+                        )
+                    ],
+                ),
+                # No tool message for call_1
+                Message(role="assistant", content="Done."),
             ]
-            filtered = filter_tool_call_pairs(messages)
-            # Tool call removed (incomplete interaction)
+            filtered = filter_tool_call_pairs2(messages)
+            # The assistant message remains, but the orphaned tool call is pruned.
+            ```
+
+        Multiple Tool Calls (Partial Completion):
+            ```python
+            messages = [
+                Message(role="user", content="Calculate 2+2 and then multiply 4 by 3"),
+                Message(
+                    role="assistant",
+                    content="Let me call two tools: add and multiply",
+                    tool_calls=[
+                        ToolCall(id="call_1", name="add", args={"x": 2, "y": 2}),
+                        ToolCall(id="call_2", name="multiply", args={"x": 4, "y": 3}),
+                    ],
+                ),
+                Message(
+                    role="tool",
+                    tool_call_id="call_1",
+                    content="4",
+                ),
+                # No tool result for call_2
+                Message(
+                    role="assistant",
+                    content="The sum is 4. I haven't gotten the multiplication result yet, but let's move on.",
+                ),
+            ]
+            filtered = filter_tool_call_pairs2(messages)
+            # Only 'call_1' is kept. 'call_2' is orphaned and removed.
+            ```
+
+        Tool Result with No Matching Call:
+            ```python
+            messages = [
+                Message(role="assistant", content="No tools called yet."),
+                Message(
+                    role="tool",
+                    tool_call_id="call_999",
+                    content="Orphaned result for call_999",
+                ),
+                Message(role="assistant", content="Something else."),
+            ]
+            filtered = filter_tool_call_pairs2(messages)
+            # The orphaned tool message referencing 'call_999' is removed, preserving conversation flow.
             ```
     """
-    # Find valid tool call/result pairs
-    tool_call_ids = set()
-    tool_result_ids = set()
+    if not messages:
+        return []
+
+    # First pass: identify valid tool call/result pairs
+    tool_call_map: dict[str, Message] = {}
+    tool_result_map: dict[str, Message] = {}
 
     for message in messages:
         if message.role == "assistant" and message.tool_calls:
             for tool_call in message.tool_calls:
                 if tool_call.id:
-                    tool_call_ids.add(tool_call.id)
+                    tool_call_map[tool_call.id] = message
         elif message.role == "tool" and message.tool_call_id:
-            tool_result_ids.add(message.tool_call_id)
+            tool_result_map[message.tool_call_id] = message
 
-    valid_tool_ids = tool_call_ids.intersection(tool_result_ids)
+    # Find valid pairs
+    valid_tool_ids = set(tool_call_map.keys()) & set(tool_result_map.keys())
 
-    # Filter messages to maintain valid tool call/result pairs
-    filtered_messages = []
+    # Second pass: build filtered message list
+    filtered_messages: list[Message] = []
+    processed_tool_calls: set[str] = set()
 
     for message in messages:
         if message.role == "assistant" and message.tool_calls:
-            filtered_tool_calls = [
-                tool_call for tool_call in message.tool_calls if tool_call.id in valid_tool_ids
+            # Filter tool calls to only include those with results
+            valid_calls = [
+                tool_call
+                for tool_call in message.tool_calls
+                if tool_call.id and tool_call.id in valid_tool_ids
             ]
 
-            msg = Message(
-                role=message.role,
-                content=message.content,
-                tool_calls=filtered_tool_calls or None,
-            )
+            if valid_calls:
+                # Create new message with only valid tool calls
+                filtered_messages.append(
+                    Message(
+                        role=message.role,
+                        content=message.content,
+                        tool_calls=valid_calls,
+                    )
+                )
 
-            filtered_messages.append(msg)
-        elif message.role == "tool":
-            if message.tool_call_id in valid_tool_ids:
+                # Track which tool calls we've processed
+                processed_tool_calls.update(call.id for call in valid_calls if call.id)
+            elif message.content:
+                # Keep messages that have content even if their tool calls were invalid
+                filtered_messages.append(Message(role=message.role, content=message.content))
+
+        elif message.role == "tool" and message.tool_call_id:
+            # Only include tool results that match a valid and processed tool call
+            tool_call_id = message.tool_call_id
+            if tool_call_id in valid_tool_ids and tool_call_id in processed_tool_calls:
                 filtered_messages.append(message)
+
         else:
+            # Keep all non-tool-related messages
             filtered_messages.append(message)
 
     return filtered_messages
