@@ -292,6 +292,11 @@ class AgentRepl:
         if self.swarm.memory:
             self.swarm.memory.clear_history()
 
+        self._usage = None
+        self._response_cost = None
+        self._active_agent = None
+        self._agent_queue.clear()
+
         print("\n🧹 Conversation history cleared")
 
     def _handle_command(self, command: str) -> bool:
