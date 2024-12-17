@@ -17,7 +17,7 @@ from liteswarm.core.summarizer import Summarizer
 from liteswarm.core.swarm import Swarm
 from liteswarm.repl.stream_handler import ReplStreamHandler
 from liteswarm.types.swarm import Agent, Message, ResponseCost, Usage
-from liteswarm.utils.logging import enable_logging
+from liteswarm.utils.logging import enable_logging as liteswarm_enable_logging
 
 Messages = TypeAdapter(list[Message])
 """Type adapter for a list of messages."""
@@ -443,6 +443,7 @@ async def start_repl(
     include_cost: bool = False,
     cleanup: bool = False,
     max_iterations: int = sys.maxsize,
+    enable_logging: bool = True,
 ) -> NoReturn:
     """Start an interactive REPL session.
 
@@ -454,6 +455,7 @@ async def start_repl(
         include_cost: Whether to track costs. Defaults to False.
         cleanup: Whether to reset agent state after each query. Defaults to False.
         max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
+        enable_logging: Whether to enable logging. Defaults to True.
 
     Example:
         ```python
@@ -470,7 +472,9 @@ async def start_repl(
         - Enables logging automatically
         - Runs until explicitly terminated
     """
-    enable_logging()
+    if enable_logging:
+        liteswarm_enable_logging()
+
     repl = AgentRepl(
         agent=agent,
         memory=memory,
