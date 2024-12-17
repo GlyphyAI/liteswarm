@@ -200,7 +200,7 @@ def dump_messages(messages: list[Message]) -> list[dict[str, Any]]:
             ```python
             messages = [
                 Message(role="user", content="Hello"),
-                Message(role="assistant", content="Hi!")
+                Message(role="assistant", content="Hi!"),
             ]
             dicts = dump_messages(messages)
             # [
@@ -214,15 +214,13 @@ def dump_messages(messages: list[Message]) -> list[dict[str, Any]]:
             messages = [
                 Message(
                     role="assistant",
-                    tool_calls=[
-                        ToolCall(id="123", name="search")
-                    ]
+                    tool_calls=[ToolCall(id="123", name="search")],
                 ),
                 Message(
                     role="tool",
                     tool_call_id="123",
-                    content="Results found"
-                )
+                    content="Results found",
+                ),
             ]
             dicts = dump_messages(messages)
             # Converts to API-compatible format
@@ -249,7 +247,7 @@ def load_messages(dicts: list[dict[str, Any]], strict: bool = False) -> list[Mes
             ```python
             dicts = [
                 {"role": "user", "content": "Hello"},
-                {"role": "assistant", "content": "Hi!"}
+                {"role": "assistant", "content": "Hi!"},
             ]
             messages = load_messages(dicts)
             # [
@@ -260,9 +258,7 @@ def load_messages(dicts: list[dict[str, Any]], strict: bool = False) -> list[Mes
 
         Strict validation:
             ```python
-            dicts = [
-                {"role": "invalid", "content": "Bad"}
-            ]
+            dicts = [{"role": "invalid", "content": "Bad"}]
             try:
                 messages = load_messages(dicts, strict=True)
             except ValidationError:
@@ -291,7 +287,7 @@ def trim_messages(messages: list[Message], model: str | None = None) -> list[Mes
             history = [
                 Message(role="user", content="Long conversation..."),
                 # ... many messages ...
-                Message(role="user", content="Latest message")
+                Message(role="user", content="Latest message"),
             ]
             trimmed = trim_messages(history, "gpt-4o")
             # Returns subset of messages fitting GPT-4o's context
@@ -333,13 +329,10 @@ def history_exceeds_token_limit(messages: list[Message], model: str) -> bool:
             ```python
             history = [
                 Message(role="user", content="Hello"),
-                Message(role="assistant", content="Hi!")
+                Message(role="assistant", content="Hi!"),
             ]
             # Short conversation
-            assert not history_exceeds_token_limit(
-                history,
-                "gpt-4o"
-            )
+            assert not history_exceeds_token_limit(history, "gpt-4o")
             ```
 
         Long conversation:
@@ -348,9 +341,9 @@ def history_exceeds_token_limit(messages: list[Message], model: str) -> bool:
                 Message(role="user", content="Very long text..."),
                 # ... many messages ...
             ]
-            if history_exceeds_token_limit(long_history, "gpt-3.5-turbo"):
+            if history_exceeds_token_limit(long_history, "gpt-4o"):
                 # Trim history or switch to larger model
-                trimmed = trim_messages(long_history, "gpt-3.5-turbo")
+                trimmed = trim_messages(long_history, "gpt-4o")
             ```
     """
     max_tokens = get_max_tokens(model)
