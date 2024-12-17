@@ -928,16 +928,20 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            await self.stream_handler.on_stream(delta, agent)
-
-            yield AgentResponse(
+            response = AgentResponse(
+                agent=agent,
                 delta=delta,
                 finish_reason=finish_reason,
                 content=full_content,
+                parsed_content=parsed_content,
                 tool_calls=full_tool_calls,
                 usage=completion_response.usage,
                 response_cost=completion_response.response_cost,
             )
+
+            await self.stream_handler.on_stream(response)
+
+            yield response
 
     async def _process_assistant_response(
         self,
