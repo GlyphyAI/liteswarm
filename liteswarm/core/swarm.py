@@ -1282,7 +1282,7 @@ class Swarm:
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
-    ) -> ConversationState:
+    ) -> AgentExecutionResult:
         """Execute a prompt and return the complete response.
 
         This is a convenience method that wraps the stream() method to provide
