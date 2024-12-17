@@ -245,7 +245,6 @@ async def run() -> None:
         agents["router"],
         include_usage=True,
         include_cost=True,
-        cleanup=False,
     )
 
 
