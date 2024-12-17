@@ -4,15 +4,23 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+import json
 import sys
+from collections import deque
 from typing import NoReturn
 
+from litellm import token_counter
+from pydantic import TypeAdapter
+
+from liteswarm.core.memory import Memory
 from liteswarm.core.summarizer import Summarizer
 from liteswarm.core.swarm import Swarm
 from liteswarm.repl.stream_handler import ReplStreamHandler
 from liteswarm.types.swarm import Agent, Message, ResponseCost, Usage
 from liteswarm.utils.logging import enable_logging
-from liteswarm.utils.usage import combine_response_cost, combine_usage
+
+Messages = TypeAdapter(list[Message])
+"""Type adapter for a list of messages."""
 
 
 class AgentRepl:
@@ -35,14 +43,15 @@ class AgentRepl:
         agent = Agent(
             id="helper",
             instructions="You are a helpful assistant.",
-            llm=LLM(model="gpt-4o")
+            llm=LLM(model="gpt-4o"),
         )
 
         repl = AgentRepl(
             agent=agent,
             include_usage=True,
-            include_cost=True
+            include_cost=True,
         )
+
         await repl.run()
         ```
 
@@ -56,43 +65,47 @@ class AgentRepl:
     def __init__(
         self,
         agent: Agent,
+        memory: Memory | None = None,
         summarizer: Summarizer | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
-        cleanup: bool = True,
+        cleanup: bool = False,
+        max_iterations: int = sys.maxsize,
     ) -> None:
-        """Initialize the REPL with a starting agent.
+        """Initialize REPL with configuration.
 
         Args:
-            agent: The initial agent to start conversations with.
-                This agent handles the first interaction and may delegate
-                to other agents as needed.
-            summarizer: Optional summarizer for managing conversation history.
-                If provided, helps maintain context while keeping history manageable.
-            include_usage: Whether to track and display token usage statistics.
-            include_cost: Whether to track and display cost information.
-            cleanup: Whether to clear agent state after completion.
-                If False, maintains the last active agent for subsequent interactions.
+            agent: Initial agent for handling conversations.
+            memory: Optional memory manager for history. Defaults to None.
+            summarizer: Optional history summarizer. Defaults to None.
+            include_usage: Whether to track token usage. Defaults to False.
+            include_cost: Whether to track costs. Defaults to False.
+            cleanup: Whether to reset agent state after each query. Defaults to False.
+            max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
 
         Notes:
-            - The REPL maintains separate full and working histories
+            - Maintains conversation state between queries if cleanup=False
             - Usage and cost tracking are optional features
-            - Agent state can persist between interactions if cleanup is False
         """
+        # Public configuration
         self.agent = agent
         self.cleanup = cleanup
         self.swarm = Swarm(
             stream_handler=ReplStreamHandler(),
+            memory=memory,
             summarizer=summarizer,
             include_usage=include_usage,
             include_cost=include_cost,
+            max_iterations=max_iterations,
         )
-        self.conversation: list[Message] = []
-        self.usage: Usage | None = None
-        self.response_cost: ResponseCost | None = None
-        self.active_agent: Agent | None = None
-        self.agent_queue: list[Agent] = []
-        self.working_history: list[Message] = []
+
+        # Internal state (private)
+        self._full_history: list[Message] = []
+        self._working_history: list[Message] = []
+        self._usage: Usage | None = None
+        self._response_cost: ResponseCost | None = None
+        self._active_agent: Agent | None = None
+        self._agent_queue: deque[Agent] = deque()
 
     def _print_welcome(self) -> None:
         """Print welcome message and usage instructions.
@@ -130,7 +143,7 @@ class AgentRepl:
             - Empty content is shown as [No content]
         """
         print("\n📝 Conversation History:")
-        for msg in self.conversation:
+        for msg in self._full_history:
             if msg.role != "system":
                 content = msg.content or "[No content]"
                 print(f"\n[{msg.role}]: {content}")
@@ -152,45 +165,134 @@ class AgentRepl:
             - Detailed breakdowns provided when available
         """
         print("\n📊 Conversation Statistics:")
-        print(f"Full history length: {len(self.conversation)} messages")
-        print(f"Working history length: {len(self.working_history)} messages")
+        print(f"Full history length: {len(self._full_history)} messages")
+        print(f"Working history length: {len(self._working_history)} messages")
 
-        if self.usage:
+        if self._usage:
             print("\nToken Usage:")
-            print(f"  Prompt tokens: {self.usage.prompt_tokens or 0:,}")
-            print(f"  Completion tokens: {self.usage.completion_tokens or 0:,}")
-            print(f"  Total tokens: {self.usage.total_tokens or 0:,}")
+            print(f"  Prompt tokens: {self._usage.prompt_tokens or 0:,}")
+            print(f"  Completion tokens: {self._usage.completion_tokens or 0:,}")
+            print(f"  Total tokens: {self._usage.total_tokens or 0:,}")
 
-            if self.usage.prompt_tokens_details:
+            # Only print token details if they exist and are not empty
+            if self._usage.prompt_tokens_details and isinstance(
+                self._usage.prompt_tokens_details, dict
+            ):
                 print("\nPrompt Token Details:")
-                for key, value in self.usage.prompt_tokens_details:
-                    print(f"  {key}: {value:,}")
+                for key, value in self._usage.prompt_tokens_details.items():
+                    if value is not None:
+                        print(f"  {key}: {value:,}")
 
-            if self.usage.completion_tokens_details:
+            if self._usage.completion_tokens_details and isinstance(
+                self._usage.completion_tokens_details, dict
+            ):
                 print("\nCompletion Token Details:")
-                for key, value in self.usage.completion_tokens_details:
-                    print(f"  {key}: {value:,}")
+                for key, value in self._usage.completion_tokens_details.items():
+                    if value is not None:
+                        print(f"  {key}: {value:,}")
 
-        if self.response_cost:
-            total_cost = (
-                self.response_cost.prompt_tokens_cost + self.response_cost.completion_tokens_cost
-            )
+        if self._response_cost:
+            prompt_cost = self._response_cost.prompt_tokens_cost or 0
+            completion_cost = self._response_cost.completion_tokens_cost or 0
+            total_cost = prompt_cost + completion_cost
 
             print("\nResponse Cost:")
-            print(f"  Prompt tokens: ${self.response_cost.prompt_tokens_cost:.4f}")
-            print(f"  Completion tokens: ${self.response_cost.completion_tokens_cost:.4f}")
-            print(f"  Total cost: ${total_cost:.4f}")
+            print(f"  Prompt tokens: ${prompt_cost:.6f}")
+            print(f"  Completion tokens: ${completion_cost:.6f}")
+            print(f"  Total cost: ${total_cost:.6f}")
 
         print("\nActive Agent:")
-        if self.active_agent:
-            print(f"  ID: {self.active_agent.id}")
-            print(f"  Model: {self.active_agent.llm.model}")
-            print(f"  Tools: {len(self.active_agent.llm.tools or [])} available")
+        if self._active_agent:
+            print(f"  ID: {self._active_agent.id}")
+            print(f"  Model: {self._active_agent.llm.model}")
+            print(f"  Tools: {len(self._active_agent.llm.tools or [])} available")
         else:
             print("  None")
 
-        print(f"\nPending agents in queue: {len(self.agent_queue)}")
+        print(f"\nPending agents in queue: {len(self._agent_queue)}")
         print("\n" + "=" * 50 + "\n")
+
+    def _save_history(self, filename: str = "conversation_history.json") -> None:
+        """Save the conversation history to a file.
+
+        Args:
+            filename: The name of the file to save the conversation history to.
+
+        Notes:
+            - Saves both full and working history
+            - Excludes system messages
+            - Includes message metadata
+        """
+        history = {
+            "full_history": [
+                msg.model_dump() for msg in self._full_history if msg.role != "system"
+            ],
+            "working_history": [
+                msg.model_dump() for msg in self._working_history if msg.role != "system"
+            ],
+        }
+
+        with open(filename, "w") as f:
+            json.dump(history, f, indent=2)
+
+        print(f"\n📤 Conversation history saved to {filename}")
+        print(f"Full history: {len(history['full_history'])} messages")
+        print(f"Working history: {len(history['working_history'])} messages")
+
+    def _load_history(self, filename: str = "conversation_history.json") -> None:
+        """Load the conversation history from a file.
+
+        Args:
+            filename: The name of the file to load the conversation history from.
+
+        Notes:
+            - Restores both full and working history
+            - Updates swarm memory state
+            - Validates message format
+            - Calculates token usage
+        """
+        try:
+            with open(filename) as f:
+                history: dict[str, list[Message]] = json.load(f)
+
+            # Validate and load histories
+            full_history = Messages.validate_python(history.get("full_history", []))
+            working_history = Messages.validate_python(history.get("working_history", []))
+
+            # Update internal state
+            self._full_history = full_history
+            self._working_history = working_history
+
+            # Update swarm memory
+            self.swarm.memory.set_history(full_history)
+
+            print(f"\n📥 Conversation history loaded from {filename}")
+            print(f"Full history: {len(full_history)} messages")
+            print(f"Working history: {len(working_history)} messages")
+
+            # Calculate token usage for working history
+            messages = [msg.model_dump() for msg in working_history if msg.role != "system"]
+            prompt_tokens = token_counter(model=self.agent.llm.model, messages=messages)
+            print(f"Working history token count: {prompt_tokens:,}")
+
+        except FileNotFoundError:
+            print(f"\n❌ History file not found: {filename}")
+        except json.JSONDecodeError:
+            print(f"\n❌ Invalid JSON format in history file: {filename}")
+        except Exception as e:
+            print(f"\n❌ Error loading history: {str(e)}")
+
+    def _clear_history(self) -> None:
+        """Clear the conversation history.
+
+        Resets both full and working histories, and clears the swarm memory.
+        """
+        self._full_history.clear()
+        self._working_history.clear()
+        if self.swarm.memory:
+            self.swarm.memory.clear_history()
+
+        print("\n🧹 Conversation history cleared")
 
     def _handle_command(self, command: str) -> bool:
         """Handle REPL commands.
@@ -201,6 +303,8 @@ class AgentRepl:
         - /clear: Clear conversation history
         - /history: Show message history
         - /stats: Show conversation statistics
+        - /save: Save conversation history to file
+        - /load: Load conversation history from file
 
         Args:
             command: The command to handle, including the leading slash.
@@ -220,14 +324,18 @@ class AgentRepl:
             case "/help":
                 self._print_welcome()
             case "/clear":
-                self.conversation.clear()
-                print("\n🧹 Conversation history cleared")
+                self._clear_history()
             case "/history":
                 self._print_history()
             case "/stats":
                 self._print_stats()
+            case "/save":
+                self._save_history()
+            case "/load":
+                self._load_history()
             case _:
                 print("\n❌ Unknown command. Type /help for available commands.")
+
         return False
 
     async def _process_query(self, query: str) -> None:
@@ -253,15 +361,15 @@ class AgentRepl:
             result = await self.swarm.execute(
                 agent=self.agent,
                 prompt=query,
-                messages=self.conversation,
                 cleanup=self.cleanup,
             )
-            self.conversation = result.messages
-            self.usage = combine_usage(self.usage, result.usage)
-            self.response_cost = combine_response_cost(self.response_cost, result.response_cost)
-            self.active_agent = result.agent
-            self.agent_queue = result.agent_queue
-            self.working_history.extend(result.messages)
+
+            self._full_history = self.swarm.memory.get_full_history()
+            self._working_history = self.swarm.memory.get_working_history()
+            self._usage = result.usage
+            self._response_cost = result.response_cost
+            self._active_agent = result.agent
+            self._agent_queue = self.swarm._agent_queue
             print("\n" + "=" * 50 + "\n")
         except Exception as e:
             print(f"\n❌ Error processing query: {str(e)}", file=sys.stderr)
@@ -321,52 +429,50 @@ class AgentRepl:
                 continue
 
 
-async def start_repl(  # noqa: PLR0913
+async def start_repl(
     agent: Agent,
+    memory: Memory | None = None,
     summarizer: Summarizer | None = None,
     include_usage: bool = False,
     include_cost: bool = False,
-    cleanup: bool = True,
+    cleanup: bool = False,
+    max_iterations: int = sys.maxsize,
 ) -> NoReturn:
-    """Start a REPL session with the given agent.
-
-    Convenience function to create and run an AgentRepl instance.
-    Handles initialization and logging setup.
+    """Start an interactive REPL session.
 
     Args:
-        agent: The agent to start the REPL with.
-            This agent handles initial interactions and may delegate to others.
-        summarizer: Optional summarizer for managing conversation history.
-            If provided, helps maintain context while keeping history manageable.
-        include_usage: Whether to track and display token usage statistics.
-        include_cost: Whether to track and display cost information.
-        cleanup: Whether to clear agent state after completion.
-            If False, maintains the last active agent for subsequent interactions.
-
-    Raises:
-        SystemExit: When the REPL is terminated.
+        agent: Initial agent for handling conversations.
+        memory: Optional memory manager for history. Defaults to None.
+        summarizer: Optional history summarizer. Defaults to None.
+        include_usage: Whether to track token usage. Defaults to False.
+        include_cost: Whether to track costs. Defaults to False.
+        cleanup: Whether to reset agent state after each query. Defaults to False.
+        max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
 
     Example:
         ```python
         agent = Agent(
             id="helper",
             instructions="You are a helpful assistant.",
-            llm=LLM(model="gpt-4")
+            llm=LLM(model="gpt-4o"),
         )
 
-        # Start REPL with usage tracking
-        await start_repl(
-            agent=agent,
-            include_usage=True
-        )
+        await start_repl(agent=agent, include_usage=True)
         ```
 
     Notes:
         - Enables logging automatically
-        - Creates a new REPL instance
         - Runs until explicitly terminated
-        - Maintains state based on cleanup setting
     """
     enable_logging()
-    repl = AgentRepl(agent, summarizer, include_usage, include_cost, cleanup)
+    repl = AgentRepl(
+        agent=agent,
+        memory=memory,
+        summarizer=summarizer,
+        include_usage=include_usage,
+        include_cost=include_cost,
+        cleanup=cleanup,
+        max_iterations=max_iterations,
+    )
+
     await repl.run()
