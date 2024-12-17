@@ -1345,11 +1345,13 @@ class Swarm:
                 print(result.content)  # Response will be personalized for Bob
                 ```
         """
-        full_response = ""
-        full_usage: Usage | None = None
-        response_cost: ResponseCost | None = None
+        last_response: AgentResponse | None = None
+        accumulated_content: str | None = None
+        accumulated_parsed_content: JSON | BaseModel | None = None
+        accumulated_usage: Usage | None = None
+        accumulated_response_cost: ResponseCost | None = None
 
-        response_stream = self.stream(
+        stream = self.stream(
             agent=agent,
             prompt=prompt,
             messages=messages,
@@ -1357,24 +1359,32 @@ class Swarm:
             cleanup=cleanup,
         )
 
-        async for agent_response in response_stream:
-            if agent_response.content:
-                full_response = agent_response.content
-            if agent_response.usage:
-                full_usage = combine_usage(full_usage, agent_response.usage)
-            if agent_response.response_cost:
-                response_cost = combine_response_cost(response_cost, agent_response.response_cost)
+        async for agent_response in stream:
+            last_response = agent_response
+            accumulated_content = agent_response.content
+            accumulated_parsed_content = agent_response.parsed_content
 
-        return ConversationState(
-            content=full_response,
-            agent=self._active_agent,
-            agent_messages=self._agent_messages,
-            agent_queue=list(self._agent_queue),
-            messages=self._full_history,
-            context_variables=self._context_variables,
-            usage=full_usage,
-            response_cost=response_cost,
+            accumulated_usage = combine_usage(
+                accumulated_usage,
+                agent_response.usage,
+            )
+
+            accumulated_response_cost = combine_response_cost(
+                accumulated_response_cost,
+                agent_response.response_cost,
+            )
+
+        if not last_response:
+            raise SwarmError("No response was generated")
+
+        return AgentExecutionResult(
+            agent=last_response.agent,
+            content=accumulated_content,
+            parsed_content=accumulated_parsed_content,
+            usage=accumulated_usage,
+            response_cost=accumulated_response_cost,
         )
+
     def cleanup(self, clear_history: bool = False) -> None:
         """Clean up swarm state and reset agents.
 
