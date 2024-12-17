@@ -19,6 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.llm import LLM
+from liteswarm.types.misc import JSON
 
 AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
 """Instructions for defining agent behavior.
@@ -642,6 +643,9 @@ class AgentResponse(BaseModel):
 
     content: str | None = None
     """Accumulated content so far."""
+
+    parsed_content: JSON | BaseModel | None = None
+    """Parsed content if response format was specified."""
 
     tool_calls: list[ChatCompletionDeltaToolCall] = Field(default_factory=list)
     """Accumulated tool calls."""
