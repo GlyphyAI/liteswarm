@@ -109,7 +109,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
+    async def on_tool_call(
+        self,
+        tool_call: ChatCompletionDeltaToolCall,
+        agent: Agent,
+    ) -> None:
         """Handle a tool call from an agent.
 
         Called when an agent initiates a tool call, before the tool is executed.
@@ -146,7 +150,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_agent_switch(self, previous_agent: Agent | None, current_agent: Agent) -> None:
+    async def on_agent_switch(
+        self,
+        previous_agent: Agent | None,
+        current_agent: Agent,
+    ) -> None:
         """Handle an agent switch event.
 
         Called when the conversation transitions from one agent to another,
@@ -178,7 +186,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_error(self, error: Exception, agent: Agent | None) -> None:
+    async def on_error(
+        self,
+        error: Exception,
+        agent: Agent | None,
+    ) -> None:
         """Handle an error during agent execution.
 
         Called when an error occurs during any phase of agent operation,
@@ -209,7 +221,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
+    async def on_complete(
+        self,
+        messages: list[Message],
+        agent: Agent | None,
+    ) -> None:
         """Handle completion of a conversation.
 
         Called when a conversation reaches its natural conclusion or is
