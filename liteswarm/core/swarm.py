@@ -910,6 +910,13 @@ class Swarm:
                 else:
                     full_content += delta.content
 
+            if should_parse_content and full_content:
+                parsed_content = await self._parse_agent_response_content(
+                    full_content=full_content,
+                    finish_reason=finish_reason,
+                    response_format=agent.llm.response_format,
+                )
+
             if delta.tool_calls:
                 for tool_call in delta.tool_calls:
                     if not isinstance(tool_call, ChatCompletionDeltaToolCall):
