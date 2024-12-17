@@ -1228,6 +1228,7 @@ class Swarm:
             if not self._active_agent:
                 break
 
+            agent_id = self._active_agent.id
             if self._active_agent.state == AgentState.STALE:
                 agent_switch_count += 1
                 agent_switched = await self._handle_agent_switch(agent_switch_count)
@@ -1235,9 +1236,10 @@ class Swarm:
                     log_verbose("No more agents to switch to, stopping")
                     break
 
-                log_verbose(f"Agent {self._active_agent.id} is stale, switching to next agent")
+                next_agent_id = self._active_agent.id
+                log_verbose(f"Agent {agent_id} is stale, switching to agent {next_agent_id}")
             else:
-                log_verbose(f"Agent {self._active_agent.id} is active, processing response")
+                log_verbose(f"Agent {agent_id} is active, processing response")
 
             agent_messages = self.memory.create_agent_context(
                 agent=self._active_agent,
