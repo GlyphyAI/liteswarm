@@ -578,10 +578,7 @@ class Swarm:
         continuation_messages = [
             Message(role="system", content=instructions),
             Message(role="assistant", content=previous_content),
-            Message(
-                role="user",
-                content="Please continue your previous response.",
-            ),
+            Message(role="user", content="Please continue your previous response."),
         ]
 
         return await self._create_completion(agent, continuation_messages)
