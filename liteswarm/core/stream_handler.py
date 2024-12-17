@@ -284,37 +284,13 @@ class LiteSwarmStreamHandler(SwarmStreamHandler):
         pass
 
     async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
-        """Handle tool call events.
-
-        Args:
-            tool_call: Details of the tool call.
-            agent: Agent making the call.
-        """
         pass
 
     async def on_agent_switch(self, previous_agent: Agent | None, current_agent: Agent) -> None:
-        """Handle agent switch events.
-
-        Args:
-            previous_agent: Agent being switched from.
-            current_agent: Agent being switched to.
-        """
         pass
 
     async def on_error(self, error: Exception, agent: Agent | None) -> None:
-        """Handle error events.
-
-        Args:
-            error: Exception that occurred.
-            agent: Agent that encountered the error.
-        """
         pass
 
     async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
-        """Handle conversation completion.
-
-        Args:
-            messages: Complete conversation history.
-            agent: Final agent in the conversation.
-        """
         pass
