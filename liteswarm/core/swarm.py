@@ -51,7 +51,7 @@ from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
 from liteswarm.utils.misc import parse_content, safe_get_attr
-from liteswarm.utils.retry import retry_with_exponential_backoff
+from liteswarm.utils.retry import retry_with_backoff
 from liteswarm.utils.typing import is_subtype
 from liteswarm.utils.unwrap import unwrap_instructions
 from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
@@ -881,8 +881,22 @@ class Swarm:
         """
         full_content: str | None = None
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
+        parsed_content: JSON | BaseModel | None = None
 
-        async for completion_response in self._get_completion_response(
+        should_parse_content = self._should_parse_agent_response(
+            model=agent.llm.model,
+            response_format=agent.llm.response_format,
+        )
+
+        completion_stream = retry_with_backoff(
+            self._get_completion_response,
+            max_retries=self.max_retries,
+            initial_delay=self.initial_retry_delay,
+            max_delay=self.max_retry_delay,
+            backoff_factor=self.backoff_factor,
+        )
+
+        async for completion_response in completion_stream(
             agent=agent,
             agent_messages=agent_messages,
             context_variables=context_variables,
