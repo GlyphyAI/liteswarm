@@ -363,8 +363,9 @@ class AgentRepl:
             - Automatically updates statistics if enabled
         """
         try:
+            agent = self._active_agent or self.agent
             result = await self.swarm.execute(
-                agent=self.agent,
+                agent=agent,
                 prompt=query,
                 cleanup=self.cleanup,
             )
