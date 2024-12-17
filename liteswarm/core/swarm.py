@@ -137,7 +137,7 @@ class Swarm:
         - Create separate instances for concurrent conversations
     """  # noqa: D214
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         stream_handler: SwarmStreamHandler | None = None,
         memory: Memory | None = None,
@@ -152,28 +152,28 @@ class Swarm:
         max_agent_switches: int = 10,
         max_iterations: int = sys.maxsize,
     ) -> None:
-        """Initialize a new Swarm instance.
+        """Initialize a new Swarm instance with specified configuration.
+
+        Configures swarm behavior with:
+        - Stream handling and event tracking
+        - Memory and history management
+        - Response summarization
+        - Usage and cost tracking
+        - Retry and safety limits
 
         Args:
-            stream_handler: Handler for streaming events during conversation.
-                Defaults to LiteSwarmStreamHandler.
-            summarizer: Handler for summarizing conversation history.
-                Defaults to LiteSummarizer.
-            include_usage: Whether to include token usage statistics.
-            include_cost: Whether to include cost statistics.
-            max_retries: Maximum retry attempts for failed API calls.
-            initial_retry_delay: Initial delay between retries (seconds).
-            max_retry_delay: Maximum delay between retries (seconds).
-            backoff_factor: Multiplier for retry delay after each attempt.
-            max_response_continuations: Maximum times a response can be
-                continued when hitting length limits.
-            max_agent_switches: Maximum number of agent switches allowed
-                in a single conversation.
-
-        Notes:
-            The retry configuration (max_retries, delays, backoff) applies
-            to API calls that fail due to transient errors. Context length
-            errors are handled separately through history management.
+            stream_handler: Handler for streaming events. Defaults to LiteSwarmStreamHandler.
+            memory: Memory for conversation history. Defaults to LiteMemory.
+            summarizer: Handler for history summarization. Defaults to LiteSummarizer.
+            include_usage: Whether to track token usage. Defaults to False.
+            include_cost: Whether to track response costs. Defaults to False.
+            max_retries: Maximum API retry attempts. Defaults to 3.
+            initial_retry_delay: Initial retry delay in seconds. Defaults to 1.0.
+            max_retry_delay: Maximum retry delay in seconds. Defaults to 10.0.
+            backoff_factor: Multiplier for retry delay. Defaults to 2.0.
+            max_response_continuations: Maximum response length continuations. Defaults to 5.
+            max_agent_switches: Maximum allowed agent switches. Defaults to 10.
+            max_iterations: Maximum processing iterations. Defaults to sys.maxsize.
         """
         # Internal state (private)
         self._active_agent: Agent | None = None
@@ -666,19 +666,20 @@ class Swarm:
     ) -> CustomStreamWrapper:
         """Create initial completion stream with robust error handling.
 
-        Implements a comprehensive completion strategy:
-        - Multiple retry attempts with exponential backoff
+        Creates and manages the initial completion stream with comprehensive features:
         - Automatic context reduction on length errors
         - Intelligent history trimming when needed
         - Proper error propagation for unrecoverable cases
+        - Token usage optimization
+        - Stream state validation
 
         Args:
-            agent: Agent for completion with model settings.
+            agent: Agent for completion, providing model settings and tools.
             agent_messages: Messages forming the conversation context.
             context_variables: Optional context for dynamic resolution.
 
         Returns:
-            Stream wrapper for managing completion response.
+            CustomStreamWrapper managing the completion response stream.
 
         Raises:
             CompletionError: If completion fails after exhausting retries.
@@ -869,6 +870,7 @@ class Swarm:
             AgentResponse containing:
             - Current response delta with updates
             - Accumulated content for context
+            - Parsed content if response format is specified
             - Collected tool calls for execution
             - Usage and cost statistics for monitoring
 
@@ -1308,7 +1310,7 @@ class Swarm:
                 If provided, these messages are used as conversation history.
             context_variables: Optional variables for dynamic instruction resolution
                 and tool execution. These variables are passed to agents and tools.
-            cleanup: Whether to clear agent state after completion.
+            cleanup: Whether to clear agent state after completion. Defaults to True.
 
         Yields:
             AgentResponse objects containing:
@@ -1356,7 +1358,7 @@ class Swarm:
                     prompt="What is 2 + 2?",
                     context_variables=ContextVariables({"user_name": "Alice"}),
                 ):
-                    print(response.content)
+                    print(response.delta.content)
                 ```
         """
         try:
@@ -1410,7 +1412,7 @@ class Swarm:
                 If provided, these messages are used as conversation history.
             context_variables: Optional variables for dynamic instruction resolution
                 and tool execution. These variables are passed to agents and tools.
-            cleanup: Whether to clear agent state after completion.
+            cleanup: Whether to clear agent state after completion. Defaults to True.
 
         Returns:
             ConversationState containing:
