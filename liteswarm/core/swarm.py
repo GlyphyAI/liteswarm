@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from liteswarm.core.memory import LiteMemory, Memory
 from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from liteswarm.core.summarizer import LiteSummarizer, Summarizer
+from liteswarm.core.swarm_stream import SwarmStream
 from liteswarm.types.exceptions import CompletionError, ContextLengthError, SwarmError
 from liteswarm.types.llm import ResponseFormat, ResponseFormatJsonSchema, ResponseSchema
 from liteswarm.types.misc import JSON
@@ -1181,7 +1182,7 @@ class Swarm:
 
         return True
 
-    async def _stream_agent_responses(
+    async def _stream_agent_execution(
         self,
         iteration_count: int = 0,
         agent_switch_count: int = 0,
@@ -1277,11 +1278,7 @@ class Swarm:
             if not last_agent_response.tool_calls:
                 self._active_agent.state = AgentState.STALE
 
-    # ================================================
-    # MARK: Public Interface
-    # ================================================
-
-    async def stream(
+    async def _create_swarm_stream(
         self,
         agent: Agent,
         prompt: str | None = None,
@@ -1289,77 +1286,37 @@ class Swarm:
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream responses from a swarm of agents.
+        """Create the base swarm execution stream.
 
-        This is the main entry point for streaming responses from a swarm of agents.
-        The swarm processes the prompt through a series of agents, where each agent
-        can contribute to the response or delegate to other agents. The process
-        continues until a complete response is generated or an error occurs.
-
-        The swarm maintains conversation state and handles:
-        - Agent initialization and switching
-        - Message history management
-        - Response streaming and accumulation
-        - Tool call execution
-        - Error recovery and retries
+        Internal method that creates the underlying async generator for SwarmStream.
+        Handles the complete streaming lifecycle:
+        - Conversation initialization
+        - Agent response processing
+        - Error handling and recovery
+        - Resource cleanup
 
         Args:
-            agent: Initial agent to handle the conversation.
-            prompt: The user's input prompt to process.
-            messages: Optional list of previous conversation messages for context.
-                If provided, these messages are used as conversation history.
-            context_variables: Optional variables for dynamic instruction resolution
-                and tool execution. These variables are passed to agents and tools.
-            cleanup: Whether to clear agent state after completion. Defaults to True.
+            agent: Initial agent for handling conversations.
+            prompt: Optional user prompt to process.
+            messages: Optional list of previous conversation messages.
+            context_variables: Optional variables for dynamic resolution.
+            cleanup: Whether to reset agent state after completion. Defaults to True.
 
         Yields:
-            AgentResponse objects containing:
-            - Current response delta with content updates
-            - Accumulated content so far
-            - Tool calls being processed
-            - Usage statistics if enabled
-            - Cost information if enabled
+            AgentResponse objects containing streaming updates.
 
         Raises:
-            SwarmError: If an unrecoverable error occurs during processing.
-            ContextLengthError: If the context becomes too large to process.
-            MaxAgentSwitchesError: If too many agent switches occur.
-            MaxResponseContinuationsError: If response requires too many continuations.
+            SwarmError: If neither prompt nor messages are provided.
+            ContextLengthError: If context becomes too large.
+            MaxAgentSwitchesError: If too many switches occur.
+            MaxResponseContinuationsError: If response needs too many continuations.
 
         Notes:
-            - The swarm uses a queue of agents to handle complex tasks
-            - Each agent can process the input or delegate to other agents
-            - The conversation history is preserved across agent switches
-            - The stream can be interrupted at any point
-            - Errors during processing may be recovered automatically
-
-        Examples:
-            Basic usage:
-                ```python
-                def get_instructions(context: ContextVariables) -> str:
-                    return f"Help {context['user_name']} with math."
-
-
-                def add(a: float, b: float, context_variables: ContextVariables) -> float:
-                    return a + b
-
-
-                agent = Agent(
-                    id="math",
-                    instructions=get_instructions,
-                    llm=LLM(
-                        model="gpt-4o",
-                        tools=[add],
-                    ),
-                )
-
-                async for response in swarm.stream(
-                    agent=agent,
-                    prompt="What is 2 + 2?",
-                    context_variables=ContextVariables({"user_name": "Alice"}),
-                ):
-                    print(response.delta.content)
-                ```
+            - This is an internal method used by stream()
+            - Handles the core streaming functionality
+            - Manages conversation state and cleanup
+            - Provides error handling and recovery
+            - Used as the base for SwarmStream wrapper
         """
         try:
             self._context_variables.update(context_variables or {})
@@ -1369,7 +1326,7 @@ class Swarm:
                 messages=messages,
             )
 
-            async for response in self._stream_agent_responses():
+            async for response in self._stream_agent_execution():
                 yield response
 
         except Exception as e:
@@ -1384,6 +1341,95 @@ class Swarm:
 
             if cleanup:
                 self.cleanup()
+
+    # ================================================
+    # MARK: Public Interface
+    # ================================================
+
+    def stream(
+        self,
+        agent: Agent,
+        prompt: str | None = None,
+        messages: list[Message] | None = None,
+        context_variables: ContextVariables | None = None,
+        cleanup: bool = True,
+    ) -> SwarmStream:
+        """Stream responses from a swarm of agents.
+
+        This is the main entry point for streaming responses from a swarm of agents.
+        Returns a SwarmStream that provides both streaming and result collection:
+        - Async iteration for real-time updates
+        - Final result accumulation
+        - Usage and cost tracking
+        - Parsed content handling
+        - Error recovery
+
+        The SwarmStream maintains internal state to:
+        - Track the last received response
+        - Accumulate complete content
+        - Combine usage statistics
+        - Aggregate cost information
+        - Handle parsed content formats
+
+        Args:
+            agent: Initial agent for handling conversations.
+            prompt: Optional user prompt to process.
+            messages: Optional list of previous conversation messages.
+            context_variables: Optional variables for dynamic resolution.
+            cleanup: Whether to reset agent state after completion. Defaults to True.
+
+        Returns:
+            SwarmStream wrapper providing both streaming and result capabilities.
+
+        Raises:
+            SwarmError: If neither prompt nor messages are provided.
+            ContextLengthError: If context becomes too large.
+            MaxAgentSwitchesError: If too many switches occur.
+            MaxResponseContinuationsError: If response needs too many continuations.
+
+        Notes:
+            - SwarmStream supports both streaming and final result modes
+            - Internal state tracks complete response accumulation
+            - Usage and cost statistics are combined properly
+            - Parsed content is handled according to format rules
+            - The stream can be consumed multiple times if needed
+
+        Examples:
+            Streaming mode:
+                ```python
+                async for response in swarm.stream(agent, prompt="Hello"):
+                    print(response.delta.content)  # Print updates as they arrive
+                ```
+
+            Result collection:
+                ```python
+                stream = swarm.stream(agent, prompt="Hello")
+                result = await stream.get_result()  # Wait for complete response
+                print(result.content)  # Print final content
+                ```
+
+            Combined usage:
+                ```python
+                stream = swarm.stream(agent, prompt="Hello")
+
+                # Stream partial responses
+                async for response in stream:
+                    print("Partial:", response.delta.content)
+
+                # Get final result
+                result = await stream.get_result()
+                print("Final:", result.content)
+                ```
+        """
+        return SwarmStream(
+            stream=self._create_swarm_stream(
+                agent=agent,
+                prompt=prompt,
+                messages=messages,
+                context_variables=context_variables,
+                cleanup=cleanup,
+            ),
+        )
 
     async def execute(
         self,
