@@ -150,6 +150,7 @@ class Swarm:
         backoff_factor: float = 2.0,
         max_response_continuations: int = 5,
         max_agent_switches: int = 10,
+        max_iterations: int = sys.maxsize,
     ) -> None:
         """Initialize a new Swarm instance.
 
@@ -195,6 +196,7 @@ class Swarm:
         # Safety limits
         self.max_response_continuations = max_response_continuations
         self.max_agent_switches = max_agent_switches
+        self.max_iterations = max_iterations
 
     # ================================================
     # MARK: Tool Processing
