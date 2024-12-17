@@ -5,29 +5,39 @@
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import copy
+import sys
 from collections import deque
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import json_repair
 import litellm
 import orjson
-from litellm import CustomStreamWrapper, acompletion, get_supported_openai_params
+from litellm import (
+    CustomStreamWrapper,
+    acompletion,
+    get_supported_openai_params,
+    supports_response_schema,
+)
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 from pydantic import BaseModel
 
+from liteswarm.core.memory import LiteMemory, Memory
 from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from liteswarm.core.summarizer import LiteSummarizer, Summarizer
-from liteswarm.types.exceptions import CompletionError, ContextLengthError
+from liteswarm.types.exceptions import CompletionError, ContextLengthError, SwarmError
+from liteswarm.types.llm import ResponseFormat, ResponseFormatJsonSchema, ResponseSchema
+from liteswarm.types.misc import JSON
 from liteswarm.types.swarm import (
     Agent,
+    AgentExecutionResult,
     AgentResponse,
     AgentState,
     CompletionResponse,
     ContextVariables,
-    ConversationState,
     Delta,
+    FinishReason,
     Message,
     ResponseCost,
     ToolCallAgentResult,
