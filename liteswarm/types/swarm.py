@@ -113,7 +113,7 @@ class Message(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
-        extra="allow",
+        extra="forbid",
     )
 
 
@@ -168,6 +168,7 @@ class ToolMessage(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
@@ -223,6 +224,7 @@ class Delta(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
     @classmethod
@@ -265,6 +267,11 @@ class ResponseCost(BaseModel):
 
     completion_tokens_cost: float
     """Cost of tokens in the completion."""
+
+    model_config = ConfigDict(
+        use_attribute_docstrings=True,
+        extra="forbid",
+    )
 
 
 class AgentState(str, Enum):
@@ -353,6 +360,7 @@ class Agent(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
@@ -469,6 +477,7 @@ class ToolCallResult(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
@@ -609,6 +618,7 @@ class CompletionResponse(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
@@ -659,6 +669,7 @@ class AgentResponse(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
