@@ -8,7 +8,7 @@ from typing import Protocol
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
-from liteswarm.types.swarm import Agent, Delta, Message
+from liteswarm.types.swarm import Agent, AgentResponse, Message
 
 
 class SwarmStreamHandler(Protocol):
@@ -70,7 +70,10 @@ class SwarmStreamHandler(Protocol):
         - Agent may be None in error and complete events if no agent is active
     """
 
-    async def on_stream(self, delta: Delta, agent: Agent) -> None:
+    async def on_stream(
+        self,
+        agent_response: AgentResponse,
+    ) -> None:
         """Handle streaming content updates from an agent.
 
         Called each time new content is received from an agent, including both
@@ -277,13 +280,7 @@ class LiteSwarmStreamHandler(SwarmStreamHandler):
         - Suitable for testing and development
     """
 
-    async def on_stream(self, delta: Delta, agent: Agent) -> None:
-        """Handle streaming content updates.
-
-        Args:
-            delta: Content or tool call update.
-            agent: Agent generating the content.
-        """
+    async def on_stream(self, agent_response: AgentResponse) -> None:
         pass
 
     async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
