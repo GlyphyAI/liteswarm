@@ -793,6 +793,61 @@ class Swarm:
             context_variables=context_variables,
         )
 
+    def _should_parse_agent_response(
+        self,
+        model: str,
+        custom_llm_provider: str | None = None,
+        response_format: ResponseFormat | None = None,
+    ) -> bool:
+        """Determine if response content requires parsing based on format and model support.
+
+        Args:
+            model: Model identifier to check for format support.
+            custom_llm_provider: Optional custom provider to check for format support.
+            response_format: Format specification to evaluate.
+
+        Returns:
+            True if content should be parsed based on format and model capabilities.
+        """
+        if not response_format:
+            return False
+
+        if not supports_response_schema(model, custom_llm_provider):
+            return False
+
+        return (
+            is_subtype(response_format, BaseModel)
+            or is_subtype(response_format, ResponseFormatJsonSchema)
+            or is_subtype(response_format, ResponseSchema)
+        )
+
+    async def _parse_agent_response_content(
+        self,
+        full_content: str,
+        finish_reason: FinishReason | None,
+        response_format: ResponseFormat | None,
+    ) -> JSON | BaseModel | None:
+        """Parse agent response content into specified format when appropriate.
+
+        Args:
+            full_content: Complete response content to parse.
+            finish_reason: Reason for response completion.
+            response_format: Target format specification.
+
+        Returns:
+            Parsed content in specified format, or None if parsing not needed/possible.
+        """
+        parsed_content = json_repair.loads(full_content)
+        if isinstance(parsed_content, tuple):
+            parsed_content = parsed_content[0]
+
+        valid_finish_reasons: set[FinishReason] = {"stop", "tool_calls"}
+        if finish_reason in valid_finish_reasons:
+            if parsed_content and is_subtype(response_format, BaseModel):
+                return response_format.model_validate(parsed_content)
+
+        return parsed_content
+
     async def _process_agent_response(
         self,
         agent: Agent,
