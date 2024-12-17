@@ -1273,9 +1273,7 @@ class Swarm:
             )
 
             if cleanup:
-                self._active_agent = None
-                self._agent_messages = []
-                self._agent_queue.clear()
+                self.cleanup()
 
     async def execute(
         self,
