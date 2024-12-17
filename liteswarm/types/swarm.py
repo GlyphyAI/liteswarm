@@ -645,54 +645,62 @@ class AgentResponse(BaseModel):
     )
 
 
-class ConversationState(BaseModel):
-    """Complete state of a conversation.
+class AgentExecutionResult(BaseModel):
+    """Final result of an agent's execution.
 
-    Captures all aspects of a conversation including content,
-    agents, history, and metrics.
+    Contains the complete execution outcome including:
+    - Final content and parsed results
+    - Active agent information
+    - Usage statistics and costs
+    - Parsed content if format was specified
+
+    This class represents the final state after:
+    - All content has been generated
+    - All tool calls have completed
+    - All statistics have been accumulated
+    - All costs have been calculated
 
     Examples:
-        Track conversation state:
+        Basic result:
             ```python
-            state = ConversationState(
-                content="Final response",
-                agent=current_agent,
-                agent_messages=[  # Current context
-                    Message(role="user", content="Hello"),
-                    Message(role="assistant", content="Hi"),
-                ],
-                agent_queue=[backup_agent],  # Queued agents
-                messages=[],  # Full history
-                context_variables=ContextVariables(
-                    user_name="John",
-                    language="English",
-                ),
+            result = AgentExecutionResult(
+                agent=agent,
+                content="Final response text",
                 usage=Usage(total_tokens=100),
+            )
+            print(result.content)
+            ```
+
+        Result with parsed content:
+            ```python
+            result = AgentExecutionResult(
+                agent=agent,
+                content='{"answer": 42}',
+                parsed_content={"answer": 42},
+                usage=Usage(total_tokens=50),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.001,
                     completion_tokens_cost=0.002,
                 ),
             )
+            print(result.parsed_content["answer"])  # 42
             ```
+
+    Notes:
+        - Content may be None if no text was generated
+        - Parsed content is available if response format was specified
+        - Usage and cost are optional but typically present
+        - Agent reference is always available
     """
+
+    agent: Agent
+    """Currently active agent."""
 
     content: str | None = None
     """Final conversation content."""
 
-    agent: Agent | None = None
-    """Currently active agent."""
-
-    agent_messages: list[Message] = Field(default_factory=list)
-    """Current agent's message context."""
-
-    agent_queue: list[Agent] = Field(default_factory=list)
-    """Queue of pending agents."""
-
-    messages: list[Message] = Field(default_factory=list)
-    """Complete conversation history."""
-
-    context_variables: ContextVariables | None = None
-    """Current context variables."""
+    parsed_content: JSON | BaseModel | None = None
+    """Parsed conversation content if response format was specified."""
 
     usage: Usage | None = None
     """Total token usage."""
