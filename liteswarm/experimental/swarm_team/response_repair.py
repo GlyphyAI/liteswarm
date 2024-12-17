@@ -239,13 +239,13 @@ class LiteResponseRepairAgent:
                 print(f"Failed to regenerate: {e}")
             ```
         """
-        last_assistant_message = self.swarm.pop_last_message()
+        last_assistant_message = self.swarm.memory.pop_last_message()
         if not last_assistant_message:
             raise ResponseRepairError("No message to regenerate")
 
-        last_user_message = self.swarm.pop_last_message()
+        last_user_message = self.swarm.memory.pop_last_message()
         if not last_user_message or last_user_message.role != "user":
-            self.swarm.append_message(last_assistant_message)
+            self.swarm.memory.append_message(last_assistant_message)
             raise ResponseRepairError("No user message found to regenerate")
 
         try:
@@ -261,8 +261,8 @@ class LiteResponseRepairAgent:
             return result.content
 
         except Exception as e:
-            self.swarm.append_message(last_user_message)
-            self.swarm.append_message(last_assistant_message)
+            self.swarm.memory.append_message(last_user_message)
+            self.swarm.memory.append_message(last_assistant_message)
             raise ResponseRepairError(
                 f"Failed to regenerate response: {e}",
                 response=last_user_message.content,
