@@ -623,27 +623,63 @@ class CompletionResponse(BaseModel):
 
 
 class AgentResponse(BaseModel):
-    """Processed response from an agent with accumulated state.
+    """Streaming response chunk from an agent with accumulated state.
 
-    Combines current update with accumulated content and tool calls
-    from previous updates.
+    Contains both incremental and accumulated state including:
+    - Current delta update (new content/tool calls)
+    - Accumulated content from previous chunks
+    - Collected tool calls and their states
+    - Running usage and cost statistics
+    - Parsed content when format specified
+
+    This class represents each streaming step with:
+    - Latest content or tool call updates
+    - Progressive content accumulation
+    - Ongoing statistics tracking
+    - Continuous state management
+    - Real-time parsing when applicable
 
     Examples:
-        Track response progress:
+        Content update:
             ```python
             response = AgentResponse(
+                agent=agent,
                 delta=Delta(content=" world"),
-                content="Hello world",  # Accumulated
-                tool_calls=[calc_call],  # Accumulated
+                content="Hello world",  # Full content so far
+                parsed_content=None,
                 finish_reason=None,
                 usage=Usage(prompt_tokens=10, completion_tokens=2),
+            )
+            print(response.delta.content)  # Latest: " world"
+            print(response.content)  # Total: "Hello world"
+            ```
+
+        Tool call update:
+            ```python
+            response = AgentResponse(
+                agent=agent,
+                delta=Delta(tool_calls=[new_call]),
+                content="Let me calculate that",
+                parsed_content=None,
+                tool_calls=[previous_call, new_call],  # All calls so far
+                usage=Usage(prompt_tokens=15, completion_tokens=5),
                 response_cost=ResponseCost(
                     prompt_tokens_cost=0.0001,
                     completion_tokens_cost=0.0002,
                 ),
             )
             ```
+
+    Notes:
+        - Delta contains only the latest update
+        - Content and tool_calls maintain running state
+        - Usage and costs track cumulative totals
+        - Parsed content updates with format rules
+        - Finish reason indicates completion status
     """
+
+    agent: Agent
+    """Agent that produced this response."""
 
     delta: Delta
     """Current content update."""
