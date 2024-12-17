@@ -599,6 +599,7 @@ class TeamMember(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
     @field_serializer("task_types")
@@ -693,6 +694,7 @@ class TaskResult(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
 
 
@@ -770,4 +772,5 @@ class Artifact(BaseModel):
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
+        extra="forbid",
     )
