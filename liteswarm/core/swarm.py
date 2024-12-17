@@ -1510,54 +1510,78 @@ class Swarm:
 
         return await stream.get_result()
 
-    def cleanup(self, clear_history: bool = False) -> None:
-        """Clean up swarm state and reset agents.
+    def cleanup(
+        self,
+        clear_agents: bool = True,
+        clear_context: bool = False,
+        clear_history: bool = False,
+    ) -> None:
+        """Clean up swarm state and reset components.
 
-        Performs a complete cleanup of the swarm's internal state, including:
-        - Resetting active agent to idle state
-        - Clearing the agent queue
-        - Resetting all queued agents to idle state
-        - Clearing context variables
-        - Optionally clearing conversation history
-
-        This method is useful for:
-        - Preparing the swarm for a new conversation
-        - Cleaning up resources after errors
-        - Resetting state between independent executions
-        - Managing memory usage in long-running applications
+        Performs selective cleanup of the swarm's internal state based on flags:
+        - Agent states and queue management
+        - Context variables clearing
+        - Conversation history clearing
 
         Args:
-            clear_history: Whether to clear the conversation history.
+            clear_agents: Whether to reset agent states and clear queue.
+                If True, sets all agents to IDLE and empties queue. Defaults to True.
+            clear_context: Whether to clear context variables.
+                If True, removes all stored variables. Defaults to False.
+            clear_history: Whether to clear conversation history.
                 If True, removes all stored messages. Defaults to False.
 
         Notes:
-            - Agent states are reset to IDLE
-            - Context variables are cleared
-            - Agent queue is emptied
-            - History clearing is optional to allow for conversation continuity
+            - Agent cleanup resets active agent and empties queue
+            - Context and history clearing are optional
+            - Partial cleanup allows for state preservation
+            - Default behavior only clears agent states
 
         Examples:
-            Basic cleanup:
+            Basic cleanup (reset agents only):
                 ```python
-                # Reset swarm state but keep history
+                # Reset agent states while preserving context and history
                 swarm.cleanup()
+                ```
+
+            Targeted cleanup:
+                ```python
+                # Reset agents and clear context variables
+                swarm.cleanup(clear_context=True)
                 ```
 
             Complete reset:
                 ```python
-                # Reset everything including history
-                swarm.cleanup(clear_history=True)
+                # Reset everything: agents, context, and history
+                swarm.cleanup(
+                    clear_agents=True,
+                    clear_context=True,
+                    clear_history=True,
+                )
+                ```
+
+            Preserve agents:
+                ```python
+                # Clear context and history while preserving agent states
+                swarm.cleanup(
+                    clear_agents=False,
+                    clear_context=True,
+                    clear_history=True,
+                )
                 ```
         """
-        if self._active_agent:
-            self._active_agent.state = AgentState.IDLE
-            self._active_agent = None
+        if clear_agents:
+            if self._active_agent:
+                self._active_agent.state = AgentState.IDLE
+                self._active_agent = None
 
-        for agent in self._agent_queue:
-            agent.state = AgentState.IDLE
+            for agent in self._agent_queue:
+                agent.state = AgentState.IDLE
 
-        self._agent_queue.clear()
-        self._context_variables.clear()
+            self._agent_queue.clear()
+
+        if clear_context:
+            self._context_variables.clear()
 
         if clear_history:
             self.memory.clear_history()
