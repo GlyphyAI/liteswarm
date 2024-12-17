@@ -815,7 +815,7 @@ class Swarm:
             CompletionError: If completion fails after retries.
             ContextLengthError: If context exceeds limits after reduction.
         """
-        full_content = ""
+        full_content: str | None = None
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
 
         async for completion_response in self._get_completion_response(
@@ -827,7 +827,10 @@ class Swarm:
             finish_reason = completion_response.finish_reason
 
             if delta.content:
-                full_content += delta.content
+                if full_content is None:
+                    full_content = delta.content
+                else:
+                    full_content += delta.content
 
             if delta.tool_calls:
                 for tool_call in delta.tool_calls:
@@ -887,7 +890,7 @@ class Swarm:
         messages: list[Message] = [
             Message(
                 role="assistant",
-                content=content or None,
+                content=content,
                 tool_calls=tool_calls if tool_calls else None,
             )
         ]
