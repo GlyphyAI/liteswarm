@@ -94,7 +94,7 @@ class LiteSummarizer:
         summarizer = LiteSummarizer(
             model="gpt-4o",
             max_history_length=50,
-            preserve_recent=25
+            preserve_recent=25,
         )
 
         # Check if summarization is needed
@@ -104,7 +104,7 @@ class LiteSummarizer:
         ```
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         model: str = "gpt-4o",
         system_prompt: str | None = None,
@@ -435,7 +435,7 @@ class TruncationSummarizer:
         ```python
         summarizer = TruncationSummarizer(
             max_history_length=50,
-            preserve_recent=25
+            preserve_recent=25,
         )
 
         # Truncate history while preserving recent messages
