@@ -11,8 +11,7 @@ import os
 from pydantic import BaseModel
 
 from liteswarm.core import Swarm
-from liteswarm.types import LLM, Agent, ContextVariables
-from liteswarm.types.swarm import ToolResult
+from liteswarm.types import LLM, Agent, ContextVariables, ToolResult
 from liteswarm.utils import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
@@ -33,13 +32,14 @@ async def instructions_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=agent,
         prompt="Hello!",
         context_variables=ContextVariables(user_name="John"),
     )
 
-    print(result.messages[-1].content)
+    messages = swarm.memory.get_working_history()
+    print(messages[-1].model_dump_json(indent=2))
 
 
 async def agent_switching_example() -> None:
@@ -84,13 +84,14 @@ async def agent_switching_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=welcome_agent,
         prompt="Hola!",
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = [msg.model_dump() for msg in result.messages]
+    working_history = swarm.memory.get_working_history()
+    messages = [msg.model_dump() for msg in working_history]
     print(json.dumps(messages, indent=2, ensure_ascii=False))
 
 
@@ -113,12 +114,13 @@ async def error_handling_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=agent,
         prompt="What is the weather in Orgrimmar?",
     )
 
-    print(result.messages[-1].content)
+    messages = swarm.memory.get_working_history()
+    print(messages[-1].model_dump_json(indent=2))
 
 
 async def pydantic_example() -> None:
@@ -142,12 +144,13 @@ async def pydantic_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=agent,
         prompt="What is the name of a user with id 1?",
     )
 
-    print(result.messages[-1].content)
+    working_history = swarm.memory.get_working_history()
+    print(working_history[-1].model_dump_json(indent=2))
 
 
 async def run_selected_example() -> None:
