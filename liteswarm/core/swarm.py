@@ -40,7 +40,6 @@ from liteswarm.types.swarm import (
     Delta,
     FinishReason,
     Message,
-    ResponseCost,
     ToolCallAgentResult,
     ToolCallFailureResult,
     ToolCallMessageResult,
@@ -55,7 +54,7 @@ from liteswarm.utils.misc import parse_content, safe_get_attr
 from liteswarm.utils.retry import retry_with_backoff
 from liteswarm.utils.typing import is_subtype
 from liteswarm.utils.unwrap import unwrap_instructions
-from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
+from liteswarm.utils.usage import calculate_response_cost
 
 litellm.modify_params = True
 
@@ -1499,12 +1498,6 @@ class Swarm:
                 print(result.content)  # Response will be personalized for Bob
                 ```
         """
-        last_response: AgentResponse | None = None
-        accumulated_content: str | None = None
-        accumulated_parsed_content: JSON | BaseModel | None = None
-        accumulated_usage: Usage | None = None
-        accumulated_response_cost: ResponseCost | None = None
-
         stream = self.stream(
             agent=agent,
             prompt=prompt,
@@ -1513,31 +1506,7 @@ class Swarm:
             cleanup=cleanup,
         )
 
-        async for agent_response in stream:
-            last_response = agent_response
-            accumulated_content = agent_response.content
-            accumulated_parsed_content = agent_response.parsed_content
-
-            accumulated_usage = combine_usage(
-                accumulated_usage,
-                agent_response.usage,
-            )
-
-            accumulated_response_cost = combine_response_cost(
-                accumulated_response_cost,
-                agent_response.response_cost,
-            )
-
-        if not last_response:
-            raise SwarmError("No response was generated")
-
-        return AgentExecutionResult(
-            agent=last_response.agent,
-            content=accumulated_content,
-            parsed_content=accumulated_parsed_content,
-            usage=accumulated_usage,
-            response_cost=accumulated_response_cost,
-        )
+        return await stream.get_result()
 
     def cleanup(self, clear_history: bool = False) -> None:
         """Clean up swarm state and reset agents.
