@@ -111,7 +111,7 @@ async def run() -> None:
             id="router",
             instructions=ROUTER_INSTRUCTIONS,
             llm=LLM(
-                model="claude-3-5-haiku-20241022",
+                model="gpt-4o-mini",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -122,7 +122,7 @@ async def run() -> None:
             id="product_manager",
             instructions=PRODUCT_MANAGER_INSTRUCTIONS,
             llm=LLM(
-                model="claude-3-5-haiku-20241022",
+                model="gpt-4o-mini",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -133,7 +133,7 @@ async def run() -> None:
             id="designer",
             instructions=DESIGNER_INSTRUCTIONS,
             llm=LLM(
-                model="claude-3-5-haiku-20241022",
+                model="gpt-4o-mini",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -144,7 +144,7 @@ async def run() -> None:
             id="engineer",
             instructions=ENGINEER_INSTRUCTIONS,
             llm=LLM(
-                model="claude-3-5-haiku-20241022",
+                model="claude-3-5-sonnet-20241022",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -155,7 +155,7 @@ async def run() -> None:
             id="qa",
             instructions=QA_INSTRUCTIONS,
             llm=LLM(
-                model="claude-3-5-haiku-20241022",
+                model="gpt-4o-mini",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
