@@ -1122,12 +1122,12 @@ class Swarm:
             self._active_agent = agent
             self._active_agent.state = AgentState.ACTIVE
         else:
-            # We probaby want to queue the agent instead,
-            # but to do so we need to support passing an empty agent
-            # to the stream method.
-            # TODO: implement passing an empty agent to the stream method,
-            #       and then queue the agent instead of setting it as active
             self._active_agent.state = AgentState.ACTIVE
+            if self._active_agent == agent:
+                return
+
+            agent.state = AgentState.IDLE
+            self._agent_queue.append(agent)
 
     async def _handle_agent_switch(self, switch_count: int) -> bool:
         """Handle transition between agents in the swarm.
