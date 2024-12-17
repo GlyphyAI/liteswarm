@@ -987,21 +987,40 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
     ) -> None:
-        """Initialize the conversation state.
+        """Initialize and set up a new conversation session.
 
-        Sets up complete conversation environment:
-        - Configures active agent with settings
-        - Initializes message histories
-        - Sets up context variables
-        - Prepares initial messages
-        - Establishes tracking state
+        Prepares the complete conversation environment by:
+        - Setting up message history and context
+        - Configuring initial agent states
+        - Managing conversation continuity
+        - Establishing message sequences
+        - Initializing tracking systems
+
+        The initialization process:
+        - Loads existing messages if provided
+        - Adds initial prompt to history
+        - Sets up active agent state
+        - Ensures proper agent activation
+        - Maintains existing state if continuing
 
         Args:
-            agent: Initial agent for conversation.
-            prompt: Starting user prompt.
-            messages: Optional existing history.
-            context_variables: Optional context for dynamic resolution.
+            agent: Initial agent to handle the conversation.
+                Will be set as the active agent if none exists.
+            prompt: Optional starting message from the user.
+                Added to history if provided. Defaults to None.
+            messages: Optional pre-existing conversation history.
+                Loaded into memory if provided. Defaults to None.
+
+        Notes:
+            - Existing history is preserved if provided
+            - Prompt is added as a user message
+            - Active agent is properly initialized
+            - Agent state is set to ACTIVE
+            - Multiple initializations maintain state
         """
+        if not messages and not prompt:
+            raise SwarmError("Please provide at least one message or prompt")
+
         if messages:
             self.memory.set_history(messages)
 
