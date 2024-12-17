@@ -1174,7 +1174,7 @@ class Swarm:
     async def stream(
         self,
         agent: Agent,
-        prompt: str,
+        prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
@@ -1278,7 +1278,7 @@ class Swarm:
     async def execute(
         self,
         agent: Agent,
-        prompt: str,
+        prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
