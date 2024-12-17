@@ -28,38 +28,46 @@ class SwarmStreamHandler(Protocol):
     Example:
         ```python
         class CustomStreamHandler(StreamHandler):
-            async def on_stream(self, delta: Delta, agent: Agent) -> None:
-                if delta.content:
-                    print(f"[{agent.id}]: {delta.content}")
+            async def on_stream(
+                self,
+                agent_response: AgentResponse,
+            ) -> None:
+                if agent_response.delta.content:
+                    print(f"[{agent_response.agent.id}]: {agent_response.delta.content}")
 
             async def on_tool_call(
                 self,
                 tool_call: ChatCompletionDeltaToolCall,
-                agent: Agent
+                agent: Agent,
             ) -> None:
                 print(f"[{agent.id}] calling {tool_call.function.name}")
 
             async def on_agent_switch(
                 self,
                 previous: Agent | None,
-                current: Agent
+                current: Agent,
             ) -> None:
                 print(f"Switching from {previous.id} to {current.id}")
 
-            async def on_error(self, error: Exception, agent: Agent) -> None:
+            async def on_error(
+                self,
+                error: Exception,
+                agent: Agent,
+            ) -> None:
                 print(f"Error from {agent.id}: {error}")
 
             async def on_complete(
                 self,
                 messages: list[Message],
-                agent: Agent | None
+                agent: Agent | None,
             ) -> None:
                 print("Conversation complete")
+
 
         # Use in Swarm
         swarm = Swarm(
             stream_handler=CustomStreamHandler(),
-            include_usage=True
+            include_usage=True,
         )
         ```
 
@@ -81,31 +89,35 @@ class SwarmStreamHandler(Protocol):
         quickly to avoid blocking the stream.
 
         Args:
-            delta: The content or tool call update, containing:
-                - content: Optional new text content
-                - tool_calls: Optional list of tool call updates
-            agent: The agent generating the content, providing:
-                - id: Agent identifier
-                - model: LLM model information
-                - other agent-specific attributes
+            agent_response: Streaming response containing:
+                - agent: Agent generating the content
+                - delta: Latest content or tool call update
+                - content: Accumulated content so far
+                - tool_calls: Accumulated tool calls
+                - usage: Running token usage statistics
+                - response_cost: Accumulated cost information
+                - parsed_content: Parsed content if format specified
 
         Example:
             ```python
-            async def on_stream(self, delta: Delta, agent: Agent) -> None:
-                # Handle content updates
-                if delta.content:
-                    print(f"Content: {delta.content}")
+            async def on_stream(self, agent_response: AgentResponse) -> None:
+                # Handle latest content
+                if agent_response.delta.content:
+                    print(f"New content: {agent_response.delta.content}")
+                    print(f"Total content: {agent_response.content}")
 
                 # Handle tool calls
-                if delta.tool_calls:
-                    for call in delta.tool_calls:
-                        print(f"Tool call: {call.function.name}")
+                if agent_response.delta.tool_calls:
+                    for call in agent_response.delta.tool_calls:
+                        print(f"New tool call: {call.function.name}")
+                    print(f"Total calls: {len(agent_response.tool_calls)}")
             ```
 
         Notes:
-            - May be called frequently with small content updates
+            - May be called frequently with small updates
             - Should avoid expensive operations
-            - Can receive both content and tool calls in same delta
+            - Can receive both content and tool calls in same update
+            - Has access to both incremental and accumulated state
         """
         ...
 
@@ -132,11 +144,7 @@ class SwarmStreamHandler(Protocol):
 
         Example:
             ```python
-            async def on_tool_call(
-                self,
-                tool_call: ChatCompletionDeltaToolCall,
-                agent: Agent
-            ) -> None:
+            async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
                 print(
                     f"Agent {agent.id} calling {tool_call.function.name}"
                     f" with args: {tool_call.function.arguments}"
@@ -168,11 +176,7 @@ class SwarmStreamHandler(Protocol):
 
         Example:
             ```python
-            async def on_agent_switch(
-                self,
-                previous: Agent | None,
-                current: Agent
-            ) -> None:
+            async def on_agent_switch(self, previous: Agent | None, current: Agent) -> None:
                 if previous:
                     print(f"Switching from {previous.id} to {current.id}")
                 else:
@@ -242,12 +246,8 @@ class SwarmStreamHandler(Protocol):
 
         Example:
             ```python
-            async def on_complete(
-                self,
-                messages: list[Message],
-                agent: Agent | None
-            ) -> None:
-                print('Conversation summary:')
+            async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
+                print("Conversation summary:")
                 print(f"- Messages: {len(messages)}")
                 print(f"- Final agent: {agent.id if agent else 'None'}")
 
@@ -281,9 +281,9 @@ class LiteSwarmStreamHandler(SwarmStreamHandler):
         ```python
         class LoggingHandler(LiteStreamHandler):
             # Only override the events we care about
-            async def on_stream(self, delta: Delta, agent: Agent) -> None:
-                if delta.content:
-                    print(f"[{agent.id}]: {delta.content}")
+            async def on_stream(self, agent_response: AgentResponse) -> None:
+                if agent_response.delta.content:
+                    print(f"[{agent_response.agent.id}]: {agent_response.delta.content}")
 
             async def on_error(self, error: Exception, agent: Agent) -> None:
                 print(f"Error in {agent.id}: {error}")
