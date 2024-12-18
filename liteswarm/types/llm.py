@@ -376,7 +376,8 @@ class LLM(BaseModel):
 
     @field_serializer("response_format")
     def serialize_response_format(
-        self, response_format: ResponseFormat | None
+        self,
+        response_format: ResponseFormat | None,
     ) -> dict[str, Any] | None:
         """Serialize response format for API requests.
 
@@ -414,7 +415,7 @@ class LLM(BaseModel):
         if isinstance(response_format, dict):
             return {**response_format}
 
-        return response_format
+        return None
 
     @model_validator(mode="after")
     def check_litellm_kwargs_keys(self) -> Self:

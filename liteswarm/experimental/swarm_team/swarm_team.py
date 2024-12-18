@@ -930,9 +930,6 @@ class SwarmTeam:
             if not result.content:
                 raise ValueError("The agent did not return any content")
 
-            if result.context_variables:
-                task_context.update(result.context_variables)
-
             task.status = TaskStatus.COMPLETED
             task_result = await self._process_response(
                 response=result.content,

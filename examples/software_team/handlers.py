@@ -5,6 +5,7 @@
 # https://opensource.org/licenses/MIT.
 
 import sys
+from collections.abc import Sequence
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
@@ -12,8 +13,8 @@ from liteswarm.core import LiteSwarmStreamHandler
 from liteswarm.experimental import LiteSwarmTeamStreamHandler
 from liteswarm.types import (
     Agent,
+    AgentResponse,
     ContextVariables,
-    Delta,
     Message,
     Plan,
     PlanFeedbackHandler,
@@ -30,28 +31,27 @@ class SwarmStreamHandler(LiteSwarmStreamHandler):
         self._last_agent: Agent | None = None
         self._current_content = ""
 
-    async def on_stream(self, delta: Delta, agent: Agent | None) -> None:
+    async def on_stream(self, agent_response: AgentResponse) -> None:
         """Handle streaming content from agents.
 
         Args:
-            delta: The content delta from the agent
-            agent: The agent generating the content
+            agent_response: The agent response
         """
-        if delta.content:
-            # Show agent prefix for first message
-            if not self._last_agent or self._last_agent != agent:
-                agent_id = agent.id if agent else "unknown"
-                role = getattr(agent, "role", "assistant")
-                print(f"\n\n🤖 [{agent_id}] ({role})", flush=True)
-                self._last_agent = agent
+        if agent_response.finish_reason == "length":
+            print("\n[...continuing...]", end="", flush=True)
 
-            # Accumulate and print content
-            self._current_content += delta.content
-            print(delta.content, end="", flush=True)
+        if content := agent_response.delta.content:
+            # Only print agent ID prefix for the first character of a new message
+            if self._last_agent != agent_response.agent:
+                agent_id = agent_response.agent.id if agent_response.agent else "unknown"
+                print(f"\n[{agent_id}] ", end="", flush=True)
+                self._last_agent = agent_response.agent
 
-            # Show continuation indicator if needed
-            if getattr(delta, "finish_reason", None) == "length":
-                print("\n[...continuing...]", end="", flush=True)
+            print(content, end="", flush=True)
+
+        # Always ensure a newline at the end of a complete response
+        if agent_response.finish_reason:
+            print("", flush=True)
 
     async def on_error(self, error: Exception, agent: Agent | None) -> None:
         """Handle and display errors.
@@ -108,7 +108,7 @@ class SwarmStreamHandler(LiteSwarmStreamHandler):
         )
         self._last_agent = None
 
-    async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
+    async def on_complete(self, messages: Sequence[Message], agent: Agent | None) -> None:
         """Handle completion of agent tasks.
 
         Args:

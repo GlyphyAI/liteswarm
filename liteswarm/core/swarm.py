@@ -5,31 +5,36 @@
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import copy
+import sys
 from collections import deque
 from collections.abc import AsyncGenerator
 from typing import Any
 
+import json_repair
 import litellm
 import orjson
-from litellm import CustomStreamWrapper, acompletion, get_supported_openai_params
+from litellm import CustomStreamWrapper, acompletion
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 from pydantic import BaseModel
 
+from liteswarm.core.context_manager import ContextManager, LiteContextManager
+from liteswarm.core.message_store import LiteMessageStore, MessageStore
 from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
-from liteswarm.core.summarizer import LiteSummarizer, Summarizer
-from liteswarm.types.exceptions import CompletionError, ContextLengthError
+from liteswarm.core.swarm_stream import SwarmStream
+from liteswarm.types.exceptions import CompletionError, ContextLengthError, SwarmError
+from liteswarm.types.llm import ResponseFormat, ResponseFormatJsonSchema, ResponseSchema
+from liteswarm.types.misc import JSON
 from liteswarm.types.swarm import (
     Agent,
+    AgentExecutionResult,
     AgentResponse,
     AgentState,
     CompletionResponse,
     ContextVariables,
-    ConversationState,
     Delta,
+    FinishReason,
     Message,
-    ResponseCost,
     ToolCallAgentResult,
     ToolCallFailureResult,
     ToolCallMessageResult,
@@ -39,12 +44,12 @@ from liteswarm.types.swarm import (
 )
 from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
-from liteswarm.utils.messages import dump_messages, history_exceeds_token_limit, trim_messages
+from liteswarm.utils.messages import dump_messages
 from liteswarm.utils.misc import parse_content, safe_get_attr
-from liteswarm.utils.retry import retry_with_exponential_backoff
+from liteswarm.utils.retry import retry_with_backoff
 from liteswarm.utils.typing import is_subtype
 from liteswarm.utils.unwrap import unwrap_instructions
-from liteswarm.utils.usage import calculate_response_cost, combine_response_cost, combine_usage
+from liteswarm.utils.usage import calculate_response_cost
 
 litellm.modify_params = True
 
@@ -127,10 +132,11 @@ class Swarm:
         - Create separate instances for concurrent conversations
     """  # noqa: D214
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         stream_handler: SwarmStreamHandler | None = None,
-        summarizer: Summarizer | None = None,
+        message_store: MessageStore | None = None,
+        context_manager: ContextManager | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
         max_retries: int = 3,
@@ -139,41 +145,40 @@ class Swarm:
         backoff_factor: float = 2.0,
         max_response_continuations: int = 5,
         max_agent_switches: int = 10,
+        max_iterations: int = sys.maxsize,
     ) -> None:
-        """Initialize a new Swarm instance.
+        """Initialize a new Swarm instance with specified configuration.
+
+        Configures swarm behavior with:
+        - Stream handling and event tracking
+        - Message storage and history management
+        - Context optimization and filtering
+        - Usage and cost tracking
+        - Retry and safety limits
 
         Args:
-            stream_handler: Handler for streaming events during conversation.
-                Defaults to LiteSwarmStreamHandler.
-            summarizer: Handler for summarizing conversation history.
-                Defaults to LiteSummarizer.
-            include_usage: Whether to include token usage statistics.
-            include_cost: Whether to include cost statistics.
-            max_retries: Maximum retry attempts for failed API calls.
-            initial_retry_delay: Initial delay between retries (seconds).
-            max_retry_delay: Maximum delay between retries (seconds).
-            backoff_factor: Multiplier for retry delay after each attempt.
-            max_response_continuations: Maximum times a response can be
-                continued when hitting length limits.
-            max_agent_switches: Maximum number of agent switches allowed
-                in a single conversation.
-
-        Notes:
-            The retry configuration (max_retries, delays, backoff) applies
-            to API calls that fail due to transient errors. Context length
-            errors are handled separately through history management.
+            stream_handler: Handler for streaming events. Defaults to LiteSwarmStreamHandler.
+            message_store: Store for conversation history. Defaults to LiteMessageStore.
+            context_manager: Manager for context optimization and relevance. Defaults to LiteContextManager.
+            include_usage: Whether to track token usage. Defaults to False.
+            include_cost: Whether to track response costs. Defaults to False.
+            max_retries: Maximum API retry attempts. Defaults to 3.
+            initial_retry_delay: Initial retry delay in seconds. Defaults to 1.0.
+            max_retry_delay: Maximum retry delay in seconds. Defaults to 10.0.
+            backoff_factor: Multiplier for retry delay. Defaults to 2.0.
+            max_response_continuations: Maximum response length continuations. Defaults to 5.
+            max_agent_switches: Maximum allowed agent switches. Defaults to 10.
+            max_iterations: Maximum processing iterations. Defaults to sys.maxsize.
         """
         # Internal state (private)
         self._active_agent: Agent | None = None
-        self._agent_messages: list[Message] = []
         self._agent_queue: deque[Agent] = deque()
-        self._full_history: list[Message] = []
-        self._working_history: list[Message] = []
         self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
         self.stream_handler = stream_handler or LiteSwarmStreamHandler()
-        self.summarizer = summarizer or LiteSummarizer()
+        self.message_store = message_store or LiteMessageStore()
+        self.context_manager = context_manager or LiteContextManager()
         self.include_usage = include_usage
         self.include_cost = include_cost
 
@@ -186,6 +191,7 @@ class Swarm:
         # Safety limits
         self.max_response_continuations = max_response_continuations
         self.max_agent_switches = max_agent_switches
+        self.max_iterations = max_iterations
 
     # ================================================
     # MARK: Tool Processing
@@ -500,16 +506,17 @@ class Swarm:
             TypeError: If response format is unexpected.
         """
         exclude_keys = {"response_format", "litellm_kwargs"}
+        llm_messages = dump_messages(messages, exclude_none=True)
         llm_kwargs = agent.llm.model_dump(exclude=exclude_keys, exclude_none=True)
         llm_override_kwargs = {
-            "messages": dump_messages(messages),
+            "messages": llm_messages,
             "stream": True,
             "stream_options": {"include_usage": True} if self.include_usage else None,
             "tools": functions_to_json(agent.llm.tools),
         }
 
         response_format = agent.llm.response_format
-        supported_params = get_supported_openai_params(agent.llm.model) or []
+        supported_params = litellm.get_supported_openai_params(agent.llm.model) or []
         if "response_format" in supported_params and response_format:
             llm_override_kwargs["response_format"] = response_format
 
@@ -531,7 +538,7 @@ class Swarm:
         }
 
         log_verbose(
-            f"Sending messages to agent [{agent.id}]: {completion_kwargs.get('messages')}",
+            f"Sending messages to agent [{agent.id}]: {orjson.dumps(llm_messages).decode()}",
             level="DEBUG",
         )
 
@@ -567,10 +574,7 @@ class Swarm:
         continuation_messages = [
             Message(role="system", content=instructions),
             Message(role="assistant", content=previous_content),
-            Message(
-                role="user",
-                content="Please continue your previous response.",
-            ),
+            Message(role="user", content="Please continue your previous response."),
         ]
 
         return await self._create_completion(agent, continuation_messages)
@@ -606,15 +610,15 @@ class Swarm:
             CompletionError: If completion fails after all retry attempts.
             ContextLengthError: If context exceeds limits and cannot be reduced.
         """
-        accumulated_content = ""
-        continuation_count = 0
-        current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
-            agent=agent,
-            agent_messages=agent_messages,
-            context_variables=context_variables,
-        )
-
         try:
+            accumulated_content: str = ""
+            continuation_count: int = 0
+            current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
+                agent=agent,
+                agent_messages=agent_messages,
+                context_variables=context_variables,
+            )
+
             while continuation_count < self.max_response_continuations:
                 if not current_stream:
                     break
@@ -643,8 +647,12 @@ class Swarm:
 
         except (CompletionError, ContextLengthError):
             raise
+
         except Exception as e:
-            raise CompletionError("Failed to get completion response", e) from e
+            raise CompletionError(
+                f"Failed to get completion response: {e}",
+                original_error=e,
+            ) from e
 
     async def _get_initial_stream(
         self,
@@ -654,46 +662,40 @@ class Swarm:
     ) -> CustomStreamWrapper:
         """Create initial completion stream with robust error handling.
 
-        Implements a comprehensive completion strategy:
-        - Multiple retry attempts with exponential backoff
+        Creates and manages the initial completion stream with comprehensive features:
         - Automatic context reduction on length errors
         - Intelligent history trimming when needed
         - Proper error propagation for unrecoverable cases
+        - Token usage optimization
+        - Stream state validation
 
         Args:
-            agent: Agent for completion with model settings.
+            agent: Agent for completion, providing model settings and tools.
             agent_messages: Messages forming the conversation context.
             context_variables: Optional context for dynamic resolution.
 
         Returns:
-            Stream wrapper for managing completion response.
+            CustomStreamWrapper managing the completion response stream.
 
         Raises:
             CompletionError: If completion fails after exhausting retries.
             ContextLengthError: If context remains too large after reduction.
         """
+        try:
+            return await self._create_completion(
+                agent=agent,
+                messages=agent_messages,
+            )
+        except ContextWindowExceededError:
+            log_verbose(
+                "Context window exceeded, attempting to reduce context size",
+                level="WARNING",
+            )
 
-        async def get_initial_response() -> CustomStreamWrapper:
-            try:
-                return await self._create_completion(agent=agent, messages=agent_messages)
-            except ContextWindowExceededError:
-                log_verbose(
-                    "Context window exceeded, attempting to reduce context size",
-                    level="WARNING",
-                )
-
-                return await self._retry_completion_with_trimmed_history(
-                    agent=agent,
-                    context_variables=context_variables,
-                )
-
-        return await retry_with_exponential_backoff(
-            get_initial_response,
-            max_retries=self.max_retries,
-            initial_delay=self.initial_retry_delay,
-            max_delay=self.max_retry_delay,
-            backoff_factor=self.backoff_factor,
-        )
+            return await self._reduce_context_size(
+                agent=agent,
+                context_variables=context_variables,
+            )
 
     async def _process_stream_chunk(
         self,
@@ -785,6 +787,61 @@ class Swarm:
             context_variables=context_variables,
         )
 
+    def _should_parse_agent_response(
+        self,
+        model: str,
+        custom_llm_provider: str | None = None,
+        response_format: ResponseFormat | None = None,
+    ) -> bool:
+        """Determine if response content requires parsing based on format and model support.
+
+        Args:
+            model: Model identifier to check for format support.
+            custom_llm_provider: Optional custom provider to check for format support.
+            response_format: Format specification to evaluate.
+
+        Returns:
+            True if content should be parsed based on format and model capabilities.
+        """
+        if not response_format:
+            return False
+
+        if not litellm.supports_response_schema(model, custom_llm_provider):
+            return False
+
+        return (
+            is_subtype(response_format, BaseModel)
+            or is_subtype(response_format, ResponseFormatJsonSchema)
+            or is_subtype(response_format, ResponseSchema)
+        )
+
+    async def _parse_agent_response_content(
+        self,
+        full_content: str,
+        finish_reason: FinishReason | None,
+        response_format: ResponseFormat | None,
+    ) -> JSON | BaseModel | None:
+        """Parse agent response content into specified format when appropriate.
+
+        Args:
+            full_content: Complete response content to parse.
+            finish_reason: Reason for response completion.
+            response_format: Target format specification.
+
+        Returns:
+            Parsed content in specified format, or None if parsing not needed/possible.
+        """
+        parsed_content = json_repair.loads(full_content)
+        if isinstance(parsed_content, tuple):
+            parsed_content = parsed_content[0]
+
+        valid_finish_reasons: set[FinishReason] = {"stop", "tool_calls"}
+        if finish_reason in valid_finish_reasons:
+            if parsed_content and is_subtype(response_format, BaseModel):
+                return response_format.model_validate(parsed_content)
+
+        return parsed_content
+
     async def _process_agent_response(
         self,
         agent: Agent,
@@ -809,6 +866,7 @@ class Swarm:
             AgentResponse containing:
             - Current response delta with updates
             - Accumulated content for context
+            - Parsed content if response format is specified
             - Collected tool calls for execution
             - Usage and cost statistics for monitoring
 
@@ -816,10 +874,24 @@ class Swarm:
             CompletionError: If completion fails after retries.
             ContextLengthError: If context exceeds limits after reduction.
         """
-        full_content = ""
+        full_content: str | None = None
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
+        parsed_content: JSON | BaseModel | None = None
 
-        async for completion_response in self._get_completion_response(
+        should_parse_content = self._should_parse_agent_response(
+            model=agent.llm.model,
+            response_format=agent.llm.response_format,
+        )
+
+        completion_stream = retry_with_backoff(
+            self._get_completion_response,
+            max_retries=self.max_retries,
+            initial_delay=self.initial_retry_delay,
+            max_delay=self.max_retry_delay,
+            backoff_factor=self.backoff_factor,
+        )
+
+        async for completion_response in completion_stream(
             agent=agent,
             agent_messages=agent_messages,
             context_variables=context_variables,
@@ -828,7 +900,17 @@ class Swarm:
             finish_reason = completion_response.finish_reason
 
             if delta.content:
-                full_content += delta.content
+                if full_content is None:
+                    full_content = delta.content
+                else:
+                    full_content += delta.content
+
+            if should_parse_content and full_content:
+                parsed_content = await self._parse_agent_response_content(
+                    full_content=full_content,
+                    finish_reason=finish_reason,
+                    response_format=agent.llm.response_format,
+                )
 
             if delta.tool_calls:
                 for tool_call in delta.tool_calls:
@@ -841,16 +923,20 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            await self.stream_handler.on_stream(delta, agent)
-
-            yield AgentResponse(
+            response = AgentResponse(
+                agent=agent,
                 delta=delta,
                 finish_reason=finish_reason,
                 content=full_content,
+                parsed_content=parsed_content,
                 tool_calls=full_tool_calls,
                 usage=completion_response.usage,
                 response_cost=completion_response.response_cost,
             )
+
+            await self.stream_handler.on_stream(response)
+
+            yield response
 
     async def _process_assistant_response(
         self,
@@ -888,7 +974,7 @@ class Swarm:
         messages: list[Message] = [
             Message(
                 role="assistant",
-                content=content or None,
+                content=content,
                 tool_calls=tool_calls if tool_calls else None,
             )
         ]
@@ -914,7 +1000,7 @@ class Swarm:
         return messages
 
     # ================================================
-    # MARK: History Management
+    # MARK: Context Management
     # ================================================
 
     async def _prepare_agent_context(
@@ -923,95 +1009,77 @@ class Swarm:
         prompt: str | None = None,
         context_variables: ContextVariables | None = None,
     ) -> list[Message]:
-        """Prepare the agent context for execution.
+        """Prepare execution context for an agent.
 
-        Builds complete context by combining:
-        - System instructions with variable resolution
-        - Filtered working history for relevance
-        - Optional user prompt for direction
-        - Required metadata for processing
+        Creates a properly ordered message list for agent execution:
+        1. System message with resolved instructions
+        2. Filtered conversation history (excluding system messages)
+        3. Optional prompt as user message
 
         Args:
-            agent: Agent requiring context preparation.
-            prompt: Optional user message to include.
-            context_variables: Optional context for dynamic resolution.
+            agent: Agent requiring context preparation
+            prompt: Optional user prompt to include
+            context_variables: Variables for dynamic resolution
 
         Returns:
-            Messages representing the complete agent context.
+            List of messages ready for agent execution.
+
+        Notes:
+            - Resolves dynamic instructions with context
+            - Filters system messages from history
+            - Maintains chronological order
+            - Adds prompt as final message if provided
         """
         instructions = unwrap_instructions(agent.instructions, context_variables)
-        history = [msg for msg in self._working_history if msg.role != "system"]
-        messages = [Message(role="system", content=instructions), *history]
+        history = [msg for msg in self.message_store.get_messages() if msg.role != "system"]
 
+        messages = [Message(role="system", content=instructions), *history]
         if prompt:
             messages.append(Message(role="user", content=prompt))
 
         return messages
 
-    async def _update_working_history(self, agent: Agent) -> None:
-        """Update working history with intelligent management.
-
-        Maintains history quality through multiple mechanisms:
-        - Summarization based on complexity metrics
-        - Token-based trimming when needed
-        - Context limit enforcement
-        - Conversation coherence preservation
-
-        The method prioritizes summarization over trimming when possible,
-        as it better preserves conversation context and meaning.
-
-        Args:
-            agent: Agent providing context limits and settings.
-
-        Notes:
-            - Full history remains preserved for reference
-            - Working history is modified as needed
-            - Summarization is preferred for context preservation
-            - Trimming serves as fallback mechanism
-            - Updates are performed in place
-        """
-        if self.summarizer.needs_summarization(self._working_history):
-            self._working_history = await self.summarizer.summarize_history(self._full_history)
-        elif history_exceeds_token_limit(self._working_history, agent.llm.model):
-            self._working_history = trim_messages(self._full_history, agent.llm.model)
-
-    async def _retry_completion_with_trimmed_history(
+    async def _reduce_context_size(
         self,
         agent: Agent,
         context_variables: ContextVariables | None = None,
     ) -> CustomStreamWrapper:
-        """Retry completion with optimized context reduction.
+        """Reduce context size when it exceeds model limits.
 
-        Implements intelligent context reduction:
-        - Updates working history within limits
-        - Prepares minimal but sufficient context
-        - Attempts completion with reduced context
-        - Maintains conversation coherence
+        Uses the context manager to optimize message history when
+        the context window is exceeded. Attempts to maintain conversation
+        coherence while fitting within model limits.
 
         Args:
-            agent: Agent for completion attempt.
-            context_variables: Context for resolution.
+            agent: Agent for completion attempt
+            context_variables: Optional context for resolution
 
         Returns:
-            Response stream from completion.
+            Response stream from completion
 
         Raises:
-            ContextLengthError: If context remains too large after reduction.
+            ContextLengthError: If context remains too large after optimization
         """
-        await self._update_working_history(agent)
-
-        reduced_messages = await self._prepare_agent_context(
-            agent=agent,
-            context_variables=context_variables,
-        )
-
         try:
-            return await self._create_completion(agent, reduced_messages)
+            messages = self.message_store.get_messages()
+            optimized = await self.context_manager.optimize(
+                messages=messages,
+                model=agent.llm.model,
+            )
+
+            self.message_store.set_messages(optimized)
+            agent_messages = await self._prepare_agent_context(
+                agent=agent,
+                context_variables=context_variables,
+            )
+
+            return await self._create_completion(agent, agent_messages)
+
         except ContextWindowExceededError as e:
             raise ContextLengthError(
-                "Context window exceeded even after reduction attempt",
+                "Context window exceeded even after optimization",
                 original_error=e,
-                current_length=len(reduced_messages),
+                current_length=len(optimized),
             ) from e
 
     # ================================================
@@ -1021,72 +1089,79 @@ class Swarm:
     async def _initialize_conversation(
         self,
         agent: Agent,
-        prompt: str,
+        prompt: str | None = None,
         messages: list[Message] | None = None,
-        context_variables: ContextVariables | None = None,
     ) -> None:
-        """Initialize the conversation state.
+        """Initialize and set up a new conversation session.
 
-        Sets up complete conversation environment:
-        - Configures active agent with settings
-        - Initializes message histories
-        - Sets up context variables
-        - Prepares initial messages
-        - Establishes tracking state
+        Prepares the conversation environment by:
+        - Loading existing messages if provided
+        - Adding initial prompt to history if provided
+        - Setting up initial agent state
+        - Managing agent queue for potential switches
 
         Args:
-            agent: Initial agent for conversation.
-            prompt: Starting user prompt.
-            messages: Optional existing history.
-            context_variables: Optional context for dynamic resolution.
+            agent: Initial agent to handle the conversation.
+                Will be set as active agent if none exists,
+                or will be queued if an active agent exists.
+            prompt: Optional starting message from the user.
+                Added to history if provided. Defaults to None.
+            messages: Optional pre-existing conversation history.
+                Loaded into message store if provided. Defaults to None.
+
+        Raises:
+            SwarmError: If neither prompt nor messages are provided.
+
+        Notes:
+            - At least one of prompt or messages must be provided
+            - Existing history is preserved if provided
+            - Active agent is set to ACTIVE state
+            - New agents are queued if an active agent exists
         """
+        if not messages and not prompt:
+            raise SwarmError("Please provide at least one message or prompt")
+
         if messages:
-            self._full_history = copy.deepcopy(messages)
-            await self._update_working_history(agent)
+            self.message_store.set_messages(messages)
 
-        self._context_variables = context_variables or ContextVariables()
+        if prompt:
+            self.message_store.add_message(Message(role="user", content=prompt))
 
+        # TODO: Use agent_queue to switch agents:
+        # - Start with null active agent - get next agent from queue
+        # - Iterate until active agent is stale - get next agent from queue
+        # - Continue until we run out of agents in queue
         if self._active_agent is None:
             self._active_agent = agent
             self._active_agent.state = AgentState.ACTIVE
-
-            initial_context = await self._prepare_agent_context(
-                agent=agent,
-                prompt=prompt,
-                context_variables=context_variables,
-            )
-
-            self._full_history = initial_context.copy()
-            self._working_history = initial_context.copy()
-            self._agent_messages = initial_context.copy()
         else:
-            user_message = Message(role="user", content=prompt)
-            self._full_history.append(user_message)
-            self._working_history.append(user_message)
-            self._agent_messages.append(user_message)
+            self._active_agent.state = AgentState.ACTIVE
+            if self._active_agent != agent:
+                agent.state = AgentState.IDLE
+                self._agent_queue.append(agent)
 
-    async def _handle_agent_switch(
-        self,
-        switch_count: int,
-        prompt: str | None = None,
-        context_variables: ContextVariables | None = None,
-    ) -> bool:
-        """Handle agent switch with proper state management.
+    async def _handle_agent_switch(self, switch_count: int) -> bool:
+        """Handle transition between agents in the swarm.
 
-        Manages complete switch process:
-        - Retrieves next agent from queue
-        - Updates active agent state
-        - Notifies stream handler of change
-        - Preserves conversation context
-        - Maintains execution state
+        Manages agent switching by:
+        - Validating switch count against maximum limit
+        - Transitioning from current to next agent in queue
+        - Updating agent states appropriately
+        - Notifying stream handler of the switch
 
         Args:
-            switch_count: Current switch iteration.
-            prompt: Optional message for new agent.
-            context_variables: Optional context for dynamic resolution.
+            switch_count: Current number of agent switches performed.
+                Used to enforce maximum switch limit.
 
         Returns:
-            True if switch completed successfully, False otherwise.
+            True if switch was successful, False otherwise.
+
+        Notes:
+            - Enforces max_agent_switches limit
+            - Next agent is taken from front of queue
+            - Previous agent's state remains unchanged
+            - Next agent is set to ACTIVE state
+            - Stream handler is notified of switch
         """
         if switch_count >= self.max_agent_switches:
             log_verbose(
@@ -1098,262 +1173,279 @@ class Swarm:
         if not self._agent_queue:
             return False
 
-        log_verbose(
-            f"Agent switch {switch_count}/{self.max_agent_switches}",
-            level="INFO",
-        )
-
-        next_agent = self._agent_queue.popleft()
-        next_agent.state = AgentState.ACTIVE
+        log_verbose(f"Agent switch {switch_count}/{self.max_agent_switches}")
 
         previous_agent = self._active_agent
+        next_agent = self._agent_queue.popleft()
+        next_agent.state = AgentState.ACTIVE
         self._active_agent = next_agent
-        self._agent_messages = await self._prepare_agent_context(
-            agent=next_agent,
-            prompt=prompt,
-            context_variables=context_variables,
-        )
 
         await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
         return True
 
-    # ================================================
-    # MARK: Public Interface
-    # ================================================
+    async def _stream_agent_execution(
+        self,
+        iteration_count: int = 0,
+        agent_switch_count: int = 0,
+    ) -> AsyncGenerator[AgentResponse, None]:
+        """Stream responses from active and subsequent agents in the swarm.
 
-    def get_history(self) -> list[Message]:
-        """Get the complete conversation history.
+        Manages the core response generation loop of the swarm, handling:
+        - Sequential agent responses and transitions
+        - Agent state management and switching
+        - Response generation and streaming
+        - Tool call processing and execution
+        - Message history updates
 
-        Returns a copy of the full conversation history, including all messages
-        from all agents and tools. This history represents the complete state
-        of the conversation from start to finish.
-
-        Returns:
-            List of all messages in chronological order.
-
-        Notes:
-            - Returns a deep copy to prevent external modifications
-            - Includes system messages, user inputs, and agent responses
-            - Contains tool calls and their results
-            - Preserves message order and relationships
-        """
-        return copy.deepcopy(self._full_history)
-
-    def set_history(self, messages: list[Message]) -> None:
-        """Set the conversation history.
-
-        Replaces the current conversation history with the provided messages.
-        This method is useful for restoring a previous conversation state or
-        initializing a new conversation with existing context.
+        The method implements the main processing loop that:
+        - Checks iteration and switch limits
+        - Verifies agent state and handles switches
+        - Creates agent context with history
+        - Processes agent response and tool calls
+        - Updates history and prepares for next iteration
+        - Handles agent state transitions
 
         Args:
-            messages: List of messages to set as the conversation history.
+            iteration_count: Current number of processing iterations.
+                Used to enforce maximum iteration limits. Defaults to 0.
+            agent_switch_count: Number of agent switches performed.
+                Used to enforce maximum switch limits. Defaults to 0.
+
+        Yields:
+            AgentResponse objects containing:
+            - Response content and deltas
+            - Tool calls and their results
+            - Usage statistics if enabled
+            - Cost information if enabled
 
         Notes:
-            - Replaces both full and working history
-            - Creates a deep copy of provided messages
-            - Clears any existing history
-            - Should be called before starting a new conversation
+            - Processing continues until no active agents remain
+            - Agents can become stale and trigger switches
+            - Empty responses are handled gracefully
+            - The loop respects max_iterations limit
+            - Agent switches respect max_agent_switches limit
         """
-        self._full_history = copy.deepcopy(messages)
-        self._working_history = copy.deepcopy(messages)
+        # TODO: Simplify this loop
+        while iteration_count < self.max_iterations:
+            iteration_count += 1
+            if not self._active_agent:
+                break
 
-    def pop_last_message(self) -> Message | None:
-        """Remove and return the last message from the history.
+            agent_id = self._active_agent.id
+            if self._active_agent.state == AgentState.STALE:
+                agent_switch_count += 1
+                agent_switched = await self._handle_agent_switch(agent_switch_count)
+                if not agent_switched:
+                    log_verbose("No more agents to switch to, stopping")
+                    break
 
-        Removes the most recent message from both the full and working history.
-        This is useful for undoing the last interaction or removing unwanted
-        messages.
+                next_agent_id = self._active_agent.id
+                log_verbose(f"Agent {agent_id} is stale, switching to agent {next_agent_id}")
+            else:
+                log_verbose(f"Agent {agent_id} is active, processing response")
 
-        Returns:
-            The last message if history is not empty, None otherwise.
+            agent_messages = await self._prepare_agent_context(
+                agent=self._active_agent,
+                context_variables=self._context_variables,
+            )
 
-        Notes:
-            - Modifies both full and working history
-            - Returns None if history is empty
-            - Does not affect agent messages or state
-        """
-        if not self._full_history:
-            return None
+            last_agent_response: AgentResponse | None = None
+            async for agent_response in self._process_agent_response(
+                agent=self._active_agent,
+                agent_messages=agent_messages,
+                context_variables=self._context_variables,
+            ):
+                yield agent_response
+                last_agent_response = agent_response
 
-        last_message = self._full_history.pop()
-        if self._working_history and self._working_history[-1] == last_message:
-            self._working_history.pop()
+            if not last_agent_response:
+                continue
 
-        return last_message
+            if last_agent_response.content or last_agent_response.tool_calls:
+                new_messages = await self._process_assistant_response(
+                    agent=self._active_agent,
+                    content=last_agent_response.content,
+                    context_variables=self._context_variables,
+                    tool_calls=last_agent_response.tool_calls,
+                )
 
-    def append_message(self, message: Message) -> None:
-        """Append a new message to the conversation history.
+                for message in new_messages:
+                    self.message_store.add_message(message)
+            else:
+                # We might not want to do this, but it's a good fallback
+                # Please consider removing this if it leads to unexpected behavior
+                self.message_store.add_message(Message(role="assistant", content="<empty>"))
+                log_verbose(
+                    "No content was generated, appending empty message",
+                    level="WARNING",
+                )
 
-        Adds a new message to both the full and working history. This method
-        is useful for manually adding messages to the conversation, such as
-        system announcements or external events.
+            if not last_agent_response.tool_calls:
+                self._active_agent.state = AgentState.STALE
 
-        Args:
-            message: Message to append to the history.
-
-        Notes:
-            - Adds to both full and working history
-            - Creates a deep copy of the message
-            - Does not trigger history management
-            - Does not affect agent state
-        """
-        message_copy = copy.deepcopy(message)
-        self._full_history.append(message_copy)
-        self._working_history.append(message_copy)
-
-    async def stream(
+    async def _create_swarm_stream(
         self,
         agent: Agent,
-        prompt: str,
+        prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream responses from a swarm of agents.
+        """Create the base swarm execution stream.
 
-        This is the main entry point for streaming responses from a swarm of agents.
-        The swarm processes the prompt through a series of agents, where each agent
-        can contribute to the response or delegate to other agents. The process
-        continues until a complete response is generated or an error occurs.
-
-        The swarm maintains conversation state and handles:
-        - Agent initialization and switching
-        - Message history management
-        - Response streaming and accumulation
-        - Tool call execution
-        - Error recovery and retries
+        Internal method that creates the underlying async generator for SwarmStream.
+        Handles the complete streaming lifecycle:
+        - Conversation initialization
+        - Agent response processing
+        - Error handling and recovery
+        - Resource cleanup
 
         Args:
-            agent: Initial agent to handle the conversation.
-            prompt: The user's input prompt to process.
-            messages: Optional list of previous conversation messages for context.
-                If provided, these messages are used as conversation history.
-            context_variables: Optional variables for dynamic instruction resolution
-                and tool execution. These variables are passed to agents and tools.
-            cleanup: Whether to clear agent state after completion.
+            agent: Initial agent for handling conversations.
+            prompt: Optional user prompt to process.
+            messages: Optional list of previous conversation messages.
+            context_variables: Optional variables for dynamic resolution.
+            cleanup: Whether to reset agent state after completion. Defaults to True.
 
         Yields:
-            AgentResponse objects containing:
-            - Current response delta with content updates
-            - Accumulated content so far
-            - Tool calls being processed
-            - Usage statistics if enabled
-            - Cost information if enabled
+            AgentResponse objects containing streaming updates.
 
         Raises:
-            SwarmError: If an unrecoverable error occurs during processing.
-            ContextLengthError: If the context becomes too large to process.
-            MaxAgentSwitchesError: If too many agent switches occur.
-            MaxResponseContinuationsError: If response requires too many continuations.
+            SwarmError: If neither prompt nor messages are provided.
+            ContextLengthError: If context becomes too large.
+            MaxAgentSwitchesError: If too many switches occur.
+            MaxResponseContinuationsError: If response needs too many continuations.
 
         Notes:
-            - The swarm uses a queue of agents to handle complex tasks
-            - Each agent can process the input or delegate to other agents
-            - The conversation history is preserved across agent switches
-            - The stream can be interrupted at any point
-            - Errors during processing may be recovered automatically
-
-        Examples:
-            Basic usage:
-                ```python
-                def get_instructions(context: ContextVariables) -> str:
-                    return f"Help {context['user_name']} with math."
-
-
-                def add(a: float, b: float, context_variables: ContextVariables) -> float:
-                    return a + b
-
-
-                agent = Agent(
-                    id="math",
-                    instructions=get_instructions,
-                    llm=LLM(
-                        model="gpt-4o",
-                        tools=[add],
-                    ),
-                )
-
-                async for response in swarm.stream(
-                    agent=agent,
-                    prompt="What is 2 + 2?",
-                    context_variables=ContextVariables({"user_name": "Alice"}),
-                ):
-                    print(response.content)
-                ```
+            - This is an internal method used by stream()
+            - Handles the core streaming functionality
+            - Manages conversation state and cleanup
+            - Provides error handling and recovery
+            - Used as the base for SwarmStream wrapper
         """
-        await self._initialize_conversation(
-            agent=agent,
-            prompt=prompt,
-            messages=messages,
-            context_variables=context_variables,
-        )
-
         try:
-            agent_switch_count = 0
-            while self._active_agent or self._agent_queue:
-                if not self._active_agent:
-                    break
+            self._context_variables.update(context_variables or {})
+            await self._initialize_conversation(
+                agent=agent,
+                prompt=prompt,
+                messages=messages,
+            )
 
-                if self._active_agent.state == "stale":
-                    agent_switch_count += 1
-                    agent_switched = await self._handle_agent_switch(
-                        switch_count=agent_switch_count,
-                        context_variables=self._context_variables,
-                    )
-
-                    if not agent_switched:
-                        break
-
-                last_content = ""
-                last_tool_calls: list[ChatCompletionDeltaToolCall] = []
-
-                async for agent_response in self._process_agent_response(
-                    agent=self._active_agent,
-                    agent_messages=self._agent_messages,
-                    context_variables=self._context_variables,
-                ):
-                    yield agent_response
-                    last_content = agent_response.content or ""
-                    last_tool_calls = agent_response.tool_calls
-
-                new_messages = await self._process_assistant_response(
-                    agent=self._active_agent,
-                    content=last_content,
-                    context_variables=self._context_variables,
-                    tool_calls=last_tool_calls,
-                )
-
-                self._full_history.extend(new_messages)
-                self._working_history.extend(new_messages)
-                self._agent_messages.extend(new_messages)
-
-                await self._update_working_history(self._active_agent)
-
-                if not last_tool_calls and not self._agent_queue:
-                    break
+            async for response in self._stream_agent_execution():
+                yield response
 
         except Exception as e:
             await self.stream_handler.on_error(e, self._active_agent)
             raise
 
         finally:
-            await self.stream_handler.on_complete(self._full_history, self._active_agent)
+            all_messages = self.message_store.get_messages()
+            await self.stream_handler.on_complete(
+                messages=all_messages,
+                agent=self._active_agent,
+            )
 
             if cleanup:
-                self._active_agent = None
-                self._agent_messages = []
-                self._agent_queue.clear()
+                self.cleanup()
+
+    # ================================================
+    # MARK: Public Interface
+    # ================================================
+
+    def stream(
+        self,
+        agent: Agent,
+        prompt: str | None = None,
+        messages: list[Message] | None = None,
+        context_variables: ContextVariables | None = None,
+        cleanup: bool = True,
+    ) -> SwarmStream:
+        """Stream responses from a swarm of agents.
+
+        This is the main entry point for streaming responses from a swarm of agents.
+        Returns a SwarmStream that provides both streaming and result collection:
+        - Async iteration for real-time updates
+        - Final result accumulation
+        - Usage and cost tracking
+        - Parsed content handling
+        - Error recovery
+
+        The SwarmStream maintains internal state to:
+        - Track the last received response
+        - Accumulate complete content
+        - Combine usage statistics
+        - Aggregate cost information
+        - Handle parsed content formats
+
+        Args:
+            agent: Initial agent for handling conversations.
+            prompt: Optional user prompt to process.
+            messages: Optional list of previous conversation messages.
+            context_variables: Optional variables for dynamic resolution.
+            cleanup: Whether to reset agent state after completion. Defaults to True.
+
+        Returns:
+            SwarmStream wrapper providing both streaming and result capabilities.
+
+        Raises:
+            SwarmError: If neither prompt nor messages are provided.
+            ContextLengthError: If context becomes too large.
+            MaxAgentSwitchesError: If too many switches occur.
+            MaxResponseContinuationsError: If response needs too many continuations.
+
+        Notes:
+            - SwarmStream supports both streaming and final result modes
+            - Internal state tracks complete response accumulation
+            - Usage and cost statistics are combined properly
+            - Parsed content is handled according to format rules
+            - The stream can be consumed multiple times if needed
+
+        Examples:
+            Streaming mode:
+                ```python
+                async for response in swarm.stream(agent, prompt="Hello"):
+                    print(response.delta.content)  # Print updates as they arrive
+                ```
+
+            Result collection:
+                ```python
+                stream = swarm.stream(agent, prompt="Hello")
+                result = await stream.get_result()  # Wait for complete response
+                print(result.content)  # Print final content
+                ```
+
+            Combined usage:
+                ```python
+                stream = swarm.stream(agent, prompt="Hello")
+
+                # Stream partial responses
+                async for response in stream:
+                    print("Partial:", response.delta.content)
+
+                # Get final result
+                result = await stream.get_result()
+                print("Final:", result.content)
+                ```
+        """
+        return SwarmStream(
+            stream=self._create_swarm_stream(
+                agent=agent,
+                prompt=prompt,
+                messages=messages,
+                context_variables=context_variables,
+                cleanup=cleanup,
+            ),
+        )
 
     async def execute(
         self,
         agent: Agent,
-        prompt: str,
+        prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
         cleanup: bool = True,
-    ) -> ConversationState:
+    ) -> AgentExecutionResult:
         """Execute a prompt and return the complete response.
 
         This is a convenience method that wraps the stream() method to provide
@@ -1373,7 +1465,7 @@ class Swarm:
                 If provided, these messages are used as conversation history.
             context_variables: Optional variables for dynamic instruction resolution
                 and tool execution. These variables are passed to agents and tools.
-            cleanup: Whether to clear agent state after completion.
+            cleanup: Whether to clear agent state after completion. Defaults to True.
 
         Returns:
             ConversationState containing:
@@ -1414,11 +1506,7 @@ class Swarm:
                 print(result.content)  # Response will be personalized for Bob
                 ```
         """
-        full_response = ""
-        full_usage: Usage | None = None
-        response_cost: ResponseCost | None = None
-
-        response_stream = self.stream(
+        stream = self.stream(
             agent=agent,
             prompt=prompt,
             messages=messages,
@@ -1426,21 +1514,80 @@ class Swarm:
             cleanup=cleanup,
         )
 
-        async for agent_response in response_stream:
-            if agent_response.content:
-                full_response = agent_response.content
-            if agent_response.usage:
-                full_usage = combine_usage(full_usage, agent_response.usage)
-            if agent_response.response_cost:
-                response_cost = combine_response_cost(response_cost, agent_response.response_cost)
+        return await stream.get_result()
 
-        return ConversationState(
-            content=full_response,
-            agent=self._active_agent,
-            agent_messages=self._agent_messages,
-            agent_queue=list(self._agent_queue),
-            messages=self._full_history,
-            context_variables=self._context_variables,
-            usage=full_usage,
-            response_cost=response_cost,
-        )
+    def cleanup(
+        self,
+        clear_agents: bool = True,
+        clear_context: bool = False,
+        clear_messages: bool = False,
+    ) -> None:
+        """Clean up swarm state and reset components.
+
+        Performs selective cleanup of the swarm's internal state based on flags:
+        - Agent states and queue management
+        - Context variables clearing
+        - Message storage clearing
+
+        Args:
+            clear_agents: Whether to reset agent states and clear queue.
+                If True, sets all agents to IDLE and empties queue. Defaults to True.
+            clear_context: Whether to clear context variables.
+                If True, removes all stored variables. Defaults to False.
+            clear_messages: Whether to clear message store.
+                If True, removes all stored messages. Defaults to False.
+
+        Notes:
+            - Agent cleanup resets active agent and empties queue
+            - Context and message clearing are optional
+            - Partial cleanup allows for state preservation
+            - Default behavior only clears agent states
+
+        Examples:
+            Basic cleanup (reset agents only):
+                ```python
+                # Reset agent states while preserving context and messages
+                swarm.cleanup()
+                ```
+
+            Targeted cleanup:
+                ```python
+                # Reset agents and clear context variables
+                swarm.cleanup(clear_context=True)
+                ```
+
+            Complete reset:
+                ```python
+                # Reset everything: agents, context, and messages
+                swarm.cleanup(
+                    clear_agents=True,
+                    clear_context=True,
+                    clear_messages=True,
+                )
+                ```
+
+            Preserve agents:
+                ```python
+                # Clear context and messages while preserving agent states
+                swarm.cleanup(
+                    clear_agents=False,
+                    clear_context=True,
+                    clear_messages=True,
+                )
+                ```
+        """
+        if clear_agents:
+            if self._active_agent:
+                self._active_agent.state = AgentState.IDLE
+                self._active_agent = None
+
+            for agent in self._agent_queue:
+                agent.state = AgentState.IDLE
+
+            self._agent_queue.clear()
+
+        if clear_context:
+            self._context_variables.clear()
+
+        if clear_messages:
+            self.message_store.clear()

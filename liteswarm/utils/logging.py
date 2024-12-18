@@ -211,9 +211,9 @@ def should_print(level: LogLevel) -> bool:
             ```python
             # export LITESWARM_VERBOSE=WARNING
 
-            should_print("ERROR")    # Returns True
+            should_print("ERROR")  # Returns True
             should_print("WARNING")  # Returns True
-            should_print("INFO")     # Returns False
+            should_print("INFO")  # Returns False
             ```
 
         Disabled verbose:
@@ -332,6 +332,7 @@ def log_verbose(
             ```python
             def my_print(msg: str) -> None:
                 sys.stderr.write(f"{msg}\\n")
+
 
             log_verbose("Error", level="ERROR", print_fn=my_print)
             ```
