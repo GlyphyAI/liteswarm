@@ -29,6 +29,7 @@ dependencies = [
     "griffe>=1.5.1",
     "json-repair>=0.30.2",
     "litellm>=1.52.2",
+    "numpy>=2.2.0",
     "orjson>=3.10.11",
     "pydantic>=2.9.2",
 ]
