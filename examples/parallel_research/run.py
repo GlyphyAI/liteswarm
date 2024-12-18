@@ -7,9 +7,10 @@
 import asyncio
 import os
 import random
+from collections.abc import Sequence
 from time import sleep
 
-from liteswarm.core import Swarm
+from liteswarm.core import LiteSwarmStreamHandler, Swarm
 from liteswarm.types import (
     LLM,
     Agent,
@@ -18,7 +19,7 @@ from liteswarm.types import (
     Message,
     ToolCallResult,
 )
-from liteswarm.utils import enable_logging
+from liteswarm.utils.logging import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
@@ -36,7 +37,7 @@ Remember to use parallel tool calls efficiently to gather data quickly.
 """.strip()
 
 
-class ConsoleStreamHandler:
+class ConsoleStreamHandler(LiteSwarmStreamHandler):
     async def on_stream(
         self,
         agent_response: AgentResponse,
@@ -60,7 +61,7 @@ class ConsoleStreamHandler:
 
     async def on_complete(
         self,
-        messages: list[Message],
+        messages: Sequence[Message],
         agent: Agent | None,
     ) -> None:
         print(f"\n[{agent.id if agent else 'unknown'}] Completed")

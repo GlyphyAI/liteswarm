@@ -12,7 +12,8 @@ from pydantic import BaseModel
 
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent, ContextVariables, ToolResult
-from liteswarm.utils import enable_logging
+from liteswarm.utils.logging import enable_logging
+from liteswarm.utils.messages import dump_messages
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
@@ -38,8 +39,8 @@ async def instructions_example() -> None:
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = swarm.memory.get_working_history()
-    print(messages[-1].model_dump_json(indent=2))
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 async def agent_switching_example() -> None:
@@ -90,9 +91,8 @@ async def agent_switching_example() -> None:
         context_variables=ContextVariables(user_name="John"),
     )
 
-    working_history = swarm.memory.get_working_history()
-    messages = [msg.model_dump() for msg in working_history]
-    print(json.dumps(messages, indent=2, ensure_ascii=False))
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2, ensure_ascii=False))
 
 
 async def error_handling_example() -> None:
@@ -119,8 +119,8 @@ async def error_handling_example() -> None:
         prompt="What is the weather in Orgrimmar?",
     )
 
-    messages = swarm.memory.get_working_history()
-    print(messages[-1].model_dump_json(indent=2))
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 async def pydantic_example() -> None:
@@ -149,8 +149,8 @@ async def pydantic_example() -> None:
         prompt="What is the name of a user with id 1?",
     )
 
-    working_history = swarm.memory.get_working_history()
-    print(working_history[-1].model_dump_json(indent=2))
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 async def run_selected_example() -> None:

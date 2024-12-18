@@ -10,7 +10,7 @@ import os
 from liteswarm.core import Swarm
 from liteswarm.experimental import SwarmTeam
 from liteswarm.types import ArtifactStatus
-from liteswarm.utils import enable_logging
+from liteswarm.utils.logging import enable_logging
 
 from .handlers import InteractivePlanFeedbackHandler, SwarmStreamHandler, SwarmTeamStreamHandler
 from .planning import create_planning_agent
