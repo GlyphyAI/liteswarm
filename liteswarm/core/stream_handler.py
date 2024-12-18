@@ -4,6 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
@@ -227,7 +228,7 @@ class SwarmStreamHandler(Protocol):
 
     async def on_complete(
         self,
-        messages: list[Message],
+        messages: Sequence[Message],
         agent: Agent | None,
     ) -> None:
         """Handle completion of a conversation.
@@ -308,5 +309,5 @@ class LiteSwarmStreamHandler(SwarmStreamHandler):
     async def on_error(self, error: Exception, agent: Agent | None) -> None:
         pass
 
-    async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
+    async def on_complete(self, messages: Sequence[Message], agent: Agent | None) -> None:
         pass
