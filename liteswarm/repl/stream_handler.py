@@ -5,6 +5,7 @@
 # https://opensource.org/licenses/MIT.
 
 import sys
+from collections.abc import Sequence
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
@@ -163,7 +164,7 @@ class ReplStreamHandler(SwarmStreamHandler):
 
     async def on_complete(
         self,
-        messages: list[Message],
+        messages: Sequence[Message],
         agent: Agent | None,
     ) -> None:
         """Handle completion of agent tasks.
