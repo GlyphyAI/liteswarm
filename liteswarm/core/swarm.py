@@ -16,13 +16,20 @@ import orjson
 from litellm import CustomStreamWrapper, acompletion
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
+from litellm.utils import token_counter
 from pydantic import BaseModel
 
 from liteswarm.core.context_manager import ContextManager, LiteContextManager
 from liteswarm.core.message_store import LiteMessageStore, MessageStore
 from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from liteswarm.core.swarm_stream import SwarmStream
-from liteswarm.types.exceptions import CompletionError, ContextLengthError, SwarmError
+from liteswarm.types.exceptions import (
+    CompletionError,
+    ContextLengthError,
+    MaxAgentSwitchesError,
+    MaxResponseContinuationsError,
+    SwarmError,
+)
 from liteswarm.types.llm import ResponseFormat, ResponseFormatJsonSchema, ResponseSchema
 from liteswarm.types.misc import JSON
 from liteswarm.types.swarm import (
@@ -749,7 +756,7 @@ class Swarm:
         continuation_count: int,
         accumulated_content: str,
         context_variables: ContextVariables,
-    ) -> CustomStreamWrapper | None:
+    ) -> CustomStreamWrapper:
         """Handle response continuation with proper limits and tracking.
 
         Manages the continuation process with safeguards:
@@ -766,15 +773,19 @@ class Swarm:
             context_variables: Context for dynamic resolution.
 
         Returns:
-            New stream for continuation, or None if max continuations reached.
+            New stream for continuation.
+
+        Raises:
+            MaxResponseContinuationsError: If maximum continuations reached.
         """
         if continuation_count >= self.max_response_continuations:
-            log_verbose(
-                f"Maximum response continuations ({self.max_response_continuations}) reached",
-                level="WARNING",
+            generated_tokens = token_counter(model=agent.llm.model, text=accumulated_content)
+            raise MaxResponseContinuationsError(
+                message=f"Maximum response continuations ({self.max_response_continuations}) reached",
+                continuation_count=continuation_count,
+                max_continuations=self.max_response_continuations,
+                total_tokens=generated_tokens,
             )
-
-            return None
 
         log_verbose(
             f"Response continuation {continuation_count}/{self.max_response_continuations}",
@@ -1077,9 +1088,9 @@ class Swarm:
 
         except ContextWindowExceededError as e:
             raise ContextLengthError(
-                "Context window exceeded even after optimization",
-                original_error=e,
+                message="Context window exceeded even after optimization",
                 current_length=len(optimized),
+                original_error=e,
             ) from e
 
     # ================================================
