@@ -1097,37 +1097,62 @@ class Swarm:
     # MARK: Agent Management
     # ================================================
 
+    async def _activate_agent(
+        self,
+        agent: Agent,
+        context_variables: ContextVariables | None = None,
+        add_system_message: bool = True,
+    ) -> None:
+        """Activate a new agent and handle core state changes.
+
+        Handles the core agent activation process:
+        - Sets agent as active
+        - Updates agent state to ACTIVE
+        - Optionally adds system message with agent instructions
+
+        Args:
+            agent: Agent to activate.
+            context_variables: Optional context for dynamic instruction resolution.
+            add_system_message: Whether to add system message to history. Defaults to True.
+        """
+        self._active_agent = agent
+        self._active_agent.state = AgentState.ACTIVE
+
+        if add_system_message:
+            instructions = unwrap_instructions(agent.instructions, context_variables)
+            self.message_store.add_message(Message(role="system", content=instructions))
+
     async def _initialize_conversation(
         self,
         agent: Agent,
         prompt: str | None = None,
         messages: list[Message] | None = None,
+        context_variables: ContextVariables | None = None,
     ) -> None:
         """Initialize and set up a new conversation session.
 
         Prepares the conversation environment by:
         - Loading existing messages if provided
+        - Activating the agent (adds system message if needed)
         - Adding initial prompt to history if provided
-        - Setting up initial agent state
-        - Managing agent queue for potential switches
 
         Args:
-            agent: Initial agent to handle the conversation.
-                Will be set as active agent if none exists,
-                or will be queued if an active agent exists.
+            agent: Agent to handle the conversation.
+                Will become the active agent.
             prompt: Optional starting message from the user.
                 Added to history if provided. Defaults to None.
             messages: Optional pre-existing conversation history.
                 Loaded into message store if provided. Defaults to None.
+            context_variables: Optional context for dynamic resolution.
+                Used to resolve agent instructions. Defaults to None.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
 
         Notes:
             - At least one of prompt or messages must be provided
-            - Existing history is preserved if provided
-            - Active agent is set to ACTIVE state
-            - New agents are queued if an active agent exists
+            - System message is only added if agent changes
+            - Message order is preserved: system -> history -> prompt
         """
         if not messages and not prompt:
             raise SwarmError("Please provide at least one message or prompt")
@@ -1135,65 +1160,14 @@ class Swarm:
         if messages:
             self.message_store.set_messages(messages)
 
+        await self._activate_agent(
+            agent=agent,
+            context_variables=context_variables,
+            add_system_message=agent != self._active_agent,
+        )
+
         if prompt:
             self.message_store.add_message(Message(role="user", content=prompt))
-
-        # TODO: Use agent_queue to switch agents:
-        # - Start with null active agent - get next agent from queue
-        # - Iterate until active agent is stale - get next agent from queue
-        # - Continue until we run out of agents in queue
-        if self._active_agent is None:
-            self._active_agent = agent
-            self._active_agent.state = AgentState.ACTIVE
-        else:
-            self._active_agent.state = AgentState.ACTIVE
-            if self._active_agent != agent:
-                agent.state = AgentState.IDLE
-                self._agent_queue.append(agent)
-
-    async def _handle_agent_switch(self, switch_count: int) -> bool:
-        """Handle transition between agents in the swarm.
-
-        Manages agent switching by:
-        - Validating switch count against maximum limit
-        - Transitioning from current to next agent in queue
-        - Updating agent states appropriately
-        - Notifying stream handler of the switch
-
-        Args:
-            switch_count: Current number of agent switches performed.
-                Used to enforce maximum switch limit.
-
-        Returns:
-            True if switch was successful, False otherwise.
-
-        Notes:
-            - Enforces max_agent_switches limit
-            - Next agent is taken from front of queue
-            - Previous agent's state remains unchanged
-            - Next agent is set to ACTIVE state
-            - Stream handler is notified of switch
-        """
-        if switch_count >= self.max_agent_switches:
-            log_verbose(
-                f"Maximum agent switches ({self.max_agent_switches}) reached",
-                level="WARNING",
-            )
-            return False
-
-        if not self._agent_queue:
-            return False
-
-        log_verbose(f"Agent switch {switch_count}/{self.max_agent_switches}")
-
-        previous_agent = self._active_agent
-        next_agent = self._agent_queue.popleft()
-        next_agent.state = AgentState.ACTIVE
-        self._active_agent = next_agent
-
-        await self.stream_handler.on_agent_switch(previous_agent, next_agent)
-
-        return True
 
     async def _stream_agent_execution(
         self,
@@ -1203,19 +1177,11 @@ class Swarm:
         """Stream responses from active and subsequent agents in the swarm.
 
         Manages the core response generation loop of the swarm, handling:
-        - Sequential agent responses and transitions
-        - Agent state management and switching
+        - Agent activation and switching
         - Response generation and streaming
         - Tool call processing and execution
         - Message history updates
-
-        The method implements the main processing loop that:
-        - Checks iteration and switch limits
-        - Verifies agent state and handles switches
-        - Creates agent context with history
-        - Processes agent response and tool calls
-        - Updates history and prepares for next iteration
-        - Handles agent state transitions
+        - State transitions
 
         Args:
             iteration_count: Current number of processing iterations.
@@ -1230,31 +1196,43 @@ class Swarm:
             - Usage statistics if enabled
             - Cost information if enabled
 
+        Raises:
+            SwarmError: If no active agent is available.
+            MaxAgentSwitchesError: If maximum number of agent switches is exceeded.
+
         Notes:
-            - Processing continues until no active agents remain
-            - Agents can become stale and trigger switches
-            - Empty responses are handled gracefully
-            - The loop respects max_iterations limit
-            - Agent switches respect max_agent_switches limit
+            - Agents become STALE when they complete without tool calls
+            - Agent switches trigger system message additions
+            - Empty responses are marked with <empty> placeholder
+            - Processing stops when queue is empty or limits are reached
         """
-        # TODO: Simplify this loop
+        if not self._active_agent:
+            raise SwarmError("No active agent available to process messages")
+
+        switch_history: list[str] = [self._active_agent.id]
         while iteration_count < self.max_iterations:
             iteration_count += 1
-            if not self._active_agent:
-                break
-
-            agent_id = self._active_agent.id
             if self._active_agent.state == AgentState.STALE:
-                agent_switch_count += 1
-                agent_switched = await self._handle_agent_switch(agent_switch_count)
-                if not agent_switched:
-                    log_verbose("No more agents to switch to, stopping")
+                if agent_switch_count >= self.max_agent_switches:
+                    raise MaxAgentSwitchesError(
+                        message=f"Maximum number of agent switches ({self.max_agent_switches}) exceeded",
+                        switch_count=agent_switch_count,
+                        max_switches=self.max_agent_switches,
+                        switch_history=switch_history,
+                    )
+
+                if not self._agent_queue:
+                    log_verbose("No more agents in queue, stopping execution")
                     break
 
-                next_agent_id = self._active_agent.id
-                log_verbose(f"Agent {agent_id} is stale, switching to agent {next_agent_id}")
-            else:
-                log_verbose(f"Agent {agent_id} is active, processing response")
+                previous_agent = self._active_agent
+                next_agent = self._agent_queue.popleft()
+                agent_switch_count += 1
+                switch_history.append(next_agent.id)
+
+                log_verbose(f"Switching from agent {previous_agent.id} to {next_agent.id}")
+                await self._activate_agent(next_agent, self._context_variables)
+                await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
             agent_messages = await self._prepare_agent_context(
                 agent=self._active_agent,
@@ -1286,9 +1264,10 @@ class Swarm:
             else:
                 # We might not want to do this, but it's a good fallback
                 # Please consider removing this if it leads to unexpected behavior
-                self.message_store.add_message(Message(role="assistant", content="<empty>"))
+                empty_message = Message(role="assistant", content="<empty>")
+                self.message_store.add_message(empty_message)
                 log_verbose(
-                    "No content was generated, appending empty message",
+                    "Empty response received, appending placeholder message",
                     level="WARNING",
                 )
 
@@ -1309,7 +1288,7 @@ class Swarm:
         - Conversation initialization
         - Agent response processing
         - Error handling and recovery
-        - Resource cleanup
+        - Stream event notifications
 
         Args:
             agent: Initial agent for handling conversations.
@@ -1328,10 +1307,9 @@ class Swarm:
 
         Notes:
             - This is an internal method used by stream()
-            - Handles the core streaming functionality
-            - Manages conversation state and cleanup
-            - Provides error handling and recovery
-            - Used as the base for SwarmStream wrapper
+            - State is preserved between conversations
+            - Stream handler is notified of completion/errors
+            - Cleanup must be performed manually when needed
         """
         try:
             self._context_variables.update(context_variables or {})
@@ -1339,6 +1317,7 @@ class Swarm:
                 agent=agent,
                 prompt=prompt,
                 messages=messages,
+                context_variables=self._context_variables,
             )
 
             async for response in self._stream_agent_execution():
@@ -1398,13 +1377,6 @@ class Swarm:
             MaxAgentSwitchesError: If too many switches occur.
             MaxResponseContinuationsError: If response needs too many continuations.
 
-        Notes:
-            - SwarmStream supports both streaming and final result modes
-            - Internal state tracks complete response accumulation
-            - Usage and cost statistics are combined properly
-            - Parsed content is handled according to format rules
-            - The stream can be consumed multiple times if needed
-
         Examples:
             Streaming mode:
                 ```python
@@ -1431,6 +1403,13 @@ class Swarm:
                 result = await stream.get_result()
                 print("Final:", result.content)
                 ```
+
+        Notes:
+            - SwarmStream supports both streaming and final result modes
+            - Internal state tracks complete response accumulation
+            - Usage and cost statistics are combined properly
+            - Parsed content is handled according to format rules
+            - The stream can be consumed multiple times if needed
         """
         return SwarmStream(
             stream=self._create_swarm_stream(
@@ -1480,12 +1459,6 @@ class Swarm:
             MaxAgentSwitchesError: If too many agent switches occur.
             MaxResponseContinuationsError: If response requires too many continuations.
 
-        Notes:
-            - This method blocks until the complete response is generated
-            - All streaming responses are accumulated internally
-            - The same error handling and recovery as stream() applies
-            - The conversation history is preserved in the same way
-
         Examples:
             Basic usage:
                 ```python
@@ -1506,6 +1479,12 @@ class Swarm:
                 )
                 print(result.content)  # Response will be personalized for Bob
                 ```
+
+        Notes:
+            - This method blocks until the complete response is generated
+            - All streaming responses are accumulated internally
+            - The same error handling and recovery as stream() applies
+            - The conversation history is preserved in the same way
         """
         stream = self.stream(
             agent=agent,
@@ -1530,35 +1509,26 @@ class Swarm:
         - Message storage clearing
 
         Args:
-            clear_agents: Whether to reset agent states and clear queue.
-                If True, sets all agents to IDLE and empties queue. Defaults to True.
+            clear_agents: Whether to reset all agent states and clear queue.
+                If True, resets active agent and empties queue. Defaults to True.
             clear_context: Whether to clear context variables.
                 If True, removes all stored variables. Defaults to False.
             clear_messages: Whether to clear message store.
                 If True, removes all stored messages. Defaults to False.
 
-        Notes:
-            - Agent cleanup resets active agent and empties queue
-            - Context and message clearing are optional
-            - Partial cleanup allows for state preservation
-            - Default behavior only clears agent states
-
         Examples:
-            Basic cleanup (reset agents only):
+            Basic cleanup (just agents):
                 ```python
-                # Reset agent states while preserving context and messages
-                swarm.cleanup()
+                # After executing a conversation
+                result = await swarm.execute(agent, prompt="Hello")
+
+                # Reset agent states and queue
+                swarm.cleanup()  # Only clears agents by default
                 ```
 
-            Targeted cleanup:
+            Full cleanup:
                 ```python
-                # Reset agents and clear context variables
-                swarm.cleanup(clear_context=True)
-                ```
-
-            Complete reset:
-                ```python
-                # Reset everything: agents, context, and messages
+                # Clear everything for a fresh start
                 swarm.cleanup(
                     clear_agents=True,
                     clear_context=True,
@@ -1566,15 +1536,37 @@ class Swarm:
                 )
                 ```
 
-            Preserve agents:
+            Selective cleanup:
                 ```python
-                # Clear context and messages while preserving agent states
+                # Keep conversation history but reset agents and context
                 swarm.cleanup(
-                    clear_agents=False,
+                    clear_agents=True,
                     clear_context=True,
-                    clear_messages=True,
+                    clear_messages=False,  # Preserve message history
+                )
+
+                # Start new conversation with same context
+                result = await swarm.execute(
+                    agent=new_agent,
+                    prompt="Continue from previous context",
                 )
                 ```
+
+            Between conversations:
+                ```python
+                # First conversation
+                result1 = await swarm.execute(agent1, prompt="Task 1")
+                swarm.cleanup(clear_messages=True)  # Clear previous conversation
+
+                # Second conversation starts fresh
+                result2 = await swarm.execute(agent2, prompt="Task 2")
+                ```
+
+        Notes:
+            - Agent cleanup resets both active agent and queue
+            - Context and message clearing are optional
+            - Must be called explicitly when cleanup is needed
+            - Partial cleanup allows for state preservation
         """
         if clear_agents:
             if self._active_agent:
