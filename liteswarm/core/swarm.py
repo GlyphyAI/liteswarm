@@ -1301,7 +1301,6 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-        cleanup: bool = True,
     ) -> AsyncGenerator[AgentResponse, None]:
         """Create the base swarm execution stream.
 
@@ -1317,7 +1316,6 @@ class Swarm:
             prompt: Optional user prompt to process.
             messages: Optional list of previous conversation messages.
             context_variables: Optional variables for dynamic resolution.
-            cleanup: Whether to reset agent state after completion. Defaults to True.
 
         Yields:
             AgentResponse objects containing streaming updates.
@@ -1357,9 +1355,6 @@ class Swarm:
                 agent=self._active_agent,
             )
 
-            if cleanup:
-                self.cleanup()
-
     # ================================================
     # MARK: Public Interface
     # ================================================
@@ -1370,7 +1365,6 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-        cleanup: bool = True,
     ) -> SwarmStream:
         """Stream responses from a swarm of agents.
 
@@ -1394,7 +1388,6 @@ class Swarm:
             prompt: Optional user prompt to process.
             messages: Optional list of previous conversation messages.
             context_variables: Optional variables for dynamic resolution.
-            cleanup: Whether to reset agent state after completion. Defaults to True.
 
         Returns:
             SwarmStream wrapper providing both streaming and result capabilities.
@@ -1445,7 +1438,6 @@ class Swarm:
                 prompt=prompt,
                 messages=messages,
                 context_variables=context_variables,
-                cleanup=cleanup,
             ),
         )
 
@@ -1455,7 +1447,6 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-        cleanup: bool = True,
     ) -> AgentExecutionResult:
         """Execute a prompt and return the complete response.
 
@@ -1476,7 +1467,6 @@ class Swarm:
                 If provided, these messages are used as conversation history.
             context_variables: Optional variables for dynamic instruction resolution
                 and tool execution. These variables are passed to agents and tools.
-            cleanup: Whether to clear agent state after completion. Defaults to True.
 
         Returns:
             ConversationState containing:
@@ -1522,7 +1512,6 @@ class Swarm:
             prompt=prompt,
             messages=messages,
             context_variables=context_variables,
-            cleanup=cleanup,
         )
 
         return await stream.get_result()
