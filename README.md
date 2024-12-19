@@ -357,6 +357,18 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+> **Note:** LiteSwarm requires explicitly passing the agent you want to use in each `execute()` or `stream()` call. To maintain a conversation with the same agent, pass that agent in subsequent calls. The conversation history is preserved, but the active agent is determined by what you pass to these methods:
+> ```python
+> # Start with agent1
+> result1 = await swarm.execute(agent1, prompt="Start task")
+> 
+> # Continue with agent1
+> result2 = await swarm.execute(agent1, prompt="Continue task")
+> 
+> # Switch to agent2 (history is preserved)
+> result3 = await swarm.execute(agent2, prompt="Review work")
+> ```
+
 ### Agent Teams
 
 The SwarmTeam class (from `liteswarm.experimental`) provides an experimental framework for orchestrating complex agent workflows with automated planning. It follows a two-phase process:
