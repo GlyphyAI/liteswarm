@@ -17,7 +17,10 @@ class SwarmError(Exception):
         Basic error handling:
             ```python
             try:
-                result = await swarm.execute(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except SwarmError as e:
                 logger.error(f"Swarm operation failed: {e}")
             ```
@@ -45,13 +48,16 @@ class CompletionError(SwarmError):
         Basic handling:
             ```python
             try:
-                response = await agent.complete(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except CompletionError as e:
                 logger.error(
                     f"API call failed: {e}",
                     extra={
-                        "error_type": type(e.original_error).__name__,
-                        "details": str(e.original_error),
+                        "error_type": type(e.original_error).__name__ if e.original_error else None,
+                        "details": str(e.original_error) if e.original_error else None,
                     },
                 )
             ```
@@ -59,11 +65,21 @@ class CompletionError(SwarmError):
         Fallback strategy:
             ```python
             try:
-                response = await primary_agent.complete(prompt)
+                result = await swarm.execute(
+                    agent=primary_agent,
+                    prompt="Hello",
+                )
             except CompletionError:
                 # Switch to backup model
-                backup_agent = Agent(id="backup", llm=LLM(model="gpt-4o"))
-                response = await backup_agent.complete(prompt)
+                backup_agent = Agent(
+                    id="backup",
+                    instructions="You are a backup assistant.",
+                    llm=LLM(model="gpt-4o"),
+                )
+                result = await swarm.execute(
+                    agent=backup_agent,
+                    prompt="Hello",
+                )
             ```
     """
 
@@ -93,30 +109,46 @@ class ContextLengthError(SwarmError):
         Basic handling:
             ```python
             try:
-                response = await agent.complete(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except ContextLengthError as e:
                 logger.warning(
                     "Context length exceeded",
                     extra={
                         "current_length": e.current_length,
-                        "error": str(e.original_error),
+                        "error": str(e.original_error) if e.original_error else None,
                     },
                 )
             ```
 
         Automatic model upgrade:
             ```python
-            async def complete_with_fallback(prompt: str, agent: Agent) -> str:
+            async def execute_with_fallback(
+                swarm: Swarm,
+                prompt: str,
+                agent: Agent,
+            ) -> AgentExecutionResult:
                 try:
-                    return await agent.complete(prompt)
+                    return await swarm.execute(
+                        agent=agent,
+                        prompt=prompt,
+                    )
                 except ContextLengthError:
                     # Switch to larger context model
                     large_agent = Agent(
                         id="large-context",
                         instructions=agent.instructions,
-                        llm=LLM(model="claude-3-5-sonnet-20241022", max_tokens=200000),
+                        llm=LLM(
+                            model="claude-3-5-sonnet-20241022",
+                            max_tokens=200000,
+                        ),
                     )
-                    return await large_agent.complete(prompt)
+                    return await swarm.execute(
+                        agent=large_agent,
+                        prompt=prompt,
+                    )
             ```
     """
 
@@ -439,14 +471,17 @@ class MaxAgentSwitchesError(SwarmError):
         Basic error handling:
             ```python
             try:
-                result = await swarm.execute(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except MaxAgentSwitchesError as e:
                 logger.error(
                     f"Too many agent switches: {e.message}",
                     extra={
                         "switch_count": e.switch_count,
                         "max_switches": e.max_switches,
-                        "switch_history": e.switch_history,
+                        "switch_history": e.switch_history,  # List of agent IDs in order
                     },
                 )
             ```
@@ -454,11 +489,20 @@ class MaxAgentSwitchesError(SwarmError):
         Fallback to single agent:
             ```python
             try:
-                result = await swarm.execute(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except MaxAgentSwitchesError as e:
-                # Fall back to primary agent
-                primary = e.switch_history[0] if e.switch_history else default_agent
-                result = await swarm.execute(prompt, agent=primary, allow_switching=False)
+                # Get the first agent from switch history
+                first_agent_id = e.switch_history[0] if e.switch_history else None
+                if first_agent_id:
+                    # Create a new swarm with just the first agent
+                    single_swarm = Swarm(max_agent_switches=0)
+                    result = await single_swarm.execute(
+                        agent=agent,
+                        prompt="Hello",
+                    )
             ```
     """
 
