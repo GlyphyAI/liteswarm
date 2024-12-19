@@ -70,13 +70,13 @@ class CompletionError(SwarmError):
     def __init__(
         self,
         message: str,
-        original_error: Exception,
+        original_error: Exception | None = None,
     ) -> None:
         """Initialize a new CompletionError.
 
         Args:
             message: Human-readable error description.
-            original_error: The underlying exception that caused the failure.
+            original_error: Optional underlying exception that caused the failure.
         """
         super().__init__(message)
         self.original_error = original_error
@@ -124,14 +124,14 @@ class ContextLengthError(SwarmError):
         self,
         message: str,
         current_length: int,
-        original_error: Exception,
+        original_error: Exception | None = None,
     ) -> None:
         """Initialize a new ContextLengthError.
 
         Args:
             message: Human-readable error description.
             current_length: Current context length that exceeded the limit.
-            original_error: The underlying exception that caused the failure.
+            original_error: Optional underlying exception that caused the failure.
         """
         super().__init__(message)
 
@@ -467,7 +467,7 @@ class MaxAgentSwitchesError(SwarmError):
         message: str,
         switch_count: int,
         max_switches: int,
-        switch_history: list[str],
+        switch_history: list[str] | None = None,
         original_error: Exception | None = None,
     ) -> None:
         """Initialize a new MaxAgentSwitchesError.
@@ -476,7 +476,7 @@ class MaxAgentSwitchesError(SwarmError):
             message: Human-readable error description.
             switch_count: Number of switches that occurred.
             max_switches: Maximum allowed switches.
-            switch_history: List of agent IDs in switch order.
+            switch_history: Optional list of agent IDs in switch order.
             original_error: Optional underlying exception.
         """
         super().__init__(message)
