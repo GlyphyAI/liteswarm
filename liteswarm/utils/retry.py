@@ -8,11 +8,11 @@ import asyncio
 import inspect
 import time
 from collections.abc import AsyncGenerator, Awaitable, Callable, Generator, Sequence
-from typing import Any, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from typing_extensions import ParamSpec
 
-from liteswarm.types.exceptions import CompletionError
+from liteswarm.types.exceptions import CompletionError, RetryError
 from liteswarm.utils.logging import log_verbose
 
 P = ParamSpec("P")
@@ -73,21 +73,56 @@ def _log_retry_attempt(
         )
 
 
-def _handle_retry_error(error: Exception, max_retries: int) -> CompletionError:
-    """Create a CompletionError with context about retry attempts.
+def _raise_retry_error(
+    last_error: Exception | None,
+    attempts: int,
+    max_retries: int,
+    start_time: float,
+    initial_delay: float,
+    max_delay: float,
+    backoff_factor: float,
+) -> NoReturn:
+    """Raise appropriate error after all retry attempts are exhausted.
 
     Args:
-        error: The last error that occurred.
-        max_retries: Maximum number of retries that were attempted.
+        last_error: The last error that occurred, if any.
+        attempts: Number of retry attempts made.
+        max_retries: Maximum number of retries allowed.
+        start_time: Time when retry attempts started.
+        initial_delay: Initial delay between retries.
+        max_delay: Maximum delay between retries.
+        backoff_factor: Multiplier for exponential backoff.
 
-    Returns:
-        CompletionError wrapping the original error with retry context.
+    Raises:
+        RetryError: If there was a last error to handle.
+        CompletionError: If no specific error was captured.
     """
-    error_type = error.__class__.__name__
-    return CompletionError(
-        f"Operation failed after {max_retries + 1} attempts: {error_type}",
-        error,
-    )
+    if last_error:
+        total_duration = time.time() - start_time
+        backoff_strategy = {
+            "initial_delay": initial_delay,
+            "max_delay": max_delay,
+            "backoff_factor": backoff_factor,
+        }
+
+        _log_retry_attempt(
+            attempts=attempts,
+            max_retries=max_retries,
+            error=last_error,
+            next_delay=0,
+            is_error=True,
+        )
+
+        error_type = last_error.__class__.__name__
+        raise RetryError(
+            message=f"Operation failed after {attempts} attempts: {error_type}",
+            attempts=attempts,
+            total_duration=total_duration,
+            backoff_strategy=backoff_strategy,
+            original_error=last_error,
+        )
+
+    raise CompletionError("Operation failed with unknown error")
 
 
 async def _async_wrapper(
@@ -116,11 +151,13 @@ async def _async_wrapper(
         Result from the successful function execution.
 
     Raises:
-        CompletionError: If all retry attempts fail.
+        RetryError: If all retry attempts fail.
+        CompletionError: If no specific error was captured.
     """
     attempts = 0
     last_error: Exception | None = None
     delay = initial_delay
+    start_time = time.time()
 
     while attempts <= max_retries:
         try:
@@ -136,11 +173,15 @@ async def _async_wrapper(
             _log_retry_attempt(attempts, max_retries, e, delay)
             await asyncio.sleep(delay)
 
-    if last_error:
-        _log_retry_attempt(attempts, max_retries, last_error, 0, is_error=True)
-        raise _handle_retry_error(last_error, max_retries)
-
-    raise CompletionError("Operation failed with unknown error", Exception("Unknown error"))
+    _raise_retry_error(
+        last_error=last_error,
+        attempts=attempts,
+        max_retries=max_retries,
+        start_time=start_time,
+        initial_delay=initial_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+    )
 
 
 def _sync_wrapper(
@@ -169,11 +210,13 @@ def _sync_wrapper(
         Result from the successful function execution.
 
     Raises:
-        CompletionError: If all retry attempts fail.
+        RetryError: If all retry attempts fail.
+        CompletionError: If no specific error was captured.
     """
     attempts = 0
     last_error: Exception | None = None
     delay = initial_delay
+    start_time = time.time()
 
     while attempts <= max_retries:
         try:
@@ -189,11 +232,15 @@ def _sync_wrapper(
             _log_retry_attempt(attempts, max_retries, e, delay)
             time.sleep(delay)
 
-    if last_error:
-        _log_retry_attempt(attempts, max_retries, last_error, 0, is_error=True)
-        raise _handle_retry_error(last_error, max_retries)
-
-    raise CompletionError("Operation failed with unknown error", Exception("Unknown error"))
+    _raise_retry_error(
+        last_error=last_error,
+        attempts=attempts,
+        max_retries=max_retries,
+        start_time=start_time,
+        initial_delay=initial_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+    )
 
 
 async def _async_gen_wrapper(
@@ -226,11 +273,13 @@ async def _async_gen_wrapper(
         Items from the generator.
 
     Raises:
-        CompletionError: If all retry attempts fail.
+        RetryError: If all retry attempts fail.
+        CompletionError: If no specific error was captured.
     """
     attempts = 0
     last_error: Exception | None = None
     delay = initial_delay
+    start_time = time.time()
 
     while attempts <= max_retries:
         try:
@@ -254,11 +303,15 @@ async def _async_gen_wrapper(
             _log_retry_attempt(attempts, max_retries, e, delay)
             await asyncio.sleep(delay)
 
-    if last_error:
-        _log_retry_attempt(attempts, max_retries, last_error, 0, is_error=True)
-        raise _handle_retry_error(last_error, max_retries)
-
-    raise CompletionError("Operation failed with unknown error", Exception("Unknown error"))
+    _raise_retry_error(
+        last_error=last_error,
+        attempts=attempts,
+        max_retries=max_retries,
+        start_time=start_time,
+        initial_delay=initial_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+    )
 
 
 def _sync_gen_wrapper(
@@ -290,11 +343,13 @@ def _sync_gen_wrapper(
         Items from the generator.
 
     Raises:
-        CompletionError: If all retry attempts fail.
+        RetryError: If all retry attempts fail.
+        CompletionError: If no specific error was captured.
     """
     attempts = 0
     last_error: Exception | None = None
     delay = initial_delay
+    start_time = time.time()
 
     while attempts <= max_retries:
         try:
@@ -312,11 +367,15 @@ def _sync_gen_wrapper(
             _log_retry_attempt(attempts, max_retries, e, delay)
             time.sleep(delay)
 
-    if last_error:
-        _log_retry_attempt(attempts, max_retries, last_error, 0, is_error=True)
-        raise _handle_retry_error(last_error, max_retries)
-
-    raise CompletionError("Operation failed with unknown error", Exception("Unknown error"))
+    _raise_retry_error(
+        last_error=last_error,
+        attempts=attempts,
+        max_retries=max_retries,
+        start_time=start_time,
+        initial_delay=initial_delay,
+        max_delay=max_delay,
+        backoff_factor=backoff_factor,
+    )
 
 
 def retry_with_backoff(
