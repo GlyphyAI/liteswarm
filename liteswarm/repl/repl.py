@@ -84,7 +84,6 @@ class AgentRepl:
         context_manager: ContextManager | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
-        cleanup: bool = False,
         max_iterations: int = sys.maxsize,
     ) -> None:
         """Initialize REPL with configuration.
@@ -95,16 +94,15 @@ class AgentRepl:
             context_manager: Optional context manager for optimization. Defaults to None.
             include_usage: Whether to track token usage. Defaults to False.
             include_cost: Whether to track costs. Defaults to False.
-            cleanup: Whether to reset agent state after each query. Defaults to False.
             max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
 
         Notes:
-            - Maintains conversation state between queries if cleanup=False
+            - Maintains conversation state between queries
             - Usage and cost tracking are optional features
+            - Cleanup must be performed explicitly using /clear command
         """
         # Public configuration
         self.agent = agent
-        self.cleanup = cleanup
         self.swarm = Swarm(
             stream_handler=ReplStreamHandler(),
             message_store=message_store,
@@ -349,7 +347,7 @@ class AgentRepl:
             return parsed
 
         except argparse.ArgumentError as e:
-            print(f"\n❌ {str(e)}")
+            print(f"\n�� {str(e)}")
             parser.print_usage()
             return None
 
@@ -468,7 +466,6 @@ class AgentRepl:
             result = await self.swarm.execute(
                 agent=agent,
                 prompt=query,
-                cleanup=self.cleanup,
             )
 
             self._messages = validate_messages(self.swarm.message_store.get_messages())
@@ -638,7 +635,6 @@ async def start_repl(
     context_manager: ContextManager | None = None,
     include_usage: bool = False,
     include_cost: bool = False,
-    cleanup: bool = False,
     max_iterations: int = sys.maxsize,
     enable_logging: bool = True,
 ) -> NoReturn:
@@ -650,7 +646,6 @@ async def start_repl(
         context_manager: Optional context manager for optimization. Defaults to None.
         include_usage: Whether to track token usage. Defaults to False.
         include_cost: Whether to track costs. Defaults to False.
-        cleanup: Whether to reset agent state after each query. Defaults to False.
         max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
         enable_logging: Whether to enable logging. Defaults to True.
 
@@ -668,6 +663,8 @@ async def start_repl(
     Notes:
         - Enables logging automatically
         - Runs until explicitly terminated
+        - State is preserved between queries
+        - Use /clear command to reset state
     """
     if enable_logging:
         liteswarm_enable_logging()
@@ -678,7 +675,6 @@ async def start_repl(
         context_manager=context_manager,
         include_usage=include_usage,
         include_cost=include_cost,
-        cleanup=cleanup,
         max_iterations=max_iterations,
     )
 
