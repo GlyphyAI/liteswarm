@@ -11,9 +11,9 @@ import os
 from pydantic import BaseModel
 
 from liteswarm.core import Swarm
-from liteswarm.types import LLM, Agent, ContextVariables
-from liteswarm.types.swarm import ToolResult
-from liteswarm.utils import enable_logging
+from liteswarm.types import LLM, Agent, ContextVariables, ToolResult
+from liteswarm.utils.logging import enable_logging
+from liteswarm.utils.messages import dump_messages
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
@@ -33,13 +33,14 @@ async def instructions_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=agent,
         prompt="Hello!",
         context_variables=ContextVariables(user_name="John"),
     )
 
-    print(result.messages[-1].content)
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 async def agent_switching_example() -> None:
@@ -84,14 +85,14 @@ async def agent_switching_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=welcome_agent,
         prompt="Hola!",
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = [msg.model_dump() for msg in result.messages]
-    print(json.dumps(messages, indent=2, ensure_ascii=False))
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2, ensure_ascii=False))
 
 
 async def error_handling_example() -> None:
@@ -113,12 +114,13 @@ async def error_handling_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=agent,
         prompt="What is the weather in Orgrimmar?",
     )
 
-    print(result.messages[-1].content)
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 async def pydantic_example() -> None:
@@ -142,12 +144,13 @@ async def pydantic_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    result = await swarm.execute(
+    await swarm.execute(
         agent=agent,
         prompt="What is the name of a user with id 1?",
     )
 
-    print(result.messages[-1].content)
+    messages = swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 async def run_selected_example() -> None:

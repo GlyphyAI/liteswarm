@@ -17,7 +17,10 @@ class SwarmError(Exception):
         Basic error handling:
             ```python
             try:
-                result = await swarm.execute(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except SwarmError as e:
                 logger.error(f"Swarm operation failed: {e}")
             ```
@@ -45,35 +48,51 @@ class CompletionError(SwarmError):
         Basic handling:
             ```python
             try:
-                response = await agent.complete(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except CompletionError as e:
                 logger.error(
                     f"API call failed: {e}",
-                    extra={"error_type": type(e.original_error).__name__, "details": str(e.original_error)},
+                    extra={
+                        "error_type": type(e.original_error).__name__ if e.original_error else None,
+                        "details": str(e.original_error) if e.original_error else None,
+                    },
                 )
             ```
 
         Fallback strategy:
             ```python
             try:
-                response = await primary_agent.complete(prompt)
+                result = await swarm.execute(
+                    agent=primary_agent,
+                    prompt="Hello",
+                )
             except CompletionError:
                 # Switch to backup model
-                backup_agent = Agent(id="backup", llm=LLM(model="gpt-3.5-turbo"))
-                response = await backup_agent.complete(prompt)
+                backup_agent = Agent(
+                    id="backup",
+                    instructions="You are a backup assistant.",
+                    llm=LLM(model="gpt-4o"),
+                )
+                result = await swarm.execute(
+                    agent=backup_agent,
+                    prompt="Hello",
+                )
             ```
     """
 
     def __init__(
         self,
         message: str,
-        original_error: Exception,
+        original_error: Exception | None = None,
     ) -> None:
         """Initialize a new CompletionError.
 
         Args:
             message: Human-readable error description.
-            original_error: The underlying exception that caused the failure.
+            original_error: Optional underlying exception that caused the failure.
         """
         super().__init__(message)
         self.original_error = original_error
@@ -90,27 +109,46 @@ class ContextLengthError(SwarmError):
         Basic handling:
             ```python
             try:
-                response = await agent.complete(prompt)
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
             except ContextLengthError as e:
                 logger.warning(
                     "Context length exceeded",
-                    extra={"current_length": e.current_length, "error": str(e.original_error)},
+                    extra={
+                        "current_length": e.current_length,
+                        "error": str(e.original_error) if e.original_error else None,
+                    },
                 )
             ```
 
         Automatic model upgrade:
             ```python
-            async def complete_with_fallback(prompt: str, agent: Agent) -> str:
+            async def execute_with_fallback(
+                swarm: Swarm,
+                prompt: str,
+                agent: Agent,
+            ) -> AgentExecutionResult:
                 try:
-                    return await agent.complete(prompt)
+                    return await swarm.execute(
+                        agent=agent,
+                        prompt=prompt,
+                    )
                 except ContextLengthError:
                     # Switch to larger context model
                     large_agent = Agent(
                         id="large-context",
                         instructions=agent.instructions,
-                        llm=LLM(model="claude-3-opus", max_tokens=100000),
+                        llm=LLM(
+                            model="claude-3-5-sonnet-20241022",
+                            max_tokens=200000,
+                        ),
                     )
-                    return await large_agent.complete(prompt)
+                    return await swarm.execute(
+                        agent=large_agent,
+                        prompt=prompt,
+                    )
             ```
     """
 
@@ -118,14 +156,14 @@ class ContextLengthError(SwarmError):
         self,
         message: str,
         current_length: int,
-        original_error: Exception,
+        original_error: Exception | None = None,
     ) -> None:
         """Initialize a new ContextLengthError.
 
         Args:
             message: Human-readable error description.
             current_length: Current context length that exceeded the limit.
-            original_error: The underlying exception that caused the failure.
+            original_error: Optional underlying exception that caused the failure.
         """
         super().__init__(message)
 
@@ -248,26 +286,24 @@ class TaskExecutionError(SwarmTeamError):
                 result = await team.execute_task(task)
             except TaskExecutionError as e:
                 logger.error(
-                    f"Task {e.task.id} ({e.task.type}) failed:",
+                    f"Task execution failed: {e.message}",
                     extra={
-                        "title": e.task.title,
+                        "task": e.task.id,
                         "assignee": e.assignee.id if e.assignee else None,
-                        "status": e.task.status,
                         "error": str(e.original_error) if e.original_error else None,
                     },
                 )
             ```
 
-        Retry with different assignee:
+        Retry with different agent:
             ```python
             try:
                 result = await team.execute_task(task)
             except TaskExecutionError as e:
                 if e.assignee:
-                    logger.warning(f"Task failed with {e.assignee.id}, trying backup")
-                    # Try again with specific assignee
-                    task.assignee = "backup-agent"
-                    result = await team.execute_task(task)
+                    # Try with different agent
+                    backup = team.get_backup_member(e.assignee)
+                    result = await team.execute_task(task, assignee=backup)
             ```
     """
 
@@ -282,8 +318,8 @@ class TaskExecutionError(SwarmTeamError):
 
         Args:
             message: Human-readable error description.
-            task: The task that failed to execute.
-            assignee: Optional team member that attempted the task.
+            task: Task that failed to execute.
+            assignee: Optional team member that failed to execute the task.
             original_error: Optional underlying exception that caused the failure.
         """
         super().__init__(message, original_error)
@@ -292,48 +328,37 @@ class TaskExecutionError(SwarmTeamError):
 
 
 class ResponseParsingError(SwarmTeamError):
-    """Exception raised when task response parsing fails.
+    """Exception raised when response parsing fails.
 
-    Occurs when an agent's response cannot be parsed according to the expected format.
-    This typically happens due to syntax issues in the JSON response, missing fields
-    that are required by the schema, incorrect data types in the response, general
-    schema validation failures, or errors in custom parser implementations.
+    Occurs when an agent's response cannot be parsed into the expected format.
+    This typically happens when the response JSON is malformed, missing required
+    fields, or contains invalid values that don't match the schema.
 
     Examples:
-        Handle parsing failures:
-            ```python
-            try:
-                output = team._parse_response(response, response_format)
-            except ResponseParsingError as e:
-                logger.error(
-                    f"Failed to parse {e.response_format.__name__} response:",
-                    extra={
-                        "response": e.response,
-                        "error_type": type(e.original_error).__name__,
-                        "error": str(e.original_error),
-                    },
-                )
-                # Attempt repair if possible
-                if isinstance(e.original_error, ValidationError):
-                    output = await repair_agent.repair_response(
-                        e.response,
-                        e.response_format,
-                        e.original_error,
-                    )
-            ```
-
-        With format-specific handling:
+        Basic error handling:
             ```python
             try:
                 result = await team.execute_task(task)
             except ResponseParsingError as e:
-                if e.response_format == ReviewOutput:
-                    # Handle review output parsing failures
-                    logger.error("Failed to parse review results")
-                    result = await fallback_review_handler(e.response)
-                else:
-                    # Handle other format failures
-                    raise
+                logger.error(
+                    f"Response parsing failed: {e.message}",
+                    extra={
+                        "response": e.response,
+                        "format": e.response_format.model_json_schema() if e.response_format else None,
+                        "error": str(e.original_error) if e.original_error else None,
+                    },
+                )
+            ```
+
+        Retry with repair:
+            ```python
+            try:
+                result = await team.execute_task(task)
+            except ResponseParsingError as e:
+                if e.response:
+                    # Try to repair and parse again
+                    repaired = repair_json(e.response)
+                    result = parse_response(repaired, e.response_format)
             ```
     """
 
@@ -349,7 +374,7 @@ class ResponseParsingError(SwarmTeamError):
         Args:
             message: Human-readable error description.
             response: Optional raw response that failed to parse.
-            response_format: Optional expected format specification.
+            response_format: Optional expected response format.
             original_error: Optional underlying exception that caused parsing to fail.
         """
         super().__init__(message, original_error)
@@ -360,49 +385,58 @@ class ResponseParsingError(SwarmTeamError):
 class ResponseRepairError(SwarmTeamError):
     """Exception raised when response repair fails.
 
-    Occurs when attempts to repair an invalid response fail. This can happen when
-    the maximum number of repair attempts is exhausted, when the response is
-    fundamentally invalid and cannot be fixed, when the agent consistently fails
-    to generate a valid response, or when the target response format's requirements
-    cannot be satisfied with the given input.
+    Occurs when attempts to repair an invalid response fail. This typically happens
+    when the response format is incompatible with the target schema, the maximum
+    repair attempts are exhausted, or when the agent consistently generates invalid
+    responses. May also occur when required fields cannot be reconstructed or the
+    response structure is too corrupted.
 
     Examples:
-        Handle repair failures:
+        Basic error handling:
             ```python
             try:
                 repaired = await repair_agent.repair_response(
-                    response,
-                    response_format,
-                    validation_error,
+                    response=invalid_response,
+                    response_format=ReviewOutput,
+                    validation_error=error,
                 )
             except ResponseRepairError as e:
                 logger.error(
-                    "Response repair failed after multiple attempts:",
+                    f"Response repair failed: {e.message}",
                     extra={
                         "response": e.response,
-                        "format": e.response_format.__name__,
-                        "error": str(e.original_error),
+                        "format": e.response_format.model_json_schema() if e.response_format else None,
+                        "error": str(e.original_error) if e.original_error else None,
                     },
                 )
                 # Fall back to raw response
                 return TaskResult(
                     task=task,
-                    content=e.response,
-                    status=TaskStatus.COMPLETED_WITH_ERRORS,
+                    content=None,
+                    status=TaskStatus.FAILED,
                 )
             ```
 
-        With retry logic:
+        With specialized repair agent:
             ```python
-            async def repair_with_retry(response: str, format: Type[BaseModel]) -> BaseModel:
-                try:
-                    return await repair_agent.repair_response(response, format)
-                except ResponseRepairError as e:
-                    if "max attempts" in str(e):
-                        # Try one more time with different agent
-                        backup_agent = Agent(id="repair-specialist", llm=LLM(model="gpt-4"))
-                        return await backup_agent.repair_response(e.response, e.response_format)
-                    raise
+            try:
+                result = await repair_agent.repair_response(response, format)
+            except ResponseRepairError as e:
+                if "max attempts" in str(e):
+                    # Try with specialized repair agent
+                    repair_specialist = Agent(
+                        id="repair-specialist",
+                        instructions="You are an expert at repairing malformed responses.",
+                        llm=LLM(
+                            model="gpt-4o",
+                            temperature=0.3,  # Lower temperature for more consistent repairs
+                        ),
+                    )
+                    return await repair_specialist.repair_response(
+                        response=e.response,
+                        response_format=e.response_format,
+                    )
+                raise  # Re-raise if not a max attempts error
             ```
     """
 
@@ -424,3 +458,199 @@ class ResponseRepairError(SwarmTeamError):
         super().__init__(message, original_error)
         self.response = response
         self.response_format = response_format
+
+
+class MaxAgentSwitchesError(SwarmError):
+    """Exception raised when too many agent switches occur.
+
+    Indicates potential infinite switching loops or excessive agent transitions.
+    This error helps prevent scenarios where agents continuously pass control
+    between each other without making progress.
+
+    Examples:
+        Basic error handling:
+            ```python
+            try:
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
+            except MaxAgentSwitchesError as e:
+                logger.error(
+                    f"Too many agent switches: {e.message}",
+                    extra={
+                        "switch_count": e.switch_count,
+                        "max_switches": e.max_switches,
+                        "switch_history": e.switch_history,  # List of agent IDs in order
+                    },
+                )
+            ```
+
+        Fallback to single agent:
+            ```python
+            try:
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                )
+            except MaxAgentSwitchesError as e:
+                # Get the first agent from switch history
+                first_agent_id = e.switch_history[0] if e.switch_history else None
+                if first_agent_id:
+                    # Create a new swarm with just the first agent
+                    single_swarm = Swarm(max_agent_switches=0)
+                    result = await single_swarm.execute(
+                        agent=agent,
+                        prompt="Hello",
+                    )
+            ```
+    """
+
+    def __init__(
+        self,
+        message: str,
+        switch_count: int,
+        max_switches: int,
+        switch_history: list[str] | None = None,
+        original_error: Exception | None = None,
+    ) -> None:
+        """Initialize a new MaxAgentSwitchesError.
+
+        Args:
+            message: Human-readable error description.
+            switch_count: Number of switches that occurred.
+            max_switches: Maximum allowed switches.
+            switch_history: Optional list of agent IDs in switch order.
+            original_error: Optional underlying exception.
+        """
+        super().__init__(message)
+        self.switch_count = switch_count
+        self.max_switches = max_switches
+        self.switch_history = switch_history
+        self.original_error = original_error
+
+
+class MaxResponseContinuationsError(SwarmError):
+    """Exception raised when response needs too many continuations.
+
+    Occurs when an agent's response exceeds length limits and requires more
+    continuations than allowed. This helps prevent scenarios where responses
+    grow indefinitely without reaching a natural conclusion.
+
+    Examples:
+        Basic error handling:
+            ```python
+            try:
+                result = await swarm.execute(prompt)
+            except MaxResponseContinuationsError as e:
+                logger.error(
+                    f"Response too long: {e.message}",
+                    extra={
+                        "continuation_count": e.continuation_count,
+                        "max_continuations": e.max_continuations,
+                        "total_tokens": e.total_tokens,
+                    },
+                )
+            ```
+
+        Split into smaller tasks:
+            ```python
+            try:
+                result = await swarm.execute(prompt)
+            except MaxResponseContinuationsError as e:
+                # Break into smaller chunks
+                subtasks = split_task(prompt)
+                results = []
+                for subtask in subtasks:
+                    result = await swarm.execute(subtask)
+                    results.append(result)
+                result = combine_results(results)
+            ```
+    """
+
+    def __init__(
+        self,
+        message: str,
+        continuation_count: int,
+        max_continuations: int,
+        total_tokens: int | None = None,
+        original_error: Exception | None = None,
+    ) -> None:
+        """Initialize a new MaxResponseContinuationsError.
+
+        Args:
+            message: Human-readable error description.
+            continuation_count: Number of continuations attempted.
+            max_continuations: Maximum allowed continuations.
+            total_tokens: Optional total tokens generated.
+            original_error: Optional underlying exception.
+        """
+        super().__init__(message)
+        self.continuation_count = continuation_count
+        self.max_continuations = max_continuations
+        self.total_tokens = total_tokens
+        self.original_error = original_error
+
+
+class RetryError(SwarmError):
+    """Exception raised when retry mechanism fails.
+
+    Indicates that all retry attempts have been exhausted without success.
+    This error provides detailed information about the retry process,
+    including attempt counts, timing, and the original error that
+    triggered retries.
+
+    Examples:
+        Basic error handling:
+            ```python
+            try:
+                result = await swarm.execute(prompt)
+            except RetryError as e:
+                logger.error(
+                    f"Retry mechanism failed: {e.message}",
+                    extra={
+                        "attempts": e.attempts,
+                        "total_duration": e.total_duration,
+                        "backoff_strategy": e.backoff_strategy,
+                        "original_error": str(e.original_error),
+                    },
+                )
+            ```
+
+        Fallback strategy:
+            ```python
+            try:
+                result = await swarm.execute(prompt)
+            except RetryError as e:
+                if e.attempts >= 3:
+                    # Switch to more reliable model
+                    fallback_agent = Agent(
+                        id="fallback",
+                        llm=LLM(model="gpt-4o"),
+                    )
+                    result = await swarm.execute(prompt, agent=fallback_agent)
+            ```
+    """
+
+    def __init__(
+        self,
+        message: str,
+        attempts: int,
+        total_duration: float,
+        backoff_strategy: dict[str, float],
+        original_error: Exception,
+    ) -> None:
+        """Initialize a new RetryError.
+
+        Args:
+            message: Human-readable error description.
+            attempts: Number of retry attempts made.
+            total_duration: Total time spent retrying in seconds.
+            backoff_strategy: Dictionary with retry settings.
+            original_error: The underlying exception that caused retries.
+        """
+        super().__init__(message)
+        self.attempts = attempts
+        self.total_duration = total_duration
+        self.backoff_strategy = backoff_strategy
+        self.original_error = original_error

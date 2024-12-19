@@ -5,18 +5,12 @@
 # https://opensource.org/licenses/MIT.
 
 from liteswarm.core import LiteSwarmStreamHandler
-from liteswarm.types import Agent, Delta
+from liteswarm.types import AgentResponse
 
 
 class SwarmStreamHandler(LiteSwarmStreamHandler):
     """Custom stream handler for displaying LLM responses."""
 
-    async def on_stream(self, delta: Delta, agent: Agent) -> None:
-        """Handle a stream delta update.
-
-        Args:
-            delta: The delta update containing new content.
-            agent: The agent that generated the content.
-        """
-        if delta.content:
-            print(f"{delta.content}", end="", flush=True)
+    async def on_stream(self, agent_response: AgentResponse) -> None:
+        if agent_response.delta.content:
+            print(f"{agent_response.delta.content}", end="", flush=True)
