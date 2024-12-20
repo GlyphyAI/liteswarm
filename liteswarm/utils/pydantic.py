@@ -48,19 +48,13 @@ class DefaultValueContainer:
     Examples:
         Static value:
             ```python
-            container = DefaultValueContainer(
-                value=42,
-                factory=None
-            )
+            container = DefaultValueContainer(value=42, factory=None)
             assert container.get_default() == 42
             ```
 
         Factory function:
             ```python
-            container = DefaultValueContainer(
-                value=None,
-                factory=lambda: list()
-            )
+            container = DefaultValueContainer(value=None, factory=lambda: list())
             result = container.get_default()  # New list
             ```
     """
@@ -87,10 +81,8 @@ class DefaultValueContainer:
             Factory:
                 ```python
                 import random
-                container = DefaultValueContainer(
-                    None,
-                    lambda: random.randint(1, 10)
-                )
+
+                container = DefaultValueContainer(None, lambda: random.randint(1, 10))
                 value = container.get_default()  # Random int
                 ```
         """
@@ -133,35 +125,27 @@ def copy_field_info(
         Basic copy:
             ```python
             class Model(BaseModel):
-                field: int = Field(
-                    default=0,
-                    description="A number"
-                )
+                field: int = Field(default=0, description="A number")
+
 
             # Copy with new description
             new_field = copy_field_info(
                 Model.model_fields["field"],
-                description="Updated description"
+                description="Updated description",
             )
             ```
 
         Make required:
             ```python
             # Remove default value
-            required_field = copy_field_info(
-                optional_field,
-                make_required=True
-            )
+            required_field = copy_field_info(optional_field, make_required=True)
             assert required_field.is_required()
             ```
 
         Exclude attributes:
             ```python
             # Copy without validation rules
-            basic_field = copy_field_info(
-                field_info,
-                exclude_attributes=["gt", "lt"]
-            )
+            basic_field = copy_field_info(field_info, exclude_attributes=["gt", "lt"])
             ```
     """
     field_kwargs: dict[str, Any] = {}
@@ -207,29 +191,21 @@ def _unwrap_pydantic_type(model_type: type[Any] | None) -> type[Any]:  # noqa: P
 
         Annotated types:
             ```python
-            type_info = _unwrap_pydantic_type(
-                Annotated[str, Field(min_length=1)]
-            )
+            type_info = _unwrap_pydantic_type(Annotated[str, Field(min_length=1)])
             assert type_info == str
             ```
 
         Container types:
             ```python
-            assert _unwrap_pydantic_type(
-                list[str]
-            ) == list[str]
+            assert _unwrap_pydantic_type(list[str]) == list[str]
 
-            assert _unwrap_pydantic_type(
-                dict[str, int]
-            ) == dict[str, int]
+            assert _unwrap_pydantic_type(dict[str, int]) == dict[str, int]
             ```
 
         Union types:
             ```python
             # Removes duplicates
-            type_info = _unwrap_pydantic_type(
-                Union[str, str, int]
-            )
+            type_info = _unwrap_pydantic_type(Union[str, str, int])
             assert type_info == Union[str, int]
             ```
     """
@@ -314,12 +290,13 @@ def _replace_placeholder_with_default(
             class Model(BaseModel):
                 value: int = Field(default=42)
 
+
             instance = Model(value="___UNKNOWN___")
             replaced = _replace_placeholder_with_default(
                 instance,
                 "___UNKNOWN___",
                 "value",
-                Model.model_fields["value"]
+                Model.model_fields["value"],
             )
             assert replaced is True
             assert instance.value == 42
@@ -332,7 +309,7 @@ def _replace_placeholder_with_default(
                 instance,
                 "___UNKNOWN___",
                 "value",
-                Model.model_fields["value"]
+                Model.model_fields["value"],
             )
             assert replaced is False
             assert instance.value == 100
@@ -379,30 +356,23 @@ def _restore_nested_models(field_type: Any, field_value: Any) -> Any:  # noqa: P
             class Inner(BaseModel):
                 value: int = 0
 
+
             class Outer(BaseModel):
                 inner: Inner = Inner()
 
-            value = _restore_nested_models(
-                Inner,
-                {"value": "___UNKNOWN___"}
-            )
+
+            value = _restore_nested_models(Inner, {"value": "___UNKNOWN___"})
             assert value.value == 0
             ```
 
         Collections:
             ```python
             # List of models
-            value = _restore_nested_models(
-                list[Inner],
-                [{"value": "___UNKNOWN___"}]
-            )
+            value = _restore_nested_models(list[Inner], [{"value": "___UNKNOWN___"}])
             assert value[0].value == 0
 
             # Dict with model values
-            value = _restore_nested_models(
-                dict[str, Inner],
-                {"key": {"value": "___UNKNOWN___"}}
-            )
+            value = _restore_nested_models(dict[str, Inner], {"key": {"value": "___UNKNOWN___"}})
             assert value["key"].value == 0
             ```
     """
@@ -466,6 +436,7 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
                 age: int = 0
                 tags: list[str] = []
 
+
             RequiredUser = remove_default_values(User)
             # All fields now required, defaults preserved
             # internally but not exposed in schema
@@ -477,9 +448,11 @@ def remove_default_values(model: type[BaseModel]) -> type[BaseModel]:
                 street: str = ""
                 city: str
 
+
             class Contact(BaseModel):
                 name: str
                 address: Address = Address()
+
 
             RequiredContact = remove_default_values(Contact)
             # Both top-level and nested defaults handled
@@ -552,16 +525,11 @@ def restore_default_values(instance: T, target_model_type: type[V]) -> V:
                 name: str
                 age: int = 0
 
-            RequiredUser = remove_default_values(User)
-            instance = RequiredUser(
-                name="Alice",
-                age="___UNKNOWN___"
-            )
 
-            original = restore_default_values(
-                instance,
-                User
-            )
+            RequiredUser = remove_default_values(User)
+            instance = RequiredUser(name="Alice", age="___UNKNOWN___")
+
+            original = restore_default_values(instance, User)
             assert original.age == 0
             ```
 
@@ -570,18 +538,15 @@ def restore_default_values(instance: T, target_model_type: type[V]) -> V:
             class Settings(BaseModel):
                 theme: str = "light"
 
+
             class App(BaseModel):
                 settings: Settings = Settings()
 
-            RequiredApp = remove_default_values(App)
-            instance = RequiredApp(
-                settings="___UNKNOWN___"
-            )
 
-            original = restore_default_values(
-                instance,
-                App
-            )
+            RequiredApp = remove_default_values(App)
+            instance = RequiredApp(settings="___UNKNOWN___")
+
+            original = restore_default_values(instance, App)
             assert original.settings.theme == "light"
             ```
     """
@@ -653,6 +618,7 @@ def replace_default_values(
                 age: int = 0
                 active: bool = True
 
+
             user = User(name="Alice", age=0)
 
             # Using automatic transformation
@@ -662,10 +628,7 @@ def replace_default_values(
 
             # Using pre-transformed model
             RequiredUser = remove_default_values(User)
-            processed = replace_default_values(
-                user,
-                RequiredUser
-            )
+            processed = replace_default_values(user, RequiredUser)
             ```
 
         Collections:
@@ -673,6 +636,7 @@ def replace_default_values(
             class Item(BaseModel):
                 tags: list[str] = []
                 meta: dict[str, str] = {}
+
 
             item = Item(tags=[], meta={})
             processed = replace_default_values(item)
@@ -685,14 +649,13 @@ def replace_default_values(
             class Address(BaseModel):
                 street: str = ""
 
+
             class Contact(BaseModel):
                 name: str
                 address: Address = Address()
 
-            contact = Contact(
-                name="Alice",
-                address=Address(street="")
-            )
+
+            contact = Contact(name="Alice", address=Address(street=""))
             processed = replace_default_values(contact)
             assert processed.address == "___UNKNOWN___"
             ```
@@ -803,11 +766,12 @@ def change_field_type(  # noqa: PLR0913
                 id: int
                 name: str
 
+
             UserWithStringId = change_field_type(
                 model_type=User,
                 field_name="id",
                 new_type=str,
-                new_model_name="UserWithStringId"
+                new_model_name="UserWithStringId",
             )
             ```
 
@@ -819,7 +783,7 @@ def change_field_type(  # noqa: PLR0913
                 new_type=str,
                 # FieldInfo kwargs
                 pattern=r"[^@]+@[^@]+\.[^@]+",
-                description="Valid email address"
+                description="Valid email address",
             )
             ```
 
@@ -833,7 +797,7 @@ def change_field_type(  # noqa: PLR0913
                 # FieldInfo kwargs
                 ge=0,
                 le=120,
-                description="User age in years"
+                description="User age in years",
             )
             ```
     """
