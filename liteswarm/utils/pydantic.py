@@ -23,6 +23,7 @@ from typing import (
 from pydantic import BaseModel, Discriminator, ValidationError, create_model
 from pydantic.fields import FieldInfo, _FromFieldInfoInputs
 from pydantic_core import PydanticUndefined
+from typing_extensions import override
 
 from liteswarm.utils.typing import is_subtype, union
 
@@ -101,6 +102,7 @@ class DefaultValueContainer:
 
         return None
 
+    @override
     def __hash__(self) -> int:
         return hash((self.value, self.factory))
 
