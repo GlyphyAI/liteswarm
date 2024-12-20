@@ -14,6 +14,7 @@ The framework is LLM-agnostic and supports 100+ language models through [litellm
 - [Installation](#installation)
 - [Requirements](#requirements)
 - [Key Features](#key-features)
+- [Core Components](#core-components)
 - [Basic Usage](#basic-usage)
 - [Advanced Features](#advanced-features)
 - [Key Concepts](#key-concepts)
@@ -107,6 +108,116 @@ See [litellm's documentation](https://docs.litellm.ai/docs/providers) for a comp
 - **Context Management**: Smart handling of conversation history and context
 - **Cost Tracking**: Optional tracking of token usage and API costs
 
+## Core Components
+
+### Message Store
+
+The Message Store is responsible for managing conversation history and message persistence. It provides:
+
+- **Message Storage**: Efficient storage and retrieval of conversation messages
+- **History Management**: Methods for adding, updating, and removing messages
+- **State Preservation**: Maintains conversation state between interactions
+- **Memory Optimization**: Support for different memory strategies
+- **Format Validation**: Ensures messages follow the required schema
+
+Example usage:
+```python
+from liteswarm.core import Swarm
+from liteswarm.core.message_store import LiteMessageStore
+from liteswarm.types import Message
+
+# Create a message store
+message_store = LiteMessageStore()
+
+# Add messages
+message_store.add_message(Message(role="user", content="Hello!"))
+
+# Get conversation history
+messages = message_store.get_messages()
+
+# Use with Swarm
+swarm = Swarm(message_store=message_store)
+```
+
+### Message Index
+
+The Message Index provides semantic search capabilities over conversation history:
+
+- **Semantic Search**: Find messages based on meaning, not just keywords
+- **Relevance Scoring**: Rank messages by semantic similarity
+- **Embedding Support**: Multiple embedding models (OpenAI, HuggingFace, etc.)
+- **Efficient Retrieval**: Fast lookup of relevant context
+- **Customizable Search**: Configurable search parameters and strategies
+
+Example usage:
+```python
+from liteswarm.core.message_index import LiteMessageIndex
+
+# Create an index
+index = LiteMessageIndex()
+
+# Add messages to index
+index.add_messages(messages)
+
+# Find relevant messages
+relevant = await index.search(
+    query="project requirements",
+    max_results=5,
+)
+```
+
+### Context Manager
+
+The Context Manager optimizes conversation context to prevent token limits and improve relevance:
+
+- **Context Optimization**: Smart selection of relevant messages
+- **Window Management**: Sliding window over conversation history
+- **RAG Integration**: Retrieval-augmented generation support
+- **Strategy Selection**: Multiple optimization strategies
+- **Token Management**: Automatic handling of context length
+
+Example usage:
+```python
+from liteswarm.core import Swarm
+from liteswarm.core.context_manager import (
+    LiteContextManager,
+    LiteOptimizationStrategy,
+)
+
+# Create context manager
+context_manager = LiteContextManager()
+
+# Optimize context
+optimized = await context_manager.optimize(
+    messages=messages,
+    model="gpt-4o",
+    strategy="rag",
+    query="latest project updates",
+)
+
+# Use with Swarm
+swarm = Swarm(context_manager=context_manager)
+```
+
+The Context Manager supports several optimization strategies:
+
+1. **Summarize**: Creates concise summaries of older messages
+2. **Window**: Keeps a sliding window of recent messages
+3. **RAG**: Uses semantic search to find relevant messages
+4. **Trim**: Simple truncation to fit token limits
+
+Each strategy can be configured through the Context Manager's settings:
+```python
+context_manager = LiteContextManager(
+    window_size=50,  # Maximum messages in sliding window
+    preserve_recent=25,  # Messages to keep when summarizing
+    relevant_window_size=10,  # Maximum relevant messages to return
+    chunk_size=10,  # Messages per summary chunk
+    default_strategy="trim",  # Default optimization strategy
+    default_embedding_model="text-embedding-3-small",  # Default model for embeddings
+)
+```
+
 ## Basic Usage
 
 ### Simple Agent
@@ -124,7 +235,7 @@ async def main() -> None:
         id="assistant",
         instructions="You are a helpful AI assistant.",
         llm=LLM(
-            model="claude-3-5-haiku-20241022",
+            model="claude-3-5-sonnet-20241022",
             temperature=0.7,
         ),
     )
@@ -162,7 +273,7 @@ async def main() -> None:
         id="math_agent",
         instructions="Use tools for calculations. Never calculate yourself.",
         llm=LLM(
-            model="claude-3-5-haiku-20241022",
+            model="claude-3-5-sonnet-20241022",
             tools=[calculate_sum],
             tool_choice="auto",
         ),
@@ -245,6 +356,18 @@ async def main() -> None:
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+> **Note:** LiteSwarm requires explicitly passing the agent you want to use in each `execute()` or `stream()` call. To maintain a conversation with the same agent, pass that agent in subsequent calls. The conversation history is preserved, but the active agent is determined by what you pass to these methods:
+> ```python
+> # Start with agent1
+> result1 = await swarm.execute(agent1, prompt="Start task")
+> 
+> # Continue with agent1
+> result2 = await swarm.execute(agent1, prompt="Continue task")
+> 
+> # Switch to agent2 (history is preserved)
+> result3 = await swarm.execute(agent2, prompt="Review work")
+> ```
 
 ### Agent Teams
 
@@ -478,40 +601,287 @@ See the [software_team example](examples/software_team/run.py) for a complete im
 
 ### Streaming Responses
 
-LiteSwarm supports real-time streaming of responses. Here's a simple example:
+LiteSwarm provides flexible response handling through `SwarmStream`, which supports both real-time streaming and final result collection. Here's a complete example showcasing streaming with structured outputs:
 
 ```python
 import asyncio
+
+from pydantic import BaseModel
 
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent
 
 
+class EntitiesModel(BaseModel):
+    attributes: list[str]
+    colors: list[str]
+    animals: list[str]
+
+
 async def main():
-    # Create an agent
+    # Create an agent for entity extraction
     agent = Agent(
-        id="explainer",
-        instructions="You are a helpful assistant that explains concepts clearly.",
+        id="extract-entities-agent",
+        instructions="You're an extraction agent. Extract the entities from the input text.",
         llm=LLM(
             model="gpt-4o",
-            temperature=0.7,
+            response_format=EntitiesModel,
         ),
     )
 
-    # Create swarm and start streaming
+    # Create swarm and get stream
     swarm = Swarm()
-    async for response in swarm.stream(
-        agent=agent,
-        prompt="Explain Python generators in 3-4 bullet points.",
-    ):
-        content = response.delta.content
-        if content is not None:
-            print(content, end="", flush=True)
+    stream = swarm.stream(
+        agent,
+        prompt="The quick brown fox jumps over the lazy dog with piercing blue eyes",
+    )
+
+    # Method 1: Stream responses and handle parsed content
+    print("Streaming responses:")
+    async for response in stream:
+        # Handle raw content
+        if response.delta.content is not None:
+            print(response.delta.content, end="", flush=True)
+
+        # Handle structured outputs
+        if isinstance(response.parsed_content, EntitiesModel):
+            print("\nParsed content:")
+            print(response.parsed_content.model_dump_json(indent=2))
+
+    # Method 2: Get final result with parsed content
+    result = await stream.get_result()
+    if isinstance(result.parsed_content, EntitiesModel):
+        print("\n\nFinal parsed result:")
+        print(result.parsed_content.model_dump_json(indent=2))
+
+    # Method 3: Direct execution with structured output
+    print("\nDirect execution:")
+    result = await swarm.execute(
+        agent,
+        prompt="The quick brown fox jumps over the lazy dog with piercing blue eyes",
+    )
+
+    if isinstance(result.parsed_content, EntitiesModel):
+        print("\nParsed result:")
+        print(result.parsed_content.model_dump_json(indent=2))
 
 
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+The example demonstrates:
+
+1. **Structured Output Models**: Define Pydantic models for response formats
+   - `EntitiesModel` for extracting attributes, colors, and animals
+
+2. **Agent Configuration**: Set up agent with structured output
+   - Configure agent with `response_format=EntitiesModel`
+   - Enable automatic parsing of responses
+
+3. **Response Handling**: Process both raw and structured content
+   - Stream parsed content as it arrives
+   - Access raw content through deltas
+   - Get final structured results
+
+The output will show:
+- Extracted entities in JSON format
+- Raw content as it streams
+- Final parsed results
+
+### Error Handling
+
+LiteSwarm provides comprehensive error handling with built-in retry mechanisms. The framework automatically retries failed operations with exponential backoff:
+
+```python
+import asyncio
+from typing import Optional
+
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent
+from liteswarm.exceptions import (
+    SwarmError,
+    ContextLengthError,
+    MaxAgentSwitchesError,
+    MaxResponseContinuationsError,
+    RetryError,
+)
+
+
+async def main():
+    # Create swarm with custom retry settings
+    swarm = Swarm(
+        # Retry Configuration
+        max_retries=3,              # Maximum number of retry attempts
+        initial_retry_delay=1.0,    # Initial delay between retries (seconds)
+        max_retry_delay=10.0,       # Maximum delay between retries (seconds)
+        backoff_factor=2.0,         # Exponential backoff multiplier
+    )
+
+    agent = Agent(
+        id="assistant",
+        instructions="You are a helpful assistant.",
+        llm=LLM(model="gpt-4o"),
+    )
+
+    # The framework will automatically:
+    # 1. Retry failed API calls with exponential backoff
+    # 2. Handle transient errors (network issues, rate limits)
+    # 3. Preserve conversation state between retries
+    # 4. Track and expose retry statistics
+
+    try:
+        stream = swarm.stream(agent, prompt="Hello!")
+        async for response in stream:
+            print(response.delta.content, end="", flush=True)
+
+        result = await stream.get_result()
+        print("\nFinal:", result.content)
+
+    except RetryError as e:
+        # RetryError includes:
+        # - Original error that caused retries
+        # - Number of retry attempts made
+        # - Total retry duration
+        # - Backoff strategy details
+        print(f"Retry mechanism failed after {e.attempts} attempts: {e}")
+        print(f"Original error: {e.original_error}")
+        print(f"Total retry duration: {e.total_duration}s")
+
+    except SwarmError as e:
+        print(f"Other swarm error: {e}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+The framework provides automatic retry with exponential backoff for:
+
+1. **API Calls**: Handles transient API issues
+   - Network connectivity problems
+   - Rate limit errors
+   - Temporary service outages
+   - Timeout errors
+
+2. **Response Generation**: Manages streaming issues
+   - Incomplete or malformed responses
+   - Connection drops during streaming
+   - Token limit exceeded errors
+   - Model-specific failures
+
+3. **Agent Switching**: Handles transition errors
+   - Failed agent initialization
+   - Context transfer issues
+   - Tool execution failures
+   - State management errors
+
+The retry mechanism features:
+
+1. **Exponential Backoff**: Gradually increases delay between retries
+   ```python
+   # Example retry delays with default settings:
+   # Attempt 1: 1.0 seconds
+   # Attempt 2: 2.0 seconds
+   # Attempt 3: 4.0 seconds
+   # Attempt 4: 8.0 seconds (capped at max_retry_delay)
+   swarm = Swarm(
+       max_retries=3,
+       initial_retry_delay=1.0,
+       max_retry_delay=10.0,
+       backoff_factor=2.0,
+   )
+   ```
+
+2. **State Preservation**: Maintains conversation context
+   - Preserves message history
+   - Retains agent state
+   - Keeps tool execution results
+   - Maintains parsed content
+
+3. **Detailed Error Information**: Provides comprehensive error data
+   ```python
+   try:
+       result = await swarm.execute(agent, prompt)
+   except RetryError as e:
+       print(f"Attempts: {e.attempts}")
+       print(f"Duration: {e.total_duration}s")
+       print(f"Original error: {e.original_error}")
+       print(f"Backoff strategy: {e.backoff_strategy}")
+   ```
+
+4. **Customizable Behavior**: Configure retry settings
+   ```python
+   swarm = Swarm(
+       # Retry settings
+       max_retries=5,              # More retry attempts
+       initial_retry_delay=0.5,    # Start with shorter delays
+       max_retry_delay=30.0,      # Allow longer maximum delay
+       backoff_factor=3.0,        # More aggressive backoff
+   )
+   ```
+
+The framework also provides specific error types for different failure scenarios:
+
+1. **SwarmError**: Base class for all swarm-specific errors
+   - Provides context about what went wrong
+   - Contains the original exception if applicable
+   - Includes agent information when relevant
+
+2. **ContextLengthError**: Raised when context becomes too large
+   - Indicates when message history exceeds limits
+   - Provides details about context size
+   - Suggests using memory management
+
+3. **MaxAgentSwitchesError**: Raised when too many agent switches occur
+   - Indicates potential infinite switching loops
+   - Shows switch count and limit
+   - Includes agent switch history
+
+4. **MaxResponseContinuationsError**: Raised when response needs too many continuations
+   - Indicates when response exceeds length limits
+   - Shows continuation count and limit
+   - Suggests breaking task into smaller parts
+
+5. **RetryError**: Raised when retry mechanism fails
+   - Contains original error that caused retries
+   - Shows retry count and settings
+   - Includes backoff strategy details
+
+Best practices for error handling:
+
+1. **Use Specific Handlers**: Catch specific errors for targeted handling
+   ```python
+   try:
+       result = await swarm.execute(agent, prompt)
+   except ContextLengthError:
+       # Handle context length issues
+   except MaxAgentSwitchesError:
+       # Handle agent switching issues
+   except SwarmError:
+       # Handle other swarm errors
+   ```
+
+2. **Stream Error Recovery**: Handle streaming errors gracefully
+   ```python
+   try:
+       async for response in swarm.stream(agent, prompt):
+           print(response.content)
+   except SwarmError as e:
+       print(f"Stream error: {e}")
+       # Implement recovery logic
+   ```
+
+3. **Retry Configuration**: Customize retry behavior
+   ```python
+   swarm = Swarm(
+       ...,
+       max_retries=3,
+       initial_retry_delay=1.0,
+       max_retry_delay=10.0,
+       backoff_factor=2.0,
+   )
+   ```
 
 ### Context Variables
 
@@ -664,20 +1034,16 @@ async def main() -> None:
         prompt=f"Review the code and provide structured feedback:\n{CODE_TO_REVIEW}",
     )
 
-    if not result.content:
+    if not isinstance(result.parsed_content, ReviewOutput):
         print("Agent failed to produce a response")
         return
 
-    # Currently, the content is the raw JSON output from the LLM,
-    # so we need to parse it manually using a response_format Pydantic model.
-    output = ReviewOutput.model_validate_json(result.content)
-
-    if output.issues:
+    if result.parsed_content.issues:
         print("Issues:")
-        for issue in output.issues:
+        for issue in result.parsed_content.issues:
             print(f"- {issue}")
 
-    print(f"\nApproved: {output.approved}")
+    print(f"\nApproved: {result.parsed_content.approved}")
 
 
 if __name__ == "__main__":

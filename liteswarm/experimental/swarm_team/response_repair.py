@@ -8,6 +8,7 @@ from typing import Protocol
 
 from pydantic import ValidationError
 
+from liteswarm.core.message_store import LiteMessageStoreFilter
 from liteswarm.core.swarm import Swarm
 from liteswarm.types.exceptions import ResponseRepairError
 from liteswarm.types.swarm import Agent, ContextVariables
@@ -239,19 +240,26 @@ class LiteResponseRepairAgent:
                 print(f"Failed to regenerate: {e}")
             ```
         """
-        last_assistant_message = self.swarm.pop_last_message()
-        if not last_assistant_message:
-            raise ResponseRepairError("No message to regenerate")
-
-        last_user_message = self.swarm.pop_last_message()
-        if not last_user_message or last_user_message.role != "user":
-            self.swarm.append_message(last_assistant_message)
-            raise ResponseRepairError("No user message found to regenerate")
-
         try:
+            last_n = 2
+            last_messages = self.swarm.message_store.get_messages(
+                filter=LiteMessageStoreFilter(last_n=last_n)
+            )
+
+            if len(last_messages) != last_n:
+                raise ResponseRepairError("No message to regenerate")
+
+            last_user_message, last_assistant_message = last_messages
+            if last_user_message.role != "user":
+                raise ResponseRepairError("No user message found to regenerate")
+
+            # Remove the last messages to regenerate the response
+            self.swarm.message_store.remove_message(last_user_message.id)
+            self.swarm.message_store.remove_message(last_assistant_message.id)
+
             result = await self.swarm.execute(
                 agent=agent,
-                prompt=last_user_message.content or "",
+                prompt=last_user_message.content,
                 context_variables=context,
             )
 
@@ -260,9 +268,14 @@ class LiteResponseRepairAgent:
 
             return result.content
 
+        except ResponseRepairError:
+            raise
+
         except Exception as e:
-            self.swarm.append_message(last_user_message)
-            self.swarm.append_message(last_assistant_message)
+            # Restore the last removed messages if repair fails
+            self.swarm.message_store.add_message(last_user_message)
+            self.swarm.message_store.add_message(last_assistant_message)
+
             raise ResponseRepairError(
                 f"Failed to regenerate response: {e}",
                 response=last_user_message.content,

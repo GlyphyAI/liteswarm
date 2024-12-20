@@ -4,11 +4,12 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from collections.abc import Sequence
 from typing import Protocol
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
-from liteswarm.types.swarm import Agent, Delta, Message
+from liteswarm.types.swarm import Agent, AgentResponse, Message
 
 
 class SwarmStreamHandler(Protocol):
@@ -28,38 +29,46 @@ class SwarmStreamHandler(Protocol):
     Example:
         ```python
         class CustomStreamHandler(StreamHandler):
-            async def on_stream(self, delta: Delta, agent: Agent) -> None:
-                if delta.content:
-                    print(f"[{agent.id}]: {delta.content}")
+            async def on_stream(
+                self,
+                agent_response: AgentResponse,
+            ) -> None:
+                if agent_response.delta.content:
+                    print(f"[{agent_response.agent.id}]: {agent_response.delta.content}")
 
             async def on_tool_call(
                 self,
                 tool_call: ChatCompletionDeltaToolCall,
-                agent: Agent
+                agent: Agent,
             ) -> None:
                 print(f"[{agent.id}] calling {tool_call.function.name}")
 
             async def on_agent_switch(
                 self,
                 previous: Agent | None,
-                current: Agent
+                current: Agent,
             ) -> None:
                 print(f"Switching from {previous.id} to {current.id}")
 
-            async def on_error(self, error: Exception, agent: Agent) -> None:
+            async def on_error(
+                self,
+                error: Exception,
+                agent: Agent,
+            ) -> None:
                 print(f"Error from {agent.id}: {error}")
 
             async def on_complete(
                 self,
                 messages: list[Message],
-                agent: Agent | None
+                agent: Agent | None,
             ) -> None:
                 print("Conversation complete")
+
 
         # Use in Swarm
         swarm = Swarm(
             stream_handler=CustomStreamHandler(),
-            include_usage=True
+            include_usage=True,
         )
         ```
 
@@ -70,7 +79,10 @@ class SwarmStreamHandler(Protocol):
         - Agent may be None in error and complete events if no agent is active
     """
 
-    async def on_stream(self, delta: Delta, agent: Agent) -> None:
+    async def on_stream(
+        self,
+        agent_response: AgentResponse,
+    ) -> None:
         """Handle streaming content updates from an agent.
 
         Called each time new content is received from an agent, including both
@@ -78,35 +90,43 @@ class SwarmStreamHandler(Protocol):
         quickly to avoid blocking the stream.
 
         Args:
-            delta: The content or tool call update, containing:
-                - content: Optional new text content
-                - tool_calls: Optional list of tool call updates
-            agent: The agent generating the content, providing:
-                - id: Agent identifier
-                - model: LLM model information
-                - other agent-specific attributes
+            agent_response: Streaming response containing:
+                - agent: Agent generating the content
+                - delta: Latest content or tool call update
+                - content: Accumulated content so far
+                - tool_calls: Accumulated tool calls
+                - usage: Running token usage statistics
+                - response_cost: Accumulated cost information
+                - parsed_content: Parsed content if format specified
 
         Example:
             ```python
-            async def on_stream(self, delta: Delta, agent: Agent) -> None:
-                # Handle content updates
-                if delta.content:
-                    print(f"Content: {delta.content}")
+            async def on_stream(self, agent_response: AgentResponse) -> None:
+                # Handle latest content
+                if agent_response.delta.content:
+                    print(f"New content: {agent_response.delta.content}")
+                    print(f"Total content: {agent_response.content}")
 
                 # Handle tool calls
-                if delta.tool_calls:
-                    for call in delta.tool_calls:
-                        print(f"Tool call: {call.function.name}")
+                if agent_response.delta.tool_calls:
+                    for call in agent_response.delta.tool_calls:
+                        print(f"New tool call: {call.function.name}")
+                    print(f"Total calls: {len(agent_response.tool_calls)}")
             ```
 
         Notes:
-            - May be called frequently with small content updates
+            - May be called frequently with small updates
             - Should avoid expensive operations
-            - Can receive both content and tool calls in same delta
+            - Can receive both content and tool calls in same update
+            - Has access to both incremental and accumulated state
         """
         ...
 
-    async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
+    async def on_tool_call(
+        self,
+        tool_call: ChatCompletionDeltaToolCall,
+        agent: Agent,
+    ) -> None:
         """Handle a tool call from an agent.
 
         Called when an agent initiates a tool call, before the tool is executed.
@@ -125,11 +145,7 @@ class SwarmStreamHandler(Protocol):
 
         Example:
             ```python
-            async def on_tool_call(
-                self,
-                tool_call: ChatCompletionDeltaToolCall,
-                agent: Agent
-            ) -> None:
+            async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
                 print(
                     f"Agent {agent.id} calling {tool_call.function.name}"
                     f" with args: {tool_call.function.arguments}"
@@ -143,7 +159,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_agent_switch(self, previous_agent: Agent | None, current_agent: Agent) -> None:
+    async def on_agent_switch(
+        self,
+        previous_agent: Agent | None,
+        current_agent: Agent,
+    ) -> None:
         """Handle an agent switch event.
 
         Called when the conversation transitions from one agent to another,
@@ -157,11 +177,7 @@ class SwarmStreamHandler(Protocol):
 
         Example:
             ```python
-            async def on_agent_switch(
-                self,
-                previous: Agent | None,
-                current: Agent
-            ) -> None:
+            async def on_agent_switch(self, previous: Agent | None, current: Agent) -> None:
                 if previous:
                     print(f"Switching from {previous.id} to {current.id}")
                 else:
@@ -175,7 +191,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_error(self, error: Exception, agent: Agent | None) -> None:
+    async def on_error(
+        self,
+        error: Exception,
+        agent: Agent | None,
+    ) -> None:
         """Handle an error during agent execution.
 
         Called when an error occurs during any phase of agent operation,
@@ -206,7 +226,11 @@ class SwarmStreamHandler(Protocol):
         """
         ...
 
-    async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
+    async def on_complete(
+        self,
+        messages: Sequence[Message],
+        agent: Agent | None,
+    ) -> None:
         """Handle completion of a conversation.
 
         Called when a conversation reaches its natural conclusion or is
@@ -223,12 +247,8 @@ class SwarmStreamHandler(Protocol):
 
         Example:
             ```python
-            async def on_complete(
-                self,
-                messages: list[Message],
-                agent: Agent | None
-            ) -> None:
-                print('Conversation summary:')
+            async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
+                print("Conversation summary:")
                 print(f"- Messages: {len(messages)}")
                 print(f"- Final agent: {agent.id if agent else 'None'}")
 
@@ -262,9 +282,9 @@ class LiteSwarmStreamHandler(SwarmStreamHandler):
         ```python
         class LoggingHandler(LiteStreamHandler):
             # Only override the events we care about
-            async def on_stream(self, delta: Delta, agent: Agent) -> None:
-                if delta.content:
-                    print(f"[{agent.id}]: {delta.content}")
+            async def on_stream(self, agent_response: AgentResponse) -> None:
+                if agent_response.delta.content:
+                    print(f"[{agent_response.agent.id}]: {agent_response.delta.content}")
 
             async def on_error(self, error: Exception, agent: Agent) -> None:
                 print(f"Error in {agent.id}: {error}")
@@ -277,47 +297,17 @@ class LiteSwarmStreamHandler(SwarmStreamHandler):
         - Suitable for testing and development
     """
 
-    async def on_stream(self, delta: Delta, agent: Agent) -> None:
-        """Handle streaming content updates.
-
-        Args:
-            delta: Content or tool call update.
-            agent: Agent generating the content.
-        """
+    async def on_stream(self, agent_response: AgentResponse) -> None:
         pass
 
     async def on_tool_call(self, tool_call: ChatCompletionDeltaToolCall, agent: Agent) -> None:
-        """Handle tool call events.
-
-        Args:
-            tool_call: Details of the tool call.
-            agent: Agent making the call.
-        """
         pass
 
     async def on_agent_switch(self, previous_agent: Agent | None, current_agent: Agent) -> None:
-        """Handle agent switch events.
-
-        Args:
-            previous_agent: Agent being switched from.
-            current_agent: Agent being switched to.
-        """
         pass
 
     async def on_error(self, error: Exception, agent: Agent | None) -> None:
-        """Handle error events.
-
-        Args:
-            error: Exception that occurred.
-            agent: Agent that encountered the error.
-        """
         pass
 
-    async def on_complete(self, messages: list[Message], agent: Agent | None) -> None:
-        """Handle conversation completion.
-
-        Args:
-            messages: Complete conversation history.
-            agent: Final agent in the conversation.
-        """
+    async def on_complete(self, messages: Sequence[Message], agent: Agent | None) -> None:
         pass

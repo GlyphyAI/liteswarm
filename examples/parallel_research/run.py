@@ -5,11 +5,23 @@
 # https://opensource.org/licenses/MIT.
 
 import asyncio
+import os
 import random
+from collections.abc import Sequence
 from time import sleep
 
-from liteswarm.core import Swarm
-from liteswarm.types import LLM, Agent, ChatCompletionDeltaToolCall, Delta, Message, ToolCallResult
+from liteswarm.core import LiteSwarmStreamHandler, Swarm
+from liteswarm.types import (
+    LLM,
+    Agent,
+    AgentResponse,
+    ChatCompletionDeltaToolCall,
+    Message,
+    ToolCallResult,
+)
+from liteswarm.utils.logging import enable_logging
+
+os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 RESEARCH_AGENT_INSTRUCTIONS = """
 You are a city research analyst. Your task is to gather and analyze data about cities using the available tools.
@@ -25,14 +37,13 @@ Remember to use parallel tool calls efficiently to gather data quickly.
 """.strip()
 
 
-class ConsoleStreamHandler:
+class ConsoleStreamHandler(LiteSwarmStreamHandler):
     async def on_stream(
         self,
-        chunk: Delta,
-        agent: Agent | None,
+        agent_response: AgentResponse,
     ) -> None:
-        if chunk.content:
-            print(f"{chunk.content}", end="", flush=True)
+        if agent_response.delta.content:
+            print(f"{agent_response.delta.content}", end="", flush=True)
 
     async def on_error(
         self,
@@ -50,7 +61,7 @@ class ConsoleStreamHandler:
 
     async def on_complete(
         self,
-        messages: list[Message],
+        messages: Sequence[Message],
         agent: Agent | None,
     ) -> None:
         print(f"\n[{agent.id if agent else 'unknown'}] Completed")
@@ -150,8 +161,9 @@ async def run() -> None:
     )
 
     print("\nFinal Analysis Complete!")
-    print(f"\n\nResult: {result.messages}\n\n")
+    print(f"\n\nResult: {result.content}\n\n")
 
 
 if __name__ == "__main__":
+    enable_logging()
     asyncio.run(run())

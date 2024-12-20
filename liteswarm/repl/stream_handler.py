@@ -5,13 +5,14 @@
 # https://opensource.org/licenses/MIT.
 
 import sys
+from collections.abc import Sequence
 
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
 from liteswarm.core.stream_handler import SwarmStreamHandler
 from liteswarm.types.swarm import (
     Agent,
-    Delta,
+    AgentResponse,
     Message,
     ToolCallAgentResult,
     ToolCallMessageResult,
@@ -66,8 +67,7 @@ class ReplStreamHandler(SwarmStreamHandler):
 
     async def on_stream(
         self,
-        chunk: Delta,
-        agent: Agent | None,
+        agent_response: AgentResponse,
     ) -> None:
         """Handle streaming content from agents.
 
@@ -78,10 +78,14 @@ class ReplStreamHandler(SwarmStreamHandler):
         - Message continuity tracking
 
         Args:
-            chunk: Content update containing:
+            agent_response: Agent response containing:
+                - agent: The agent generating the content
                 - content: Optional text content
+                - parsed_content: Optional parsed content
                 - finish_reason: Optional completion status
-            agent: The agent generating the content, or None if system message.
+                - delta: Optional content update
+                - usage: Optional usage information
+                - response_cost: Optional response cost information
 
         Notes:
             - Only shows agent prefix for first chunk of new messages
@@ -89,18 +93,21 @@ class ReplStreamHandler(SwarmStreamHandler):
             - Maintains visual continuity for multi-chunk responses
             - Ensures immediate output through flushing
         """
-        if chunk.content:
-            # Show a continuation indicator if the response ended due to a length limit
-            if getattr(chunk, "finish_reason", None) == "length":
-                print("\n[...continuing...]", end="", flush=True)
+        if agent_response.finish_reason == "length":
+            print("\n[...continuing...]", end="", flush=True)
 
+        if content := agent_response.delta.content:
             # Only print agent ID prefix for the first character of a new message
-            if not hasattr(self, "_last_agent") or self._last_agent != agent:
-                agent_id = agent.id if agent else "unknown"
+            if self._last_agent != agent_response.agent:
+                agent_id = agent_response.agent.id if agent_response.agent else "unknown"
                 print(f"\n[{agent_id}] ", end="", flush=True)
-                self._last_agent = agent
+                self._last_agent = agent_response.agent
 
-            print(f"{chunk.content}", end="", flush=True)
+            print(content, end="", flush=True)
+
+        # Always ensure a newline at the end of a complete response
+        if agent_response.finish_reason:
+            print("", flush=True)
 
     async def on_error(
         self,
@@ -157,7 +164,7 @@ class ReplStreamHandler(SwarmStreamHandler):
 
     async def on_complete(
         self,
-        messages: list[Message],
+        messages: Sequence[Message],
         agent: Agent | None,
     ) -> None:
         """Handle completion of agent tasks.
@@ -177,7 +184,7 @@ class ReplStreamHandler(SwarmStreamHandler):
             - Maintains consistent formatting
         """
         agent_id = agent.id if agent else "unknown"
-        print(f"\n✅ [{agent_id}] Completed")
+        print(f"\n✅ [{agent_id}] Completed", flush=True)
         self._last_agent = None
 
     async def on_tool_call(
