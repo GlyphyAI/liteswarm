@@ -9,6 +9,8 @@ import uuid
 from collections.abc import Sequence
 from typing import Any, Protocol, TypeVar
 
+from typing_extensions import override
+
 from liteswarm.types.message_store import LiteMessageStoreFilter
 from liteswarm.types.messages import MessageRecord
 from liteswarm.types.swarm import Message
@@ -267,6 +269,7 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
         """
         self._messages: dict[str, MessageRecord] = {}
 
+    @override
     def get_messages(
         self,
         filter: LiteMessageStoreFilter | None = None,
@@ -309,6 +312,7 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
 
         return copy.deepcopy(messages)
 
+    @override
     def add_message(
         self,
         message: Message,
@@ -340,6 +344,7 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
         self._messages[msg_id] = message_record
         return copy.deepcopy(message_record)
 
+    @override
     def set_messages(
         self,
         messages: Sequence[Message],
@@ -372,6 +377,7 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
 
         return memory_messages
 
+    @override
     def remove_message(self, message_id: str) -> None:
         """Remove a message from the store.
 
@@ -384,6 +390,7 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
         """
         self._messages.pop(message_id, None)
 
+    @override
     def clear(self) -> None:
         """Clear all messages from the store.
 

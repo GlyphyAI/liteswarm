@@ -9,6 +9,7 @@ from collections.abc import Sequence
 from typing import Any, Literal, Protocol, TypeAlias
 
 from litellm import acompletion
+from typing_extensions import override
 
 from liteswarm.core.message_index import LiteMessageIndex, MessageIndex
 from liteswarm.types.llm import LLM
@@ -472,6 +473,7 @@ class LiteContextManager(ContextManager):
     # MARK: Public API
     # ================================================
 
+    @override
     async def optimize(
         self,
         messages: Sequence[MessageRecord],
@@ -523,6 +525,7 @@ class LiteContextManager(ContextManager):
 
         return [*system_messages, *optimized]
 
+    @override
     async def get_relevant_context(
         self,
         messages: Sequence[MessageRecord],

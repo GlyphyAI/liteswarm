@@ -11,6 +11,7 @@ from typing import Any, Protocol
 import numpy as np
 from litellm import aembedding
 from numpy.typing import NDArray
+from typing_extensions import override
 
 from liteswarm.types.messages import MessageRecord
 
@@ -204,6 +205,7 @@ class LiteMessageIndex(MessageIndex):
 
         return [(msg, embedding) for msg, embedding in embedding_pairs if embedding.size > 0]
 
+    @override
     async def index(self, messages: Sequence[MessageRecord]) -> None:
         """Add new messages to the index.
 
@@ -223,6 +225,7 @@ class LiteMessageIndex(MessageIndex):
             self._messages[msg.id] = msg
             self._message_embeddings[msg.id] = embedding
 
+    @override
     async def search(
         self,
         query: str,
@@ -264,6 +267,7 @@ class LiteMessageIndex(MessageIndex):
 
         return similarity_scores
 
+    @override
     async def clear(self) -> None:
         """Clear all indexed embeddings while preserving messages.
 
