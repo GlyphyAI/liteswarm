@@ -7,18 +7,11 @@
 import asyncio
 import os
 import random
-from collections.abc import Sequence
 from time import sleep
+from typing import Any
 
-from liteswarm.core import LiteSwarmStreamHandler, Swarm
-from liteswarm.types import (
-    LLM,
-    Agent,
-    AgentResponse,
-    ChatCompletionDeltaToolCall,
-    Message,
-    ToolCallResult,
-)
+from liteswarm.core import ConsoleEventHandler, Swarm
+from liteswarm.types import LLM, Agent
 from liteswarm.utils.logging import enable_logging
 
 os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
@@ -37,54 +30,8 @@ Remember to use parallel tool calls efficiently to gather data quickly.
 """.strip()
 
 
-class ConsoleStreamHandler(LiteSwarmStreamHandler):
-    async def on_stream(
-        self,
-        agent_response: AgentResponse,
-    ) -> None:
-        if agent_response.delta.content:
-            print(f"{agent_response.delta.content}", end="", flush=True)
-
-    async def on_error(
-        self,
-        error: Exception,
-        agent: Agent | None,
-    ) -> None:
-        print(f"[{agent.id if agent else 'unknown'}] Error: {str(error)}")
-
-    async def on_agent_switch(
-        self,
-        previous_agent: Agent | None,
-        next_agent: Agent,
-    ) -> None:
-        print(f"\n[{next_agent.id}] Switched to {next_agent.id}")
-
-    async def on_complete(
-        self,
-        messages: Sequence[Message],
-        agent: Agent | None,
-    ) -> None:
-        print(f"\n[{agent.id if agent else 'unknown'}] Completed")
-
-    async def on_tool_call(
-        self,
-        tool_call: ChatCompletionDeltaToolCall,
-        agent: Agent | None,
-    ) -> None:
-        print(f"\n[{agent.id if agent else 'unknown'}] Tool call: {tool_call.function.name}")
-
-    async def on_tool_call_result(
-        self,
-        tool_call_result: ToolCallResult,
-        agent: Agent | None,
-    ) -> None:
-        print(
-            f"\n[{agent.id if agent else 'unknown'}] Got result for: {tool_call_result.tool_call.function.name}"
-        )
-
-
 async def run() -> None:
-    def query_weather_api(location: str) -> dict:
+    def query_weather_api(location: str) -> dict[str, Any]:
         """Query weather data for a location."""
         # Simulate API call with random delay
         sleep(random.uniform(1, 3))
@@ -94,7 +41,7 @@ async def run() -> None:
             "conditions": random.choice(["sunny", "rainy", "cloudy"]),
         }
 
-    def query_population_data(city: str) -> dict:
+    def query_population_data(city: str) -> dict[str, Any]:
         """Query population statistics for a city."""
         # Simulate API call with random delay
         sleep(random.uniform(1, 3))
@@ -104,7 +51,7 @@ async def run() -> None:
             "growth_rate": round(random.uniform(-2, 5), 2),
         }
 
-    def query_tourist_attractions(city: str) -> dict:
+    def query_tourist_attractions(city: str) -> dict[str, Any]:
         """Query tourist attractions for a city."""
         # Simulate API call with random delay
         sleep(random.uniform(1, 3))
@@ -121,7 +68,7 @@ async def run() -> None:
             "annual_visitors": random.randint(100000, 1000000),
         }
 
-    def query_economic_data(city: str) -> dict:
+    def query_economic_data(city: str) -> dict[str, Any]:
         """Query economic data for a city."""
         # Simulate API call with random delay
         sleep(random.uniform(1, 3))
@@ -152,9 +99,7 @@ async def run() -> None:
         ),
     )
 
-    console_handler = ConsoleStreamHandler()
-    client = Swarm(stream_handler=console_handler)
-
+    client = Swarm(event_handler=ConsoleEventHandler())
     result = await client.execute(
         agent=research_agent,
         prompt="Please analyze the city of Seattle and provide insights about its weather, population, tourism, and economy.",

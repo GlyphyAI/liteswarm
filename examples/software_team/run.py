@@ -12,7 +12,7 @@ from liteswarm.experimental import SwarmTeam
 from liteswarm.types import ArtifactStatus
 from liteswarm.utils.logging import enable_logging
 
-from .handlers import InteractivePlanFeedbackHandler, SwarmStreamHandler, SwarmTeamStreamHandler
+from .handlers import InteractivePlanFeedbackHandler, SwarmEventHandler
 from .planning import create_planning_agent
 from .tasks import create_task_definitions
 from .team import create_team_members
@@ -84,8 +84,9 @@ def create_team() -> SwarmTeam:
     Returns:
         A new SwarmTeam instance.
     """
+    event_handler = SwarmEventHandler()
     swarm = Swarm(
-        stream_handler=SwarmStreamHandler(),
+        event_handler=event_handler,
         include_usage=True,
         include_cost=True,
     )
@@ -99,7 +100,7 @@ def create_team() -> SwarmTeam:
         members=team_members,
         task_definitions=task_definitions,
         planning_agent=planning_agent,
-        stream_handler=SwarmTeamStreamHandler(),
+        event_handler=event_handler,
     )
 
     return team
