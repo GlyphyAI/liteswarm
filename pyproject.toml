@@ -119,6 +119,7 @@ disallow_any_generics = true
 disallow_untyped_defs = true
 disallow_any_unimported = true
 warn_unreachable = true
+explicit_package_bases = true
 enable_error_code = [
     "explicit-override",
     "possibly-undefined",
