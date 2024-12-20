@@ -115,6 +115,17 @@ docstring-code-format = true
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
+disallow_any_generics = true
+disallow_untyped_defs = true
+disallow_any_unimported = true
+warn_unreachable = true
+enable_error_code = [
+    "explicit-override",
+    "possibly-undefined",
+    "truthy-bool",
+    "unused-awaitable",
+    "unused-ignore",
+]
 plugins = [
     "pydantic.mypy",
 ]
@@ -125,5 +136,5 @@ version = "0.1.1"
 tag_format = "$version"
 version_files = [
     "pyproject.toml:version",
-    "CITATION.cff:version"
+    "CITATION.cff:version",
 ]
