@@ -6,6 +6,8 @@
 
 from typing import Any
 
+from typing_extensions import override
+
 
 class ContextVariables(dict[str, Any]):
     """Manages context variables with attribute-style access.
@@ -105,6 +107,7 @@ class ContextVariables(dict[str, Any]):
         except KeyError:
             raise AttributeError(f"'ContextVariables' object has no attribute '{key}'") from None
 
+    @override
     def __setattr__(self, key: str, value: Any) -> None:
         """Assign a value to a key using attribute access.
 
@@ -114,6 +117,7 @@ class ContextVariables(dict[str, Any]):
         """
         self[key] = value
 
+    @override
     def __delattr__(self, key: str) -> None:
         """Delete a key-value pair using attribute access.
 
