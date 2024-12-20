@@ -9,6 +9,7 @@ from typing import Protocol
 import json_repair
 import orjson
 from pydantic import ValidationError
+from typing_extensions import override
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
@@ -713,6 +714,7 @@ class LitePlanningAgent(PlanningAgent):
                 original_error=e,
             ) from e
 
+    @override
     async def create_plan(
         self,
         prompt: str,
