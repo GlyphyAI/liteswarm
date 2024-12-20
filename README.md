@@ -823,57 +823,57 @@ The retry mechanism features:
 
 The framework also provides specific error types for different failure scenarios:
 
-1. **SwarmError**: Base class for all swarm-specific errors
+* **SwarmError**: Base class for all swarm-specific errors
    - Provides context about what went wrong
    - Contains the original exception if applicable
    - Includes agent information when relevant
 
-2. **CompletionError**: Raised when LLM completion fails permanently
+* **CompletionError**: Raised when LLM completion fails permanently
    - Indicates API call failure after all retries
    - Contains the original API error
    - Provides completion attempt details
 
-3. **ContextLengthError**: Raised when context becomes too large
+* **ContextLengthError**: Raised when context becomes too large
    - Indicates when message history exceeds limits
    - Provides details about context size
    - Suggests using memory management
 
-4. **SwarmTeamError**: Base class for team-related errors
+* **SwarmTeamError**: Base class for team-related errors
    - Provides unified error handling for team operations
    - Contains original error and team context
    - Used for planning and execution failures
 
-5. **PlanValidationError**: Raised when plan validation fails
+* **PlanValidationError**: Raised when plan validation fails
    - Indicates invalid task types or dependencies
    - Lists specific validation failures
    - Helps identify plan structure issues
 
-6. **TaskExecutionError**: Raised when task execution fails
+* **TaskExecutionError**: Raised when task execution fails
    - Contains task and assignee information
    - Provides execution failure details
    - Helps track which task and member failed
 
-7. **ResponseParsingError**: Raised when response parsing fails
+* **ResponseParsingError**: Raised when response parsing fails
    - Contains raw response and expected format
    - Helps debug format mismatches
    - Used for structured output validation
 
-8. **ResponseRepairError**: Raised when response repair fails
+* **ResponseRepairError**: Raised when response repair fails
    - Indicates failed attempts to fix invalid responses
    - Contains repair attempt details
    - Used when response cannot be salvaged
 
-9. **MaxAgentSwitchesError**: Raised when too many agent switches occur
+* **MaxAgentSwitchesError**: Raised when too many agent switches occur
    - Indicates potential infinite switching loops
    - Shows switch count and limit
    - Includes agent switch history
 
-10. **MaxResponseContinuationsError**: Raised when response needs too many continuations
+* **MaxResponseContinuationsError**: Raised when response needs too many continuations
     - Indicates when response exceeds length limits
     - Shows continuation count and limit
     - Suggests breaking task into smaller parts
 
-11. **RetryError**: Raised when retry mechanism fails
+* **RetryError**: Raised when retry mechanism fails
     - Contains original error that caused retries
     - Shows retry count and settings
     - Includes backoff strategy details
@@ -1449,7 +1449,7 @@ If you use LiteSwarm in your research or project, please cite our work:
     year = {2024},
     url = {https://github.com/glyphyai/liteswarm},
     license = {MIT},
-    version = {0.1.1}
+    version = {0.2.0}
 }
 ```
 

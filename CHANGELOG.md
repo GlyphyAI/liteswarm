@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.2.0 (2024-12-20)
+
+### Added
+- New message management system with MessageStore, MessageIndex, and ContextManager
+- Event system with ConsoleEventHandler and SwarmEventHandler
+- SwarmStream wrapper for improved response handling and parsing
+- Task context and plan ID support
+- New REPL commands for optimization and search
+
+### Changed
+- Refactored stream handler to use event-based system
+- Enhanced message and context management
+- Improved type system with stricter checks
+- Updated examples to use new event system
+
+### Fixed
+- Context update and retry mechanism improvements
+- Tool call pair filtering enhancements
+- Response format and cleanup handling
+- Variable initialization and error logging
+
+### Removed
+- Legacy stream handler and summarizer
+- Unused types and context keys
+
+[0.2.0]: https://github.com/glyphyai/liteswarm/releases/tag/0.2.0
+
 ## 0.1.1 (2024-12-10)
 
 ### Added
