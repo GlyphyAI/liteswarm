@@ -20,9 +20,17 @@ from litellm.utils import token_counter
 from pydantic import BaseModel
 
 from liteswarm.core.context_manager import ContextManager, LiteContextManager
+from liteswarm.core.event_handler import LiteSwarmEventHandler, SwarmEventHandler
 from liteswarm.core.message_store import LiteMessageStore, MessageStore
-from liteswarm.core.stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from liteswarm.core.swarm_stream import SwarmStream
+from liteswarm.types.events import (
+    SwarmAgentResponseEvent,
+    SwarmAgentSwitchEvent,
+    SwarmCompleteEvent,
+    SwarmErrorEvent,
+    SwarmToolCallEvent,
+    SwarmToolCallResultEvent,
+)
 from liteswarm.types.exceptions import (
     CompletionError,
     ContextLengthError,
@@ -141,8 +149,8 @@ class Swarm:
 
     def __init__(
         self,
-        stream_handler: SwarmStreamHandler | None = None,
-        message_store: MessageStore | None = None,
+        event_handler: SwarmEventHandler | None = None,
+        message_store: MessageStore[Any] | None = None,
         context_manager: ContextManager | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
@@ -157,14 +165,14 @@ class Swarm:
         """Initialize a new Swarm instance with specified configuration.
 
         Configures swarm behavior with:
-        - Stream handling and event tracking
+        - Event handler for processing swarm events
         - Message storage and history management
         - Context optimization and filtering
         - Usage and cost tracking
         - Retry and safety limits
 
         Args:
-            stream_handler: Handler for streaming events. Defaults to LiteSwarmStreamHandler.
+            event_handler: Handler for processing swarm events. Defaults to LiteSwarmEventHandler.
             message_store: Store for conversation history. Defaults to LiteMessageStore.
             context_manager: Manager for context optimization and relevance. Defaults to LiteContextManager.
             include_usage: Whether to track token usage. Defaults to False.
@@ -183,7 +191,7 @@ class Swarm:
         self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
-        self.stream_handler = stream_handler or LiteSwarmStreamHandler()
+        self.event_handler = event_handler or LiteSwarmEventHandler()
         self.message_store = message_store or LiteMessageStore()
         self.context_manager = context_manager or LiteContextManager()
         self.include_usage = include_usage
@@ -359,7 +367,12 @@ class Swarm:
                 error=ValueError(f"Unknown function: {function_name}"),
             )
 
-        await self.stream_handler.on_tool_call(tool_call, agent)
+        await self.event_handler.on_event(
+            SwarmToolCallEvent(
+                tool_call=tool_call,
+                agent=agent,
+            )
+        )
 
         try:
             args = orjson.loads(tool_call.function.arguments)
@@ -367,13 +380,27 @@ class Swarm:
             if function_has_parameter(function_tool, "context_variables"):
                 args = {**args, "context_variables": context_variables}
 
+            function_tool_result = function_tool(**args)
             tool_call_result = self._parse_tool_call_result(
                 tool_call=tool_call,
-                result=function_tool(**args),
+                result=function_tool_result,
+            )
+
+            await self.event_handler.on_event(
+                SwarmToolCallResultEvent(
+                    tool_call=tool_call,
+                    tool_call_result=function_tool_result,
+                    agent=agent,
+                )
             )
 
         except Exception as error:
-            await self.stream_handler.on_error(error, agent)
+            await self.event_handler.on_event(
+                SwarmErrorEvent(
+                    error=error,
+                    agent=agent,
+                )
+            )
             tool_call_result = ToolCallFailureResult(tool_call=tool_call, error=error)
 
         return tool_call_result
@@ -511,6 +538,7 @@ class Swarm:
         Raises:
             ValueError: If agent parameters are invalid or inconsistent.
             TypeError: If response format is unexpected.
+            ContextWindowExceededError: If context window is exceeded.
         """
         exclude_keys = {"response_format", "litellm_kwargs"}
         llm_messages = dump_messages(messages, exclude_none=True)
@@ -737,7 +765,7 @@ class Swarm:
         usage = safe_get_attr(chunk, "usage", Usage)
         response_cost = None
 
-        if usage and self.include_cost:
+        if usage is not None and self.include_cost:
             response_cost = calculate_response_cost(
                 model=agent.llm.model,
                 usage=usage,
@@ -831,6 +859,7 @@ class Swarm:
         full_content: str,
         finish_reason: FinishReason | None,
         response_format: ResponseFormat | None,
+        ignore_errors: bool = False,
     ) -> JSON | BaseModel | None:
         """Parse agent response content into specified format when appropriate.
 
@@ -838,20 +867,34 @@ class Swarm:
             full_content: Complete response content to parse.
             finish_reason: Reason for response completion.
             response_format: Target format specification.
+            ignore_errors: Whether to ignore errors and return None.
 
         Returns:
             Parsed content in specified format, or None if parsing not needed/possible.
+
+        Raises:
+            CompletionError: If parsing fails and ignore_errors is False.
         """
-        parsed_content = json_repair.loads(full_content)
-        if isinstance(parsed_content, tuple):
-            parsed_content = parsed_content[0]
+        try:
+            parsed_content = json_repair.loads(full_content)
+            if isinstance(parsed_content, tuple):
+                parsed_content = parsed_content[0]
 
-        valid_finish_reasons: set[FinishReason] = {"stop", "tool_calls"}
-        if finish_reason in valid_finish_reasons:
-            if parsed_content and is_subtype(response_format, BaseModel):
-                return response_format.model_validate(parsed_content)
+            valid_finish_reasons: set[FinishReason] = {"stop", "tool_calls"}
+            if finish_reason in valid_finish_reasons:
+                if parsed_content and is_subtype(response_format, BaseModel):
+                    return response_format.model_validate(parsed_content)
 
-        return parsed_content
+            return parsed_content
+
+        except Exception as e:
+            if ignore_errors:
+                return None
+
+            raise CompletionError(
+                f"Failed to parse agent response content: {e}",
+                original_error=e,
+            ) from e
 
     async def _process_agent_response(
         self,
@@ -864,7 +907,7 @@ class Swarm:
         Implements agent response handling:
         - Streams completion responses with proper buffering
         - Accumulates content and tool calls accurately
-        - Updates stream handler with progress
+        - Updates event handler with progress
         - Maintains conversation state consistency
         - Tracks usage and costs throughout
 
@@ -921,6 +964,7 @@ class Swarm:
                     full_content=full_content,
                     finish_reason=finish_reason,
                     response_format=agent.llm.response_format,
+                    ignore_errors=True,
                 )
 
             if delta.tool_calls:
@@ -945,7 +989,7 @@ class Swarm:
                 response_cost=completion_response.response_cost,
             )
 
-            await self.stream_handler.on_stream(response)
+            await self.event_handler.on_event(SwarmAgentResponseEvent(response=response))
 
             yield response
 
@@ -1071,21 +1115,20 @@ class Swarm:
         Raises:
             ContextLengthError: If context remains too large after optimization
         """
+        messages = self.message_store.get_messages()
+        optimized = await self.context_manager.optimize(
+            messages=messages,
+            model=agent.llm.model,
+        )
+
+        self.message_store.set_messages(optimized)
+        agent_messages = await self._prepare_agent_context(
+            agent=agent,
+            context_variables=context_variables,
+        )
+
         try:
-            messages = self.message_store.get_messages()
-            optimized = await self.context_manager.optimize(
-                messages=messages,
-                model=agent.llm.model,
-            )
-
-            self.message_store.set_messages(optimized)
-            agent_messages = await self._prepare_agent_context(
-                agent=agent,
-                context_variables=context_variables,
-            )
-
             return await self._create_completion(agent, agent_messages)
-
         except ContextWindowExceededError as e:
             raise ContextLengthError(
                 message="Context window exceeded even after optimization",
@@ -1231,8 +1274,15 @@ class Swarm:
                 switch_history.append(next_agent.id)
 
                 log_verbose(f"Switching from agent {previous_agent.id} to {next_agent.id}")
+
+                await self.event_handler.on_event(
+                    SwarmAgentSwitchEvent(
+                        previous=previous_agent,
+                        current=next_agent,
+                    )
+                )
+
                 await self._activate_agent(next_agent, self._context_variables)
-                await self.stream_handler.on_agent_switch(previous_agent, next_agent)
 
             agent_messages = await self._prepare_agent_context(
                 agent=self._active_agent,
@@ -1324,14 +1374,21 @@ class Swarm:
                 yield response
 
         except Exception as e:
-            await self.stream_handler.on_error(e, self._active_agent)
+            await self.event_handler.on_event(
+                SwarmErrorEvent(
+                    error=e,
+                    agent=self._active_agent,
+                )
+            )
             raise
 
         finally:
             all_messages = self.message_store.get_messages()
-            await self.stream_handler.on_complete(
-                messages=all_messages,
-                agent=self._active_agent,
+            await self.event_handler.on_event(
+                SwarmCompleteEvent(
+                    messages=all_messages,
+                    agent=self._active_agent,
+                )
             )
 
     # ================================================
