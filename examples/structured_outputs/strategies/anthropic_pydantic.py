@@ -64,8 +64,7 @@ def create_response_parser() -> Callable[[str, ContextVariables], InnerMonologue
         if not isinstance(response_json, dict):
             raise TypeError("Response is not a valid JSON object")
 
-        first_key = next(iter(response_json))
-        return InnerMonologue.model_validate(response_json[first_key])
+        return InnerMonologue.model_validate(response_json["values"])
 
     return response_parser
 

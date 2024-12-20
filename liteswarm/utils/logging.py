@@ -12,6 +12,8 @@ from datetime import datetime
 from functools import lru_cache
 from typing import Any, Literal, cast
 
+from typing_extensions import override
+
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 verbose_logger = logging.getLogger("liteswarm")
@@ -76,6 +78,7 @@ class FancyFormatter(logging.Formatter):
             ```
     """
 
+    @override
     def format(self, record: logging.LogRecord) -> str:
         """Format log record with colors and structure.
 

@@ -32,13 +32,21 @@ def union(types: Sequence[T]) -> Union[T]:  # noqa: UP007
         number_types = [int, str, float]
         NumberUnion = union(number_types)  # Union[int, str, float]
 
+
         # Use in type hints
         def process_number(value: NumberUnion) -> None:
             pass
 
+
         # Create a Union type for custom classes
-        class A: pass
-        class B: pass
+        class A:
+            pass
+
+
+        class B:
+            pass
+
+
         custom_union = union([A, B])  # Union[A, B]
         ```
 
@@ -65,12 +73,17 @@ def is_callable(obj: Any) -> TypeIs[Callable[..., Any]]:
 
     Example:
         ```python
-        def my_func(): pass
-        class MyClass: pass
+        def my_func():
+            pass
+
+
+        class MyClass:
+            pass
+
 
         is_callable(my_func)  # Returns True
         is_callable(MyClass)  # Returns False
-        is_callable(print)    # Returns True
+        is_callable(print)  # Returns True
         ```
     """
     return callable(obj) and not isinstance(obj, type)
@@ -91,12 +104,17 @@ def is_subtype(obj: Any, obj_type: type[T]) -> TypeGuard[type[T]]:
 
     Example:
         ```python
-        class Animal: pass
-        class Dog(Animal): pass
+        class Animal:
+            pass
 
-        is_subtype(Dog, Animal)     # Returns True
-        is_subtype(str, Animal)     # Returns False
-        is_subtype(None, Animal)    # Returns False
+
+        class Dog(Animal):
+            pass
+
+
+        is_subtype(Dog, Animal)  # Returns True
+        is_subtype(str, Animal)  # Returns False
+        is_subtype(None, Animal)  # Returns False
         ```
     """
     return (

@@ -4,23 +4,25 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from .console_handler import ConsoleEventHandler
 from .context_manager import ContextManager, LiteContextManager, LiteOptimizationStrategy
+from .event_handler import LiteSwarmEventHandler, SwarmEventHandler
 from .message_index import LiteMessageIndex, MessageIndex
 from .message_store import LiteMessageStore, MessageStore
-from .stream_handler import LiteSwarmStreamHandler, SwarmStreamHandler
 from .swarm import Swarm
 from .swarm_stream import SwarmStream
 
 __all__ = [
+    "ConsoleEventHandler",
     "ContextManager",
     "LiteContextManager",
     "LiteMessageIndex",
     "LiteMessageStore",
     "LiteOptimizationStrategy",
-    "LiteSwarmStreamHandler",
+    "LiteSwarmEventHandler",
     "MessageIndex",
     "MessageStore",
     "Swarm",
+    "SwarmEventHandler",
     "SwarmStream",
-    "SwarmStreamHandler",
 ]

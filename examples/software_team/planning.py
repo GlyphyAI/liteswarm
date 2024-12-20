@@ -110,17 +110,18 @@ def build_planning_agent_system_prompt(context: ContextVariables) -> str:
 
     response_format = SoftwarePlan
     response_example = SoftwarePlan(
+        id="plan-1",
         tasks=[
             FlutterTask(
                 type="flutter_feature",
-                id="<task_id>",
-                title="<task_title>",
-                description="<task_description>",
+                id="task-1",
+                title="Create a new Flutter feature",
+                description="Create a new Flutter feature",
                 status=TaskStatus.PENDING,
                 assignee=None,
                 dependencies=[],
                 metadata=None,
-                feature_type="<feature_type>",
+                feature_type="new_feature",
             ),
         ],
         metadata=None,

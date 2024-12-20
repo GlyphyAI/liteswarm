@@ -75,12 +75,12 @@ def get_user_input(
         print(f"{i}. {id} - {strategy_builder.description}")
         print(f"   Default model: {strategy_builder.default_model}")
 
+    strategy_id: StrategyId | None = None
+
     while True:
         try:
             choice = input(f"\nSelect strategy (1-{len(items)}) or press Enter for default: ")
             choice = choice.strip()
-            strategy_id: StrategyId | None = None
-
             if not choice:
                 strategy_id = registry.default_strategy_id
                 break

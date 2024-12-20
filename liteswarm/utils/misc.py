@@ -148,6 +148,8 @@ def extract_json(content: str) -> JSON:
     if matches:
         for match in matches:
             try:
+                if not isinstance(match, str):
+                    continue
                 return orjson.loads(match.strip())
             except Exception:
                 continue

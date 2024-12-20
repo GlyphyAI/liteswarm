@@ -7,6 +7,7 @@
 from litellm.types.utils import ChatCompletionDeltaToolCall
 
 from .context import ContextVariables
+from .events import SwarmEvent, SwarmEventType
 from .llm import LLM, AgentTool
 from .messages import MessageRecord
 from .misc import JSON, Number
@@ -50,6 +51,8 @@ __all__ = [
     "Number",
     "Plan",
     "PlanFeedbackHandler",
+    "SwarmEvent",
+    "SwarmEventType",
     "Task",
     "TaskDefinition",
     "TaskInstructions",

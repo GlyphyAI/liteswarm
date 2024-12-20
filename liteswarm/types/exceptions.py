@@ -4,6 +4,8 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+from pydantic import BaseModel
+
 from liteswarm.types.swarm_team import PydanticResponseFormat, Task, TeamMember
 
 
@@ -366,7 +368,7 @@ class ResponseParsingError(SwarmTeamError):
         self,
         message: str,
         response: str | None = None,
-        response_format: PydanticResponseFormat | None = None,
+        response_format: PydanticResponseFormat[BaseModel] | None = None,
         original_error: Exception | None = None,
     ) -> None:
         """Initialize a new ResponseParsingError.
@@ -444,7 +446,7 @@ class ResponseRepairError(SwarmTeamError):
         self,
         message: str,
         response: str | None = None,
-        response_format: PydanticResponseFormat | None = None,
+        response_format: PydanticResponseFormat[BaseModel] | None = None,
         original_error: Exception | None = None,
     ) -> None:
         """Initialize a new ResponseRepairError.

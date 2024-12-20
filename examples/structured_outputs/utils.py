@@ -13,7 +13,7 @@ from liteswarm.core import Swarm
 from liteswarm.types import Agent, ContextVariables
 from liteswarm.utils.typing import is_callable
 
-from .stream import SwarmStreamHandler
+from .handlers import EventHandler
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -63,7 +63,7 @@ async def generate_structured_response_typed(
         ValueError: If response content is empty.
         ValidationError: If response doesn't match expected format.
     """
-    swarm = Swarm(stream_handler=SwarmStreamHandler())
+    swarm = Swarm(event_handler=EventHandler())
     result = await swarm.execute(agent=agent, prompt=user_prompt)
     if not result.content:
         raise ValueError("No response content")

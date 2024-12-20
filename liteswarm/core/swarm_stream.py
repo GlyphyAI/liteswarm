@@ -7,6 +7,8 @@
 from collections.abc import AsyncGenerator, AsyncIterator
 from typing import TYPE_CHECKING
 
+from typing_extensions import override
+
 from liteswarm.types.swarm import AgentExecutionResult, AgentResponse, ResponseCost, Usage
 from liteswarm.utils.usage import combine_response_cost, combine_usage
 
@@ -83,6 +85,7 @@ class SwarmStream(AsyncIterator[AgentResponse]):
         self._accumulated_usage: Usage | None = None
         self._accumulated_response_cost: ResponseCost | None = None
 
+    @override
     def __aiter__(self) -> AsyncIterator[AgentResponse]:
         """Provide async iterator interface.
 
@@ -91,6 +94,7 @@ class SwarmStream(AsyncIterator[AgentResponse]):
         """
         return self
 
+    @override
     async def __anext__(self) -> AgentResponse:
         """Get next response from stream with accumulation.
 

@@ -9,6 +9,7 @@ from typing import Protocol
 import json_repair
 import orjson
 from pydantic import ValidationError
+from typing_extensions import override
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
@@ -135,7 +136,7 @@ class PlanningAgent(Protocol):
                         ),
                     ]
                     # Create plan with all required fields
-                    return Plan(tasks=tasks, metadata=None)
+                    return Plan(id="plan-1", tasks=tasks, metadata=None)
             ```
     """
 
@@ -369,7 +370,7 @@ class LitePlanningAgent(PlanningAgent):
                 ```python
                 def parse_plan(content: str, context: ContextVariables) -> Plan:
                     # Custom parsing logic
-                    return Plan(tasks=[...])
+                    return Plan(id="plan-1", tasks=[...])
 
 
                 planning_agent = LitePlanningAgent(swarm=swarm, response_format=parse_plan)
@@ -400,6 +401,7 @@ class LitePlanningAgent(PlanningAgent):
             Valid plan:
                 ```python
                 plan = Plan(
+                    id="plan-1",
                     tasks=[
                         Task(
                             # Base Task required fields
@@ -432,6 +434,7 @@ class LitePlanningAgent(PlanningAgent):
             Unknown task type:
                 ```python
                 plan = Plan(
+                    id="plan-1",
                     tasks=[
                         Task(
                             type="unknown",  # Unknown type
@@ -453,6 +456,7 @@ class LitePlanningAgent(PlanningAgent):
             Invalid dependencies:
                 ```python
                 plan = Plan(
+                    id="plan-1",
                     tasks=[
                         Task(
                             type="review",
@@ -713,6 +717,7 @@ class LitePlanningAgent(PlanningAgent):
                 original_error=e,
             ) from e
 
+    @override
     async def create_plan(
         self,
         prompt: str,

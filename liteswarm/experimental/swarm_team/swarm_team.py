@@ -9,6 +9,7 @@ from collections import defaultdict
 import json_repair
 from pydantic import BaseModel, ValidationError
 
+from liteswarm.core.event_handler import LiteSwarmEventHandler
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.planning import LitePlanningAgent, PlanningAgent
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
@@ -16,7 +17,12 @@ from liteswarm.experimental.swarm_team.response_repair import (
     LiteResponseRepairAgent,
     ResponseRepairAgent,
 )
-from liteswarm.experimental.swarm_team.stream_handler import SwarmTeamStreamHandler
+from liteswarm.types.events import (
+    SwarmTeamPlanCompletedEvent,
+    SwarmTeamPlanCreatedEvent,
+    SwarmTeamTaskCompletedEvent,
+    SwarmTeamTaskStartedEvent,
+)
 from liteswarm.types.exceptions import TaskExecutionError
 from liteswarm.types.swarm import ContextVariables
 from liteswarm.types.swarm_team import (
@@ -139,9 +145,9 @@ class SwarmTeam:
         swarm: Swarm,
         members: list[TeamMember],
         task_definitions: list[TaskDefinition],
+        event_handler: LiteSwarmEventHandler | None = None,
         planning_agent: PlanningAgent | None = None,
         response_repair_agent: ResponseRepairAgent | None = None,
-        stream_handler: SwarmTeamStreamHandler | None = None,
     ) -> None:
         """Initialize a new team.
 
@@ -149,9 +155,10 @@ class SwarmTeam:
             swarm: Swarm client for agent interactions.
             members: Team members with their capabilities.
             task_definitions: Task types the team can handle.
+            event_handler: Optional event handler for team events.
             planning_agent: Optional custom planning agent.
             response_repair_agent: Optional custom response repair agent.
-            stream_handler: Optional event stream handler.
+
         """
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
@@ -161,7 +168,7 @@ class SwarmTeam:
         # Public properties
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
-        self.stream_handler = stream_handler
+        self.event_handler = event_handler or LiteSwarmEventHandler()
         self.planning_agent = planning_agent or LitePlanningAgent(
             swarm=self.swarm,
             task_definitions=task_definitions,
@@ -647,9 +654,7 @@ class SwarmTeam:
             context=context,
         )
 
-        if self.stream_handler:
-            await self.stream_handler.on_plan_created(result)
-
+        await self.event_handler.on_event(SwarmTeamPlanCreatedEvent(plan=result))
         return result
 
     async def execute(
@@ -779,7 +784,7 @@ class SwarmTeam:
             1. Creates an execution artifact to track progress.
             2. Executes tasks when their dependencies are met.
             3. Tracks execution results and updates artifact status.
-            4. Handles failures and notifies via stream handler.
+            4. Handles failures and notifies via event handler.
 
         Args:
             plan: Plan with tasks to execute.
@@ -833,9 +838,12 @@ class SwarmTeam:
                     artifact.task_results.append(task_result)
 
             artifact.status = ArtifactStatus.COMPLETED
-
-            if self.stream_handler:
-                await self.stream_handler.on_plan_completed(plan)
+            await self.event_handler.on_event(
+                SwarmTeamPlanCompletedEvent(
+                    plan=plan,
+                    artifact=artifact,
+                )
+            )
 
             return artifact
 
@@ -898,22 +906,19 @@ class SwarmTeam:
                     print(f"Task execution failed: {e}")
                 ```
         """
+        assignee = self._select_matching_member(task)
+        if not assignee:
+            raise TaskExecutionError(
+                f"No team member found for task type '{task.type}'",
+                task=task,
+            )
+
         try:
-            assignee = self._select_matching_member(task)
-            if not assignee:
-                raise ValueError(f"No team member found for task type '{task.type}'")
-
-            if self.stream_handler:
-                await self.stream_handler.on_task_started(task)
-
+            await self.event_handler.on_event(SwarmTeamTaskStartedEvent(task=task))
             task.status = TaskStatus.IN_PROGRESS
             task.assignee = assignee.agent.id
 
             task_definition = self._task_registry.get_task_definition(task.type)
-            if not task_definition:
-                task.status = TaskStatus.FAILED
-                raise ValueError(f"No TaskDefinition found for task type '{task.type}'")
-
             task_context = self._build_task_context(task, context)
             task_instructions = self._prepare_instructions(
                 task=task,
@@ -939,8 +944,13 @@ class SwarmTeam:
                 task_context=task_context,
             )
 
-            if self.stream_handler:
-                await self.stream_handler.on_task_completed(task)
+            await self.event_handler.on_event(
+                SwarmTeamTaskCompletedEvent(
+                    task=task,
+                    task_result=task_result,
+                    task_context=task_context,
+                )
+            )
 
             return task_result
 
@@ -949,7 +959,7 @@ class SwarmTeam:
             raise TaskExecutionError(
                 f"Failed to execute task: {task.title}",
                 task=task,
-                assignee=assignee if "assignee" in locals() else None,
+                assignee=assignee,
                 original_error=e,
             ) from e
 

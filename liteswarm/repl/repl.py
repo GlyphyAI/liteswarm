@@ -12,11 +12,12 @@ from collections import deque
 from typing import Any, NoReturn, get_args
 
 from litellm import token_counter
+from typing_extensions import override
 
 from liteswarm.core.context_manager import ContextManager, LiteOptimizationStrategy
 from liteswarm.core.message_store import MessageStore
 from liteswarm.core.swarm import Swarm
-from liteswarm.repl.stream_handler import ReplStreamHandler
+from liteswarm.repl.event_handler import ReplEventHandler
 from liteswarm.types.swarm import Agent, Message, ResponseCost, Usage
 from liteswarm.utils.logging import enable_logging as liteswarm_enable_logging
 from liteswarm.utils.messages import dump_messages, validate_messages
@@ -29,6 +30,7 @@ class ReplArgumentParser(argparse.ArgumentParser):
     calling sys.exit(), making it suitable for interactive use.
     """
 
+    @override
     def error(self, message: str) -> NoReturn:
         """Raise an ArgumentError instead of exiting.
 
@@ -80,7 +82,7 @@ class AgentRepl:
     def __init__(
         self,
         agent: Agent,
-        message_store: MessageStore | None = None,
+        message_store: MessageStore[Any] | None = None,
         context_manager: ContextManager | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
@@ -104,7 +106,7 @@ class AgentRepl:
         # Public configuration
         self.agent = agent
         self.swarm = Swarm(
-            stream_handler=ReplStreamHandler(),
+            event_handler=ReplEventHandler(),
             message_store=message_store,
             context_manager=context_manager,
             include_usage=include_usage,
@@ -191,19 +193,15 @@ class AgentRepl:
             print(f"  Total tokens: {self._usage.total_tokens or 0:,}")
 
             # Only print token details if they exist and are not empty
-            if self._usage.prompt_tokens_details and isinstance(
-                self._usage.prompt_tokens_details, dict
-            ):
+            if self._usage.prompt_tokens_details:
                 print("\nPrompt Token Details:")
-                for key, value in self._usage.prompt_tokens_details.items():
+                for key, value in self._usage.prompt_tokens_details.model_dump().items():
                     if value is not None:
                         print(f"  {key}: {value:,}")
 
-            if self._usage.completion_tokens_details and isinstance(
-                self._usage.completion_tokens_details, dict
-            ):
+            if self._usage.completion_tokens_details:
                 print("\nCompletion Token Details:")
-                for key, value in self._usage.completion_tokens_details.items():
+                for key, value in self._usage.completion_tokens_details.model_dump().items():
                     if value is not None:
                         print(f"  {key}: {value:,}")
 
@@ -631,7 +629,7 @@ class AgentRepl:
 
 async def start_repl(
     agent: Agent,
-    message_store: MessageStore | None = None,
+    message_store: MessageStore[Any] | None = None,
     context_manager: ContextManager | None = None,
     include_usage: bool = False,
     include_cost: bool = False,

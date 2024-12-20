@@ -410,12 +410,10 @@ class LLM(BaseModel):
         """
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):
             return response_format.model_json_schema()
-        if isinstance(response_format, BaseModel):
-            return response_format.model_dump_json()
-        if isinstance(response_format, dict):
+        elif isinstance(response_format, dict):
             return {**response_format}
-
-        return None
+        else:
+            return response_format
 
     @model_validator(mode="after")
     def check_litellm_kwargs_keys(self) -> Self:

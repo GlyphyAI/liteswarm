@@ -360,6 +360,7 @@ class Plan(BaseModel):
             ```python
             class ReviewPlan(Plan):
                 # All fields are required without defaults
+                id: str  # From base Plan
                 tasks: list[ReviewTask]  # Specific task type
                 metadata: dict[str, Any] | None  # From base Plan
             ```
@@ -368,6 +369,7 @@ class Plan(BaseModel):
             ```python
             plan = ReviewPlan(
                 # Base Plan required fields
+                id="plan-123",  # Unique identifier
                 tasks=[
                     ReviewTask(
                         # Base Task required fields - all must be provided
@@ -391,6 +393,7 @@ class Plan(BaseModel):
         LLM response format:
             ```json
             {
+                "id": "plan-123",
                 "tasks": [
                     {
                         "type": "code_review",
@@ -416,6 +419,9 @@ class Plan(BaseModel):
         - Avoiding complex Pydantic features
         - Using simple types that serialize to JSON
     """
+
+    id: str
+    """Unique identifier for the plan."""
 
     tasks: Sequence[Task]
     """Tasks in this plan."""
