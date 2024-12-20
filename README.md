@@ -828,25 +828,55 @@ The framework also provides specific error types for different failure scenarios
    - Contains the original exception if applicable
    - Includes agent information when relevant
 
-2. **ContextLengthError**: Raised when context becomes too large
+2. **CompletionError**: Raised when LLM completion fails permanently
+   - Indicates API call failure after all retries
+   - Contains the original API error
+   - Provides completion attempt details
+
+3. **ContextLengthError**: Raised when context becomes too large
    - Indicates when message history exceeds limits
    - Provides details about context size
    - Suggests using memory management
 
-3. **MaxAgentSwitchesError**: Raised when too many agent switches occur
+4. **SwarmTeamError**: Base class for team-related errors
+   - Provides unified error handling for team operations
+   - Contains original error and team context
+   - Used for planning and execution failures
+
+5. **PlanValidationError**: Raised when plan validation fails
+   - Indicates invalid task types or dependencies
+   - Lists specific validation failures
+   - Helps identify plan structure issues
+
+6. **TaskExecutionError**: Raised when task execution fails
+   - Contains task and assignee information
+   - Provides execution failure details
+   - Helps track which task and member failed
+
+7. **ResponseParsingError**: Raised when response parsing fails
+   - Contains raw response and expected format
+   - Helps debug format mismatches
+   - Used for structured output validation
+
+8. **ResponseRepairError**: Raised when response repair fails
+   - Indicates failed attempts to fix invalid responses
+   - Contains repair attempt details
+   - Used when response cannot be salvaged
+
+9. **MaxAgentSwitchesError**: Raised when too many agent switches occur
    - Indicates potential infinite switching loops
    - Shows switch count and limit
    - Includes agent switch history
 
-4. **MaxResponseContinuationsError**: Raised when response needs too many continuations
-   - Indicates when response exceeds length limits
-   - Shows continuation count and limit
-   - Suggests breaking task into smaller parts
+10. **MaxResponseContinuationsError**: Raised when response needs too many continuations
+    - Indicates when response exceeds length limits
+    - Shows continuation count and limit
+    - Suggests breaking task into smaller parts
 
-5. **RetryError**: Raised when retry mechanism fails
-   - Contains original error that caused retries
-   - Shows retry count and settings
-   - Includes backoff strategy details
+11. **RetryError**: Raised when retry mechanism fails
+    - Contains original error that caused retries
+    - Shows retry count and settings
+    - Includes backoff strategy details
 
 Best practices for error handling:
 
@@ -854,28 +884,43 @@ Best practices for error handling:
    ```python
    try:
        result = await swarm.execute(agent, prompt)
-   except ContextLengthError:
+   except CompletionError as e:
+       # Handle API failures
+   except ContextLengthError as e:
        # Handle context length issues
-   except MaxAgentSwitchesError:
-       # Handle agent switching issues
-   except SwarmError:
+   except SwarmError as e:
        # Handle other swarm errors
    ```
 
-2. **Stream Error Recovery**: Handle streaming errors gracefully
+2. **Team Error Recovery**: Handle team-specific errors
    ```python
    try:
-       async for response in swarm.stream(agent, prompt):
-           print(response.content)
-   except SwarmError as e:
-       print(f"Stream error: {e}")
-       # Implement recovery logic
+       artifact = await team.execute_plan(plan)
+   except PlanValidationError as e:
+       # Handle invalid plan structure
+   except TaskExecutionError as e:
+       # Handle task execution failures
+   except ResponseParsingError as e:
+       # Handle response format issues
+   except SwarmTeamError as e:
+       # Handle other team errors
    ```
 
-3. **Retry Configuration**: Customize retry behavior
+3. **Response Format Recovery**: Handle parsing and repair
+   ```python
+   try:
+       result = await team.execute_task(task)
+   except ResponseParsingError as e:
+       # Try to repair the response
+       repaired = repair_json(e.response)
+       result = parse_response(repaired, e.response_format)
+   except ResponseRepairError as e:
+       # Handle unrecoverable format issues
+   ```
+
+4. **Retry Configuration**: Customize retry behavior
    ```python
    swarm = Swarm(
-       ...,
        max_retries=3,
        initial_retry_delay=1.0,
        max_retry_delay=10.0,
@@ -1246,7 +1291,7 @@ See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for
 3. **Swarm**: Orchestrator for agent interactions and conversations
 4. **SwarmTeam**: Coordinator for multiple specialized agents
 5. **Context Variables**: Dynamic data passed to agents and tools
-6. **Stream Handler**: Interface for real-time response processing
+6. **Event Handler**: Interface for processing and responding to swarm events
 
 ## Best Practices
 
@@ -1262,7 +1307,7 @@ See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for
 2. Implement proper error handling:
    ```python
    try:
-       result = await team.execute_task(task)
+       result = await team.execute(agent, prompt)
    except TaskExecutionError as e:
        logger.error(f"Task failed: {e}")
    ```
@@ -1273,11 +1318,12 @@ See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for
        return f"Help {context['user_name']} with {context['task']}"
    ```
 
-4. Leverage streaming for real-time feedback:
+4. Leverage event handlers for real-time feedback:
    ```python
-   class MyStreamHandler(SwarmStreamHandler):
-       async def on_stream(self, delta: Delta, agent: Agent) -> None:
-           print(delta.content, end="", flush=True)
+   class MyEventHandler(SwarmEventHandler):
+       async def on_event(self, event: SwarmEventType) -> None:
+            if event.type == "agent_response":
+                print(event.delta.content, end="", flush=True)
    ```
 
 ## Examples
