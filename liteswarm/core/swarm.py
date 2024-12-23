@@ -452,7 +452,7 @@ class Swarm:
 
         return results
 
-    async def _process_tool_call_result(
+    def _process_tool_call_result(
         self,
         result: ToolCallResult,
     ) -> ToolMessage:
