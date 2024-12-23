@@ -89,28 +89,12 @@ class Swarm:
         Basic calculation:
             ```python
             def add(a: float, b: float) -> float:
-                \"\"\"Add two numbers together.
-
-                Args:
-                    a: First number.
-                    b: Second number.
-
-                Returns:
-                    Sum of the two numbers.
-                \"\"\"
                 return a + b
 
+
             def multiply(a: float, b: float) -> float:
-                \"\"\"Multiply two numbers together.
-
-                Args:
-                    a: First number.
-                    b: Second number.
-
-                Returns:
-                    Product of the two numbers.
-                \"\"\"
                 return a * b
+
 
             agent_instructions = (
                 "You are a math assistant. Use tools to perform calculations. "
@@ -133,7 +117,7 @@ class Swarm:
             swarm = Swarm(include_usage=True)
             result = await swarm.execute(
                 agent=agent,
-                prompt="What is (2 + 3) * 4?"
+                prompt="What is (2 + 3) * 4?",
             )
 
             # The agent will:
@@ -145,7 +129,7 @@ class Swarm:
     Notes:
         - Maintains internal state during conversations
         - Create separate instances for concurrent conversations
-    """  # noqa: D214
+    """
 
     def __init__(
         self,
