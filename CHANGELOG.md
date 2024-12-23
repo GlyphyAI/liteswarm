@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.3.0 (2024-12-23)
+
+### Added
+- Async interface for MessageStore protocol and implementations
+- Batch operations for message management (add_messages, remove_messages)
+- Unified ContextManager interface with create_context, optimize_context, and find_context methods
+
+### Changed
+- Renamed response types to better reflect streaming nature (AgentResponseChunk, CompletionResponseChunk)
+- Updated event types to match new response chunk naming
+- Improved context management to use MessageStore for data access
+- Enhanced usage and cost tracking in REPL with proper accumulation
+
+### Fixed
+- Usage statistics accumulation in streaming responses
+
+[0.3.0]: https://github.com/glyphyai/liteswarm/releases/tag/0.3.0
+
 ## 0.2.0 (2024-12-20)
 
 ### Added
