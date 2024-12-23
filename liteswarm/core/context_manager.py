@@ -12,96 +12,17 @@ from litellm import acompletion
 from typing_extensions import override
 
 from liteswarm.core.message_index import LiteMessageIndex, MessageIndex
+from liteswarm.core.message_store import MessageStore
+from liteswarm.types.context import ContextVariables
 from liteswarm.types.llm import LLM
-from liteswarm.types.messages import MessageRecord
-from liteswarm.types.swarm import Message
+from liteswarm.types.messages import MessageRecord, MessageT
+from liteswarm.types.swarm import Agent, Message
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, filter_tool_call_pairs, trim_messages
-
-
-class ContextManager(Protocol):
-    """Protocol for managing conversation context size and relevance.
-
-    Provides context optimization and relevance filtering capabilities while
-    delegating storage to MessageStore. Supports various optimization strategies
-    like summarization, windowing, and semantic search.
-
-    Examples:
-        Basic implementation:
-            ```python
-            class SimpleManager(ContextManager):
-                async def optimize(
-                    self,
-                    messages: Sequence[MessageRecord],
-                    model: str,
-                ) -> list[MessageRecord]:
-                    # Trim to fit model context
-                    return await self._trim_messages(messages, model)
-
-                async def get_relevant_context(
-                    self,
-                    messages: Sequence[MessageRecord],
-                    query: str,
-                ) -> list[MessageRecord]:
-                    # Find relevant messages
-                    return await self._search_context(messages, query)
-            ```
-    """
-
-    async def optimize(
-        self,
-        messages: Sequence[MessageRecord],
-        model: str,
-        *args: Any,
-        **kwargs: Any,
-    ) -> list[MessageRecord]:
-        """Optimize context to fit within model limits.
-
-        Reduces context size while preserving important information. System
-        messages are always preserved at the start of the context.
-
-        Args:
-            messages: Messages to optimize.
-            model: Model identifier for context limits.
-            *args: Implementation-specific positional arguments.
-            **kwargs: Implementation-specific keyword arguments.
-
-        Returns:
-            Optimized list of messages that fits model context.
-        """
-        ...
-
-    async def get_relevant_context(
-        self,
-        messages: Sequence[MessageRecord],
-        query: str,
-        max_messages: int | None = None,
-        embedding_model: str | None = None,
-        *args: Any,
-        **kwargs: Any,
-    ) -> list[MessageRecord]:
-        """Find messages most relevant to the current query.
-
-        Uses semantic search when embedding model is provided, otherwise
-        falls back to recency-based selection.
-
-        Args:
-            messages: Messages to search through.
-            query: Current conversation query.
-            max_messages: Maximum number of messages to return.
-            embedding_model: Model for computing embeddings.
-            *args: Implementation-specific positional arguments.
-            **kwargs: Implementation-specific keyword arguments.
-
-        Returns:
-            List of messages most relevant to the query.
-        """
-        ...
-
+from liteswarm.utils.unwrap import unwrap_instructions
 
 LiteOptimizationStrategy: TypeAlias = Literal["trim", "window", "summarize", "rag"]
 """Available context optimization strategies."""
-
 
 SUMMARIZER_SYSTEM_PROMPT = """\
 You are a precise conversation summarizer that distills complex interactions into essential points.
@@ -131,63 +52,228 @@ Be direct and factual. Exclude any unnecessary details or pleasantries.\
 """
 
 
-class LiteContextManager(ContextManager):
-    """Lightweight implementation of the ContextManager protocol.
+class ContextManager(Protocol):
+    """Protocol for managing agent execution contexts.
 
-    Provides multiple optimization strategies and semantic search capabilities.
-    Suitable for managing context in agentic systems like liteswarm.
+    Manages the context provided to language models during agent execution. Creates
+    appropriate context from available messages. Optimizes context size to fit model
+    limits. Provides semantic search capabilities for finding relevant messages.
+
+    The manager is responsible for fetching and managing context on its own.
+    Typically this would be done using a MessageStore, but implementations are free
+    to source context in any way that suits their needs.
+
+    Core responsibilities include context creation, optimization, and relevance
+    filtering. The manager ensures proper message ordering and handles dynamic
+    resolution of agent instructions.
 
     Examples:
-        Basic usage:
+        Basic usage with message store:
             ```python
-            manager = LiteContextManager()
+            class BasicContextManager(ContextManager):
+                def __init__(self, message_store: MessageStore[Any]) -> None:
+                    self.message_store = message_store
+                    self.window_size = 50
 
-            # Optimize context for model
-            optimized = await manager.optimize(
-                messages=messages,
-                model="gpt-4o",
-                strategy="summarize",
-            )
+                async def create_context(
+                    self,
+                    agent: Agent,
+                    prompt: str | None = None,
+                    context_variables: ContextVariables | None = None,
+                ) -> list[Message]:
+                    # Get history from store
+                    history = await self.message_store.get_messages()
 
-            # Find relevant context
-            relevant = await manager.get_relevant_context(
-                messages=messages,
-                query="How do I deploy?",
-                max_messages=10,
-            )
+                    # Create context with system message and history
+                    messages = [Message(role="system", content=agent.instructions), *history]
+
+                    # Add prompt if provided
+                    if prompt:
+                        messages.append(Message(role="user", content=prompt))
+                    return messages
+
+                async def optimize_context(
+                    self,
+                    model: str,
+                    strategy: str | None = None,
+                ) -> list[Message]:
+                    messages = await self.message_store.get_messages()
+                    # Keep only recent messages in window
+                    return messages[-self.window_size :]
+
+                async def find_context(
+                    self,
+                    query: str,
+                    max_messages: int | None = None,
+                ) -> list[Message]:
+                    messages = await self.message_store.get_messages()
+                    # In practice, you'd use semantic search here
+                    return messages[-10:]  # Return 10 most recent for simplicity
             ```
+    """
+
+    async def create_context(
+        self,
+        agent: Agent,
+        prompt: str | None = None,
+        context_variables: ContextVariables | None = None,
+    ) -> list[Message]:
+        """Create an execution context for an agent.
+
+        Prepares a list of messages suitable for the agent's next execution.
+        Resolves agent instructions with provided context variables. Combines
+        system message, relevant history, and optional user prompt.
+
+        Args:
+            agent: Agent requiring context creation.
+            prompt: Optional user prompt to include.
+            context_variables: Optional variables for dynamic resolution.
+
+        Returns:
+            List of messages ready for execution.
+
+        Examples:
+            Basic usage:
+                ```python
+                context = await manager.create_context(
+                    agent=agent,
+                    prompt="Hello!",
+                )
+                ```
+
+            With context variables:
+                ```python
+                context = await manager.create_context(
+                    agent=agent,
+                    prompt="Help with task",
+                    context_variables=ContextVariables(
+                        user_name="Alice",
+                        task_type="analysis",
+                    ),
+                )
+                ```
+        """
+        ...
+
+    async def optimize_context(
+        self,
+        model: str,
+        strategy: Any | None = None,
+    ) -> list[Message]:
+        """Optimize context to fit within model limits.
+
+        Reduces context size to fit within model token limits. Preserves important
+        information based on the chosen strategy. Ensures system messages remain
+        at the start of context.
+
+        Args:
+            model: Model identifier for context limits.
+            strategy: Optimization strategy to use.
+
+        Returns:
+            Optimized list of messages that fits model context.
+
+        Examples:
+            Basic optimization:
+                ```python
+                optimized = await manager.optimize_context(
+                    model="gpt-4o",
+                    strategy="window",
+                )
+                ```
+        """
+        ...
+
+    async def find_context(
+        self,
+        query: str,
+        context: Sequence[Message] | None = None,
+        max_messages: int | None = None,
+        embedding_model: str | None = None,
+    ) -> list[Message]:
+        """Find messages matching the search query.
+
+        Searches through available messages to find those matching the query.
+        Uses semantic search or other relevance metrics based on the
+        implementation. Preserves message relationships in the results.
+
+        Args:
+            query: Search query text.
+            context: Optional context to search within.
+            max_messages: Optional maximum messages to return.
+            embedding_model: Optional model for computing embeddings.
+
+        Returns:
+            List of matching messages.
+
+        Examples:
+            Basic search:
+                ```python
+                matches = await manager.find_context(
+                    query="How do I deploy?",
+                    max_messages=10,
+                )
+                ```
+        """
+        ...
+
+
+class LiteContextManager(ContextManager):
+    """Default implementation of context management.
+
+    Uses MessageStore as the source of context for all operations. Provides
+    multiple strategies for context optimization and semantic search capabilities.
+
+    Context optimization strategies:
+    - "trim": Token-based trimming that preserves message order and relationships
+    - "window": Sliding window that keeps N most recent messages
+    - "summarize": Creates concise summaries of older messages while preserving recent ones
+    - "rag": Semantic search with query-based optimization, falls back to trim if no query
+
+    Context search is implemented using a MessageIndex for semantic operations.
+    The index computes embeddings for messages and performs similarity search
+    to find the most relevant context. System messages are always preserved
+    in search results.
+
+    All context operations fetch messages from the underlying MessageStore:
+    - create_context gets history and adds system message
+    - optimize_context fetches and processes messages using chosen strategy
+    - find_context searches through stored messages using semantic index
     """
 
     def __init__(
         self,
-        llm: LLM | None = None,
+        message_store: MessageStore[Any],
+        message_index: MessageIndex | None = None,
+        optimization_llm: LLM | None = None,
         window_size: int = 50,
         preserve_recent: int = 25,
         relevant_window_size: int = 10,
         chunk_size: int = 10,
-        message_index: MessageIndex | None = None,
-        default_strategy: LiteOptimizationStrategy = "trim",
+        default_optimization_strategy: LiteOptimizationStrategy = "trim",
         default_embedding_model: str = "text-embedding-3-small",
     ) -> None:
         """Initialize the context manager.
 
         Args:
-            llm: Language model for summarization.
-            window_size: Maximum messages in sliding window.
-            preserve_recent: Messages to keep when summarizing.
-            relevant_window_size: Maximum relevant messages to return.
-            chunk_size: Messages per summary chunk.
-            message_index: Index for semantic search.
-            default_strategy: Default optimization strategy.
-            default_embedding_model: Default model for embeddings.
+            message_store: Store for message persistence.
+            message_index: Index for semantic search operations.
+            optimization_llm: Language model used for context summarization.
+            window_size: Maximum messages in sliding window strategy.
+            preserve_recent: Messages to preserve when summarizing.
+            relevant_window_size: Maximum messages to return in search results.
+            chunk_size: Number of messages per summary chunk.
+            default_optimization_strategy: Default strategy for context optimization.
+            default_embedding_model: Default model for computing embeddings.
         """
-        self.llm = llm or LLM(model="gpt-4o")
+        self.message_store = message_store
+        self.message_index = message_index or LiteMessageIndex()
+        self.optimization_llm = optimization_llm or LLM(model="gpt-4o")
         self.window_size = window_size
         self.preserve_recent = preserve_recent
         self.relevant_window_size = relevant_window_size
         self.chunk_size = chunk_size
-        self.message_index = message_index or LiteMessageIndex()
-        self.default_strategy = default_strategy
+        self.default_optimization_strategy = default_optimization_strategy
         self.default_embedding_model = default_embedding_model
 
     # ================================================
@@ -196,8 +282,8 @@ class LiteContextManager(ContextManager):
 
     def _split_messages(
         self,
-        messages: Sequence[MessageRecord],
-    ) -> tuple[list[MessageRecord], list[MessageRecord]]:
+        messages: Sequence[MessageT],
+    ) -> tuple[list[MessageT], list[MessageT]]:
         """Split messages into system and non-system groups.
 
         Args:
@@ -206,8 +292,8 @@ class LiteContextManager(ContextManager):
         Returns:
             Tuple of (system_messages, non_system_messages).
         """
-        system_messages: list[MessageRecord] = []
-        non_system_messages: list[MessageRecord] = []
+        system_messages: list[MessageT] = []
+        non_system_messages: list[MessageT] = []
 
         for msg in messages:
             if msg.role == "system":
@@ -219,8 +305,8 @@ class LiteContextManager(ContextManager):
 
     def _create_message_chunks(
         self,
-        messages: Sequence[MessageRecord],
-    ) -> list[list[MessageRecord]]:
+        messages: Sequence[MessageT],
+    ) -> list[list[MessageT]]:
         """Create chunks of messages for summarization.
 
         Preserves tool call/result pairs within chunks and handles
@@ -235,9 +321,9 @@ class LiteContextManager(ContextManager):
         if not messages:
             return []
 
-        chunks: list[list[MessageRecord]] = []
-        current_chunk: list[MessageRecord] = []
-        pending_tool_calls: dict[str, MessageRecord] = {}
+        chunks: list[list[MessageT]] = []
+        current_chunk: list[MessageT] = []
+        pending_tool_calls: dict[str, MessageT] = {}
 
         def add_chunk() -> None:
             if current_chunk:
@@ -278,7 +364,7 @@ class LiteContextManager(ContextManager):
     # MARK: Summarization Helpers
     # ================================================
 
-    async def _summarize_chunk(self, messages: Sequence[MessageRecord]) -> str:
+    async def _summarize_chunk(self, messages: Sequence[Message]) -> str:
         """Create a concise summary of messages.
 
         Args:
@@ -299,7 +385,7 @@ class LiteContextManager(ContextManager):
         ]
 
         response = await acompletion(
-            model=self.llm.model,
+            model=self.optimization_llm.model,
             messages=dump_messages(input_messages),
         )
 
@@ -318,10 +404,10 @@ class LiteContextManager(ContextManager):
 
     async def _trim_strategy(
         self,
-        messages: Sequence[MessageRecord],
+        messages: Sequence[Message],
         model: str,
         trim_ratio: float = 0.75,
-    ) -> list[MessageRecord]:
+    ) -> list[Message]:
         """Optimize context using token-based trimming.
 
         Preserves message order and tool call pairs while fitting
@@ -329,7 +415,7 @@ class LiteContextManager(ContextManager):
 
         Args:
             messages: Messages to optimize.
-            model: Model to determine token limits.
+            model: Model identifier to determine context limits.
             trim_ratio: Proportion of model's context to use.
 
         Returns:
@@ -353,7 +439,11 @@ class LiteContextManager(ContextManager):
 
         return trimmed.messages
 
-    async def _window_strategy(self, messages: Sequence[MessageRecord]) -> list[MessageRecord]:
+    async def _window_strategy(
+        self,
+        messages: Sequence[Message],
+        model: str,
+    ) -> list[Message]:
         """Keep only the most recent messages.
 
         Maintains chronological order and tool call pairs while
@@ -361,6 +451,7 @@ class LiteContextManager(ContextManager):
 
         Args:
             messages: Messages to optimize.
+            model: Model identifier to determine context limits.
 
         Returns:
             Most recent messages that fit within window.
@@ -375,7 +466,7 @@ class LiteContextManager(ContextManager):
 
         recent = list(messages[-self.window_size :])
         filtered = filter_tool_call_pairs(recent)
-        trimmed = trim_messages(filtered, self.llm.model)
+        trimmed = trim_messages(filtered, model)
 
         log_verbose(
             f"Window strategy reduced messages from {len(messages)} to {len(trimmed.messages)}",
@@ -384,7 +475,11 @@ class LiteContextManager(ContextManager):
 
         return trimmed.messages
 
-    async def _summarize_strategy(self, messages: Sequence[MessageRecord]) -> list[MessageRecord]:
+    async def _summarize_strategy(
+        self,
+        messages: Sequence[Message],
+        model: str,
+    ) -> list[Message]:
         """Summarize older messages while preserving recent ones.
 
         Creates concise summaries of older messages while keeping
@@ -392,6 +487,7 @@ class LiteContextManager(ContextManager):
 
         Args:
             messages: Messages to optimize.
+            model: Model identifier to determine context limits.
 
         Returns:
             Combined summary and recent messages.
@@ -414,15 +510,15 @@ class LiteContextManager(ContextManager):
         )
 
         combined_messages = [MessageRecord.from_message(summary_message), *to_preserve]
-        trimmed = trim_messages(combined_messages, self.llm.model)
+        trimmed = trim_messages(combined_messages, model)
         return trimmed.messages
 
     async def _rag_strategy(
         self,
-        messages: Sequence[MessageRecord],
+        messages: Sequence[Message],
         model: str,
         query: str | None = None,
-    ) -> list[MessageRecord]:
+    ) -> list[Message]:
         """Optimize context using semantic search.
 
         Uses query-based relevance when available, falls back to
@@ -430,7 +526,7 @@ class LiteContextManager(ContextManager):
 
         Args:
             messages: Messages to optimize.
-            model: Target model for context limits.
+            model: Model identifier to determine context limits.
             query: Optional query for semantic search.
 
         Returns:
@@ -448,10 +544,10 @@ class LiteContextManager(ContextManager):
             level="DEBUG",
         )
 
-        relevant = await self.get_relevant_context(
-            messages=messages,
+        relevant = await self.find_context(
             query=query,
             max_messages=self.relevant_window_size,
+            context=messages,
             embedding_model=self.default_embedding_model,
         )
 
@@ -474,14 +570,69 @@ class LiteContextManager(ContextManager):
     # ================================================
 
     @override
-    async def optimize(
+    async def create_context(
         self,
-        messages: Sequence[MessageRecord],
+        agent: Agent,
+        prompt: str | None = None,
+        context_variables: ContextVariables | None = None,
+    ) -> list[Message]:
+        """Create an execution context for an agent.
+
+        Prepares a list of messages suitable for the agent's next execution.
+        Resolves agent instructions with provided context variables. Combines
+        system message, relevant history, and optional user prompt.
+
+        Args:
+            agent: Agent requiring context creation.
+            prompt: Optional user prompt to include.
+            context_variables: Optional variables for dynamic resolution.
+
+        Returns:
+            List of messages ready for execution.
+
+        Examples:
+            Basic usage:
+                ```python
+                context = await manager.create_context(
+                    agent=agent,
+                    prompt="Hello!",
+                )
+                ```
+
+            With context variables:
+                ```python
+                context = await manager.create_context(
+                    agent=agent,
+                    prompt="Help with task",
+                    context_variables=ContextVariables(
+                        user_name="Alice",
+                        task_type="analysis",
+                    ),
+                )
+                ```
+        """
+        instructions = unwrap_instructions(agent.instructions, context_variables)
+        history = await self.message_store.get_messages()
+        history = [msg for msg in history if msg.role != "system"]
+
+        messages = [Message(role="system", content=instructions), *history]
+        if prompt:
+            messages.append(Message(role="user", content=prompt))
+
+        return messages
+
+    @override
+    async def optimize_context(
+        self,
         model: str,
         strategy: LiteOptimizationStrategy | None = None,
         query: str | None = None,
-    ) -> list[MessageRecord]:
-        """Optimize conversation context using selected strategy.
+    ) -> list[Message]:
+        """Optimize context to fit model limits.
+
+        Reduces context size to fit within model token limits. Applies the chosen
+        strategy to preserve the most important information. Maintains message
+        relationships and ensures proper ordering in the result.
 
         Available strategies:
         - "trim": Token-based trimming without summarization
@@ -490,16 +641,25 @@ class LiteContextManager(ContextManager):
         - "rag": Semantic search with query-based optimization
 
         Args:
-            messages: Messages to optimize.
-            model: Model identifier for context limits.
+            model: Model identifier to determine context limits.
             strategy: Optimization strategy to use.
             query: Optional query for RAG strategy.
 
         Returns:
-            Optimized messages that fit model context.
+            Optimized list of messages.
+
+        Examples:
+            Basic optimization:
+                ```python
+                optimized = await manager.optimize_context(
+                    model="gpt-4o",
+                    strategy="window",
+                )
+                ```
         """
+        messages = await self.message_store.get_messages()
         system_messages, non_system_messages = self._split_messages(messages)
-        strategy = strategy or self.default_strategy
+        strategy = strategy or self.default_optimization_strategy
 
         log_verbose(
             f"Optimizing context with strategy '{strategy}' for model {model}",
@@ -510,9 +670,9 @@ class LiteContextManager(ContextManager):
             case "trim":
                 optimized = await self._trim_strategy(non_system_messages, model)
             case "window":
-                optimized = await self._window_strategy(non_system_messages)
+                optimized = await self._window_strategy(non_system_messages, model)
             case "summarize":
-                optimized = await self._summarize_strategy(non_system_messages)
+                optimized = await self._summarize_strategy(non_system_messages, model)
             case "rag":
                 optimized = await self._rag_strategy(non_system_messages, model, query)
             case _:
@@ -523,37 +683,53 @@ class LiteContextManager(ContextManager):
             level="DEBUG",
         )
 
-        return [*system_messages, *optimized]
+        optimized_messages = [*system_messages, *optimized]
+        await self.message_store.set_messages(optimized_messages)
+
+        return optimized_messages
 
     @override
-    async def get_relevant_context(
+    async def find_context(
         self,
-        messages: Sequence[MessageRecord],
         query: str,
+        context: Sequence[Message] | None = None,
         max_messages: int | None = None,
         embedding_model: str | None = None,
-    ) -> list[MessageRecord]:
-        """Find messages most relevant to the current query.
+    ) -> list[Message]:
+        """Find messages matching the search query.
 
-        Uses semantic search with embeddings when model is provided,
-        falls back to recency-based selection otherwise.
+        Searches through available messages to find those matching the query.
+        Uses semantic search or other relevance metrics based on the
+        implementation. Preserves message relationships in the results.
 
         Args:
-            messages: Messages to search through.
-            query: Current query to find context for.
-            max_messages: Maximum messages to return.
-            embedding_model: Model for computing embeddings.
+            query: Search query text.
+            context: Optional context to search within.
+            max_messages: Optional maximum messages to return.
+            embedding_model: Optional model for computing embeddings.
 
         Returns:
-            Messages most relevant to the query.
+            List of matching messages.
+
+        Examples:
+            Basic search:
+                ```python
+                matches = await manager.find_context(
+                    query="How do I deploy?",
+                    max_messages=10,
+                )
+                ```
         """
+        if context is not None:
+            messages = [MessageRecord.from_message(msg) for msg in context]
+        else:
+            messages = await self.message_store.get_messages()
+
         system_messages, non_system_messages = self._split_messages(messages)
         embedding_model = embedding_model or self.default_embedding_model
 
         if not non_system_messages:
-            max_messages = max_messages or self.window_size
-            recent = list(non_system_messages[-max_messages:])
-            return [*system_messages, *recent]
+            return [*system_messages]
 
         log_verbose(
             f"Searching for relevant messages with query: '{query}' using {embedding_model}",
@@ -563,13 +739,13 @@ class LiteContextManager(ContextManager):
         await self.message_index.index(non_system_messages)
         result = await self.message_index.search(
             query=query,
-            max_results=max_messages or self.window_size,
+            max_results=max_messages or self.relevant_window_size,
         )
 
         relevant_messages = [msg for msg, _ in result]
 
         log_verbose(
-            f"Found {len(relevant_messages)} relevant messages out of {len(non_system_messages)}",
+            f"Found {len(relevant_messages)} relevant messages",
             level="DEBUG",
         )
 
