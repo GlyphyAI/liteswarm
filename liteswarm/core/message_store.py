@@ -15,11 +15,11 @@ from liteswarm.types.message_store import LiteMessageStoreFilter
 from liteswarm.types.messages import MessageRecord
 from liteswarm.types.swarm import Message
 
-FilterT_contra = TypeVar("FilterT_contra", contravariant=True)
+FilterT = TypeVar("FilterT", contravariant=True)
 """Type variable for store-specific filter types."""
 
 
-class MessageStore(Protocol[FilterT_contra]):
+class MessageStore(Protocol[FilterT]):
     """Protocol for managing messages with metadata and filtering.
 
     Provides storage and retrieval of messages with unique IDs and custom metadata.
@@ -30,9 +30,13 @@ class MessageStore(Protocol[FilterT_contra]):
         Basic in-memory implementation:
             ```python
             class SimpleStore(MessageStore["SimpleFilter"]):
-                def get_messages(self, filter: SimpleFilter) -> list[MessageRecord]:
+                async def get_messages(self, filter: SimpleFilter) -> list[MessageRecord]:
                     # Filter messages based on SimpleFilter rules
                     return filtered_messages
+
+                async def add_messages(self, messages: list[Message]) -> list[MessageRecord]:
+                    # Add multiple messages atomically
+                    return [await self._create_record(msg) for msg in messages]
             ```
 
         SQLite implementation:
@@ -45,7 +49,7 @@ class MessageStore(Protocol[FilterT_contra]):
 
 
             class SQLiteStore(MessageStore[SQLiteFilter]):
-                def get_messages(self, filter: SQLiteFilter | None = None) -> list[MessageRecord]:
+                async def get_messages(self, filter: SQLiteFilter | None = None) -> list[MessageRecord]:
                     query = "SELECT * FROM messages"
                     params = []
 
@@ -69,7 +73,17 @@ class MessageStore(Protocol[FilterT_contra]):
                             query += " ORDER BY timestamp DESC LIMIT ?"
                             params.append(filter.last_n)
 
-                    return [self._row_to_message(row) for row in self._db.execute(query, params)]
+                    async with self._db.execute(query, params) as cursor:
+                        rows = await cursor.fetchall()
+                        return [self._row_to_message(row) for row in rows]
+
+                async def add_messages(self, messages: list[Message]) -> list[MessageRecord]:
+                    async with self._db.transaction():
+                        records = []
+                        for message in messages:
+                            record = await self._insert_message(message)
+                            records.append(record)
+                        return records
             ```
 
         Vector store implementation:
@@ -81,16 +95,16 @@ class MessageStore(Protocol[FilterT_contra]):
                 metadata_filters: dict[str, Any] | None = None
 
 
-            class VectorMemory(MemoryNew[VectorFilter]):
-                def get_messages(self, filter: VectorFilter | None = None) -> list[MessageRecord]:
+            class VectorStore(MessageStore[VectorFilter]):
+                async def get_messages(self, filter: VectorFilter | None = None) -> list[MessageRecord]:
                     if not filter or not filter.query:
                         return list(self._messages.values())
 
                     # Generate query embedding
-                    query_embedding = self._embed(filter.query)
+                    query_embedding = await self._embed(filter.query)
 
                     # Search vector store
-                    results = self._vector_store.search(
+                    results = await self._vector_store.search(
                         query_embedding,
                         filter=filter.metadata_filters,
                         limit=filter.max_results,
@@ -98,6 +112,11 @@ class MessageStore(Protocol[FilterT_contra]):
                     )
 
                     return [self._result_to_message(r) for r in results]
+
+                async def add_messages(self, messages: list[Message]) -> list[MessageRecord]:
+                    # Batch embed and store messages
+                    embeddings = await self._embed_batch([msg.content for msg in messages])
+                    return await self._vector_store.add_batch(messages, embeddings)
             ```
 
         Redis implementation:
@@ -109,11 +128,12 @@ class MessageStore(Protocol[FilterT_contra]):
                 last_n: int | None = None
 
 
-            class RedisMemory(MemoryNew[RedisFilter]):
-                def get_messages(self, filter: RedisFilter | None = None) -> list[MessageRecord]:
+            class RedisStore(MessageStore[RedisFilter]):
+                async def get_messages(self, filter: RedisFilter | None = None) -> list[MessageRecord]:
                     # Use Redis sorted set for time-based queries
                     if not filter:
-                        return [self._deserialize(msg) for msg in self._redis.zrange("messages", 0, -1)]
+                        messages = await self._redis.zrange("messages", 0, -1)
+                        return [self._deserialize(msg) for msg in messages]
 
                     min_score = "-inf"
                     max_score = "+inf"
@@ -123,7 +143,7 @@ class MessageStore(Protocol[FilterT_contra]):
                     if filter.before:
                         max_score = filter.before.timestamp()
 
-                    messages = self._redis.zrangebyscore(
+                    messages = await self._redis.zrangebyscore(
                         "messages",
                         min_score,
                         max_score,
@@ -138,12 +158,23 @@ class MessageStore(Protocol[FilterT_contra]):
                         messages = messages[-filter.last_n :]
 
                     return [self._deserialize(msg) for msg in messages]
+
+                async def add_messages(self, messages: list[Message]) -> list[MessageRecord]:
+                    # Use Redis pipeline for atomic batch insert
+                    async with self._redis.pipeline() as pipe:
+                        records = []
+                        for message in messages:
+                            record = self._create_record(message)
+                            await pipe.zadd("messages", record.timestamp, self._serialize(record))
+                            records.append(record)
+                        await pipe.execute()
+                        return records
             ```
     """
 
-    def get_messages(
+    async def get_messages(
         self,
-        filter: FilterT_contra | None = None,
+        filter: FilterT | None = None,
     ) -> list[MessageRecord]:
         """Get messages matching the specified filter.
 
@@ -159,7 +190,27 @@ class MessageStore(Protocol[FilterT_contra]):
         """
         ...
 
-    def add_message(
+    async def set_messages(
+        self,
+        messages: Sequence[Message],
+        metadata: dict[str, Any] | None = None,
+    ) -> list[MessageRecord]:
+        """Replace all existing messages with new ones.
+
+        Atomically clears all existing messages and adds the provided ones. The
+        optional metadata is applied to all new messages. Returns the newly created
+        message records in implementation-defined order.
+
+        Args:
+            messages: Messages to store
+            metadata: Optional metadata to associate with all messages
+
+        Returns:
+            List of stored message records.
+        """
+        ...
+
+    async def add_message(
         self,
         message: Message,
         message_id: str | None = None,
@@ -181,27 +232,27 @@ class MessageStore(Protocol[FilterT_contra]):
         """
         ...
 
-    def set_messages(
+    async def add_messages(
         self,
         messages: Sequence[Message],
         metadata: dict[str, Any] | None = None,
     ) -> list[MessageRecord]:
-        """Replace all existing messages with new ones.
+        """Add multiple messages to the store.
 
-        Atomically clears all existing messages and adds the provided ones. The
-        optional metadata is applied to all new messages. Returns the newly created
-        message records in implementation-defined order.
+        Atomically adds multiple messages to the store. Each message gets a unique ID
+        and optional metadata. The operation preserves message order and is thread-safe.
 
         Args:
-            messages: Messages to store
-            metadata: Optional metadata to associate with all messages
+            messages: Messages to add to the store. Order is preserved.
+            metadata: Optional metadata to associate with all messages.
+                     Each message gets a deep copy of this metadata.
 
         Returns:
-            List of stored message records.
+            List of stored message records in the same order as input.
         """
         ...
 
-    def remove_message(self, message_id: str) -> None:
+    async def remove_message(self, message_id: str) -> None:
         """Remove a message by its ID.
 
         Atomically removes the message with the given ID if it exists. The operation
@@ -212,7 +263,21 @@ class MessageStore(Protocol[FilterT_contra]):
         """
         ...
 
-    def clear(self) -> None:
+    async def remove_messages(
+        self,
+        message_ids: Sequence[str],
+    ) -> None:
+        """Remove multiple messages by their IDs.
+
+        Atomically removes messages with the given IDs. The operation is thread-safe
+        and skips any IDs that don't exist. If no IDs are provided, no action is taken.
+
+        Args:
+            message_ids: IDs of messages to remove. Non-existent IDs are ignored.
+        """
+        ...
+
+    async def clear(self) -> None:
         """Remove all messages.
 
         Atomically removes all messages and their associated metadata. This operation
@@ -233,31 +298,33 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
             ```python
             store = LiteMessageStore()
 
-            # Add a message with metadata
-            msg1 = store.add_message(
+            # Add messages with metadata
+            messages = [
                 Message(role="user", content="Hello"),
-                metadata={"tag": "greeting"},
-            )
-
-            # Add a message with custom ID
-            msg2 = store.add_message(
                 Message(role="assistant", content="Hi"),
-                message_id="greeting-response-1",
+            ]
+            records = await store.add_messages(
+                messages,
+                metadata={"session": "greeting"},
             )
 
             # Filter messages
             filter = LiteMessageStoreFilter(
                 role="user",
-                metadata_filters={"tag": "greeting"},
+                metadata_filters={"session": "greeting"},
             )
-            greetings = store.get_messages(filter)
+            user_messages = await store.get_messages(filter)
 
             # Replace all messages
             new_messages = [
                 Message(role="system", content="New conversation"),
                 Message(role="user", content="Start"),
             ]
-            store.set_messages(new_messages, metadata={"session": "new"})
+            await store.set_messages(new_messages, metadata={"session": "new"})
+
+            # Remove specific messages
+            message_ids = [record.id for record in records]
+            await store.remove_messages(message_ids)
             ```
     """
 
@@ -270,11 +337,11 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
         self._messages: dict[str, MessageRecord] = {}
 
     @override
-    def get_messages(
+    async def get_messages(
         self,
         filter: LiteMessageStoreFilter | None = None,
     ) -> list[MessageRecord]:
-        """Retrieve and filter messages from the store.
+        """Get messages matching the filter criteria.
 
         Applies filters in sequence: role, time range, metadata, and count limit.
         Messages are sorted by timestamp before applying the count limit. Returns
@@ -285,35 +352,61 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
                    all messages in chronological order.
 
         Returns:
-            List of message records sorted by timestamp. If a count limit is
-            specified via filter.last_n, returns only the most recent messages.
+            List of message records matching the filter criteria. If a count limit
+            is specified via filter.last_n, returns only the most recent messages.
         """
         messages = list(self._messages.values())
+        if filter is None:
+            return copy.deepcopy(messages)
 
-        if filter:
-            if filter.role:
-                messages = [m for m in messages if m.role == filter.role]
-            if filter.before:
-                messages = [m for m in messages if m.timestamp < filter.before]
-            if filter.after:
-                messages = [m for m in messages if m.timestamp > filter.after]
-            if filter.metadata_filters:
-                for key, value in filter.metadata_filters.items():
-                    messages = [
-                        m
-                        for m in messages
-                        if m.metadata and key in m.metadata and m.metadata[key] == value
-                    ]
+        if filter.role:
+            messages = [m for m in messages if m.role == filter.role]
 
-        messages.sort(key=lambda m: m.timestamp)
+        if filter.before:
+            messages = [m for m in messages if m.timestamp < filter.before]
 
-        if filter and filter.last_n is not None:
+        if filter.after:
+            messages = [m for m in messages if m.timestamp > filter.after]
+
+        if filter.metadata_filters:
+            for key, value in filter.metadata_filters.items():
+                messages = [
+                    m
+                    for m in messages
+                    if m.metadata and key in m.metadata and m.metadata[key] == value
+                ]
+
+        if filter.last_n is not None:
             messages = messages[-filter.last_n :]
 
         return copy.deepcopy(messages)
 
     @override
-    def add_message(
+    async def set_messages(
+        self,
+        messages: Sequence[Message],
+        metadata: dict[str, Any] | None = None,
+    ) -> list[MessageRecord]:
+        """Replace all messages in the store.
+
+        Atomically replaces all existing messages with new ones. Each message
+        is assigned a new UUID and wrapped in a MessageRecord with the provided
+        metadata. The operation maintains chronological order based on the
+        sequence order.
+
+        Args:
+            messages: Sequence of messages to store. Order is preserved.
+            metadata: Optional metadata to apply to all messages. Each message
+                     gets a deep copy of this metadata.
+
+        Returns:
+            List of stored message records in the same order as the input sequence.
+        """
+        await self.clear()
+        return await self.add_messages(messages, metadata=metadata)
+
+    @override
+    async def add_message(
         self,
         message: Message,
         message_id: str | None = None,
@@ -336,49 +429,48 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
         Raises:
             ValueError: If the provided message_id already exists in the store.
         """
-        msg_id = message_id or str(uuid.uuid4())
-        if msg_id in self._messages:
-            raise ValueError(f"Message with ID {msg_id} already exists")
+        message_id = message_id or str(uuid.uuid4())
+        if message_id in self._messages:
+            raise ValueError(f"Message with ID {message_id} already exists")
 
-        message_record = MessageRecord.from_message(message, metadata)
-        self._messages[msg_id] = message_record
-        return copy.deepcopy(message_record)
+        record = MessageRecord.from_message(
+            message=copy.deepcopy(message),
+            metadata=copy.deepcopy(metadata) if metadata else {},
+        )
+
+        self._messages[message_id] = record
+        return copy.deepcopy(record)
 
     @override
-    def set_messages(
+    async def add_messages(
         self,
         messages: Sequence[Message],
         metadata: dict[str, Any] | None = None,
     ) -> list[MessageRecord]:
-        """Replace all messages in the store.
+        """Add multiple messages to the store.
 
-        Atomically replaces all existing messages with new ones. Each message
-        is assigned a new UUID and wrapped in a MessageRecord with the provided
-        metadata. The operation maintains chronological order based on the
-        sequence order.
+        Creates MessageRecords for each message with the current timestamp and
+        stores them with generated UUIDs. The operation maintains chronological
+        order based on the sequence order.
 
         Args:
-            messages: Sequence of messages to store. Order is preserved.
-            metadata: Optional metadata to apply to all messages. Each message
-                     gets a deep copy of this metadata.
+            messages: Messages to store. Order is preserved.
+            metadata: Optional metadata to apply to all messages.
+                     Each message gets a deep copy of this metadata.
 
         Returns:
-            List of stored message records in the same order as the input sequence.
+            List of stored message records in the same order as input.
         """
-        self.clear()
-        memory_messages: list[MessageRecord] = []
+        records: list[MessageRecord] = []
 
         for message in messages:
-            memory_msg = self.add_message(
-                message=message,
-                metadata=copy.deepcopy(metadata) if metadata else None,
-            )
-            memory_messages.append(memory_msg)
+            record = await self.add_message(message, metadata=metadata)
+            records.append(record)
 
-        return memory_messages
+        return records
 
     @override
-    def remove_message(self, message_id: str) -> None:
+    async def remove_message(self, message_id: str) -> None:
         """Remove a message from the store.
 
         Attempts to remove the message with the given ID. The operation is
@@ -391,7 +483,20 @@ class LiteMessageStore(MessageStore[LiteMessageStoreFilter]):
         self._messages.pop(message_id, None)
 
     @override
-    def clear(self) -> None:
+    async def remove_messages(self, message_ids: Sequence[str]) -> None:
+        """Remove multiple messages by their IDs.
+
+        Attempts to remove messages with the given IDs. The operation is atomic
+        through dictionary key deletion and skips any IDs that don't exist.
+
+        Args:
+            message_ids: IDs of messages to remove. Non-existent IDs are ignored.
+        """
+        for message_id in message_ids:
+            self._messages.pop(message_id, None)
+
+    @override
+    async def clear(self) -> None:
         """Clear all messages from the store.
 
         Atomically removes all messages and their metadata from the store.
