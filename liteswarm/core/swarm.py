@@ -1160,7 +1160,8 @@ class Swarm:
 
         if add_system_message:
             instructions = unwrap_instructions(agent.instructions, context_variables)
-            self.message_store.add_message(Message(role="system", content=instructions))
+            message = Message(role="system", content=instructions)
+            await self.message_store.add_message(message)
 
     async def _initialize_conversation(
         self,
@@ -1198,7 +1199,7 @@ class Swarm:
             raise SwarmError("Please provide at least one message or prompt")
 
         if messages:
-            self.message_store.set_messages(messages)
+            await self.message_store.set_messages(messages)
 
         await self._activate_agent(
             agent=agent,
@@ -1207,7 +1208,8 @@ class Swarm:
         )
 
         if prompt:
-            self.message_store.add_message(Message(role="user", content=prompt))
+            message = Message(role="user", content=prompt)
+            await self.message_store.add_message(message)
 
     async def _stream_agent_execution(
         self,
@@ -1306,13 +1308,12 @@ class Swarm:
                     tool_calls=last_agent_response.tool_calls,
                 )
 
-                for message in new_messages:
-                    self.message_store.add_message(message)
+                await self.message_store.add_messages(new_messages)
             else:
                 # We might not want to do this, but it's a good fallback
                 # Please consider removing this if it leads to unexpected behavior
                 empty_message = Message(role="assistant", content="<empty>")
-                self.message_store.add_message(empty_message)
+                await self.message_store.add_message(empty_message)
                 log_verbose(
                     "Empty response received, appending placeholder message",
                     level="WARNING",
@@ -1380,7 +1381,7 @@ class Swarm:
             raise
 
         finally:
-            all_messages = self.message_store.get_messages()
+            all_messages = await self.message_store.get_messages()
             await self.event_handler.on_event(
                 SwarmCompleteEvent(
                     messages=all_messages,
@@ -1549,7 +1550,7 @@ class Swarm:
 
         return await stream.get_result()
 
-    def cleanup(
+    async def cleanup(
         self,
         clear_agents: bool = True,
         clear_context: bool = False,
@@ -1636,4 +1637,4 @@ class Swarm:
             self._context_variables.clear()
 
         if clear_messages:
-            self.message_store.clear()
+            await self.message_store.clear()
