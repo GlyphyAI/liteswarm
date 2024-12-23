@@ -514,31 +514,19 @@ class Swarm:
     # MARK: Response Handling
     # ================================================
 
-    async def _create_completion(
+    def _prepare_completion_kwargs(
         self,
         agent: Agent,
         messages: list[Message],
-    ) -> CustomStreamWrapper:
-        """Create a completion request with comprehensive configuration.
-
-        Prepares and sends a completion request with full configuration:
-        - Message history with proper formatting
-        - Tool configurations and permissions
-        - Response format specifications
-        - Usage tracking and cost monitoring settings
-        - Model-specific parameters from agent
+    ) -> dict[str, Any]:
+        """Prepare completion kwargs for both sync and async completions.
 
         Args:
             agent: Agent to use for completion, providing model settings.
             messages: Messages to send as conversation context.
 
         Returns:
-            Response stream from the completion API.
-
-        Raises:
-            ValueError: If agent parameters are invalid or inconsistent.
-            TypeError: If response format is unexpected.
-            ContextWindowExceededError: If context window is exceeded.
+            Dictionary of completion kwargs ready for litellm.completion/acompletion.
         """
         exclude_keys = {"response_format", "litellm_kwargs"}
         llm_messages = dump_messages(messages, exclude_none=True)
@@ -577,7 +565,36 @@ class Swarm:
             level="DEBUG",
         )
 
-        response_stream = await acompletion(**completion_kwargs)
+        return completion_kwargs
+
+    async def _create_completion(
+        self,
+        agent: Agent,
+        messages: list[Message],
+    ) -> CustomStreamWrapper:
+        """Create an async completion request with comprehensive configuration.
+
+        Prepares and sends a completion request with full configuration:
+        - Message history with proper formatting
+        - Tool configurations and permissions
+        - Response format specifications
+        - Usage tracking and cost monitoring settings
+        - Model-specific parameters from agent
+
+        Args:
+            agent: Agent to use for completion, providing model settings.
+            messages: Messages to send as conversation context.
+
+        Returns:
+            Response stream from the completion API.
+
+        Raises:
+            ValueError: If agent parameters are invalid or inconsistent.
+            TypeError: If response format is unexpected.
+            ContextWindowExceededError: If context window is exceeded.
+        """
+        completion_kwargs = self._prepare_completion_kwargs(agent, messages)
+        response_stream = await litellm.acompletion(**completion_kwargs)
         if not isinstance(response_stream, CustomStreamWrapper):
             raise TypeError("Expected a CustomStreamWrapper instance.")
 
