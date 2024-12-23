@@ -13,7 +13,7 @@ from typing import Any
 import json_repair
 import litellm
 import orjson
-from litellm import CustomStreamWrapper, acompletion
+from litellm import CustomStreamWrapper
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 from litellm.utils import token_counter
@@ -24,7 +24,7 @@ from liteswarm.core.event_handler import LiteSwarmEventHandler, SwarmEventHandle
 from liteswarm.core.message_store import LiteMessageStore, MessageStore
 from liteswarm.core.swarm_stream import SwarmStream
 from liteswarm.types.events import (
-    SwarmAgentResponseEvent,
+    SwarmAgentResponseChunkEvent,
     SwarmAgentSwitchEvent,
     SwarmCompleteEvent,
     SwarmErrorEvent,
@@ -43,9 +43,9 @@ from liteswarm.types.misc import JSON
 from liteswarm.types.swarm import (
     Agent,
     AgentExecutionResult,
-    AgentResponse,
+    AgentResponseChunk,
     AgentState,
-    CompletionResponse,
+    CompletionResponseChunk,
     ContextVariables,
     Delta,
     FinishReason,
@@ -193,7 +193,7 @@ class Swarm:
         # Public configuration
         self.event_handler = event_handler or LiteSwarmEventHandler()
         self.message_store = message_store or LiteMessageStore()
-        self.context_manager = context_manager or LiteContextManager()
+        self.context_manager = context_manager or LiteContextManager(self.message_store)
         self.include_usage = include_usage
         self.include_cost = include_cost
 
@@ -619,8 +619,8 @@ class Swarm:
         agent: Agent,
         agent_messages: list[Message],
         context_variables: ContextVariables,
-    ) -> AsyncGenerator[CompletionResponse, None]:
-        """Stream agent completion responses handling continuations and errors.
+    ) -> AsyncGenerator[CompletionResponseChunk, None]:
+        """Stream completion response chunks from the language model.
 
         Manages the complete response lifecycle with advanced features:
         - Initial response stream creation and validation
@@ -635,7 +635,7 @@ class Swarm:
             context_variables: Context for dynamic resolution.
 
         Yields:
-            CompletionResponse containing:
+            CompletionResponseChunk containing:
             - Current response delta with content updates
             - Finish reason for proper flow control
             - Usage statistics for monitoring (if enabled)
@@ -659,13 +659,13 @@ class Swarm:
                     break
 
                 async for chunk in current_stream:
-                    response = await self._process_stream_chunk(agent, chunk)
-                    if response.delta.content:
-                        accumulated_content += response.delta.content
+                    response_chunk = self._process_stream_chunk(agent, chunk)
+                    if response_chunk.delta.content:
+                        accumulated_content += response_chunk.delta.content
 
-                    yield response
+                    yield response_chunk
 
-                    if response.finish_reason == "length":
+                    if response_chunk.finish_reason == "length":
                         continuation_count += 1
                         current_stream = await self._handle_continuation(
                             agent=agent,
@@ -736,7 +736,7 @@ class Swarm:
         self,
         agent: Agent,
         chunk: ModelResponse,
-    ) -> CompletionResponse:
+    ) -> CompletionResponseChunk:
         """Process a raw stream chunk into a structured completion response.
 
         Performs stream chunk processing:
@@ -771,7 +771,7 @@ class Swarm:
                 usage=usage,
             )
 
-        return CompletionResponse(
+        return CompletionResponseChunk(
             delta=delta,
             finish_reason=finish_reason,
             usage=usage,
@@ -901,11 +901,11 @@ class Swarm:
         agent: Agent,
         agent_messages: list[Message],
         context_variables: ContextVariables,
-    ) -> AsyncGenerator[AgentResponse, None]:
+    ) -> AsyncGenerator[AgentResponseChunk, None]:
         """Process agent responses with state management and tracking.
 
         Implements agent response handling:
-        - Streams completion responses with proper buffering
+        - Streams completion response chunks with proper buffering
         - Accumulates content and tool calls accurately
         - Updates event handler with progress
         - Maintains conversation state consistency
@@ -917,7 +917,7 @@ class Swarm:
             context_variables: Context for dynamic resolution.
 
         Yields:
-            AgentResponse containing:
+            AgentResponseChunk containing:
             - Current response delta with updates
             - Accumulated content for context
             - Parsed content if response format is specified
@@ -945,13 +945,13 @@ class Swarm:
             backoff_factor=self.backoff_factor,
         )
 
-        async for completion_response in completion_stream(
+        async for completion_chunk in completion_stream(
             agent=agent,
             agent_messages=agent_messages,
             context_variables=context_variables,
         ):
-            delta = completion_response.delta
-            finish_reason = completion_response.finish_reason
+            delta = completion_chunk.delta
+            finish_reason = completion_chunk.finish_reason
 
             if delta.content:
                 if full_content is None:
@@ -978,20 +978,20 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            response = AgentResponse(
+            response_chunk = AgentResponseChunk(
                 agent=agent,
                 delta=delta,
                 finish_reason=finish_reason,
                 content=full_content,
                 parsed_content=parsed_content,
                 tool_calls=full_tool_calls,
-                usage=completion_response.usage,
-                response_cost=completion_response.response_cost,
+                usage=completion_chunk.usage,
+                response_cost=completion_chunk.response_cost,
             )
 
-            await self.event_handler.on_event(SwarmAgentResponseEvent(response=response))
+            await self.event_handler.on_event(SwarmAgentResponseChunkEvent(chunk=response_chunk))
 
-            yield response
+            yield response_chunk
 
     async def _process_assistant_response(
         self,
@@ -1289,7 +1289,7 @@ class Swarm:
                 context_variables=self._context_variables,
             )
 
-            last_agent_response: AgentResponse | None = None
+            last_agent_response: AgentResponseChunk | None = None
             async for agent_response in self._process_agent_response(
                 agent=self._active_agent,
                 agent_messages=agent_messages,
@@ -1330,7 +1330,7 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-    ) -> AsyncGenerator[AgentResponse, None]:
+    ) -> AsyncGenerator[AgentResponseChunk, None]:
         """Create the base swarm execution stream.
 
         Internal method that creates the underlying async generator for SwarmStream.
@@ -1347,7 +1347,7 @@ class Swarm:
             context_variables: Optional variables for dynamic resolution.
 
         Yields:
-            AgentResponse objects containing streaming updates.
+            AgentResponseChunk objects containing streaming updates.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
