@@ -1055,7 +1055,27 @@ class Swarm:
     # MARK: Context Management
     # ================================================
 
-    async def _prepare_agent_context(
+    async def _optimize_context(self, agent: Agent) -> list[Message]:
+        """Optimize the message context for an agent's execution.
+
+        Uses the context manager to optimize the conversation history by:
+        - Filtering irrelevant messages
+        - Summarizing long conversations
+        - Removing redundant content
+        - Maintaining conversation coherence
+        - Preserving critical context
+
+        Args:
+            agent: Agent requiring context optimization.
+
+        Returns:
+            List of optimized messages ready for agent execution.
+        """
+        return await self.context_manager.optimize_context(
+            model=agent.llm.model,
+        )
+
+    async def _create_agent_context(
         self,
         agent: Agent,
         prompt: str | None = None,
@@ -1069,27 +1089,18 @@ class Swarm:
         3. Optional prompt as user message
 
         Args:
-            agent: Agent requiring context preparation
-            prompt: Optional user prompt to include
-            context_variables: Variables for dynamic resolution
+            agent: Agent requiring context creation.
+            prompt: Optional user prompt to include.
+            context_variables: Optional variables for dynamic resolution.
 
         Returns:
-            List of messages ready for agent execution.
-
-        Notes:
-            - Resolves dynamic instructions with context
-            - Filters system messages from history
-            - Maintains chronological order
-            - Adds prompt as final message if provided
+            List of messages ready for execution.
         """
-        instructions = unwrap_instructions(agent.instructions, context_variables)
-        history = [msg for msg in self.message_store.get_messages() if msg.role != "system"]
-
-        messages = [Message(role="system", content=instructions), *history]
-        if prompt:
-            messages.append(Message(role="user", content=prompt))
-
-        return messages
+        return await self.context_manager.create_context(
+            agent=agent,
+            prompt=prompt,
+            context_variables=context_variables,
+        )
 
     async def _reduce_context_size(
         self,
@@ -1112,14 +1123,8 @@ class Swarm:
         Raises:
             ContextLengthError: If context remains too large after optimization
         """
-        messages = self.message_store.get_messages()
-        optimized = await self.context_manager.optimize(
-            messages=messages,
-            model=agent.llm.model,
-        )
-
-        self.message_store.set_messages(optimized)
-        agent_messages = await self._prepare_agent_context(
+        optimized_messages = await self._optimize_context(agent)
+        agent_messages = await self._create_agent_context(
             agent=agent,
             context_variables=context_variables,
         )
@@ -1129,7 +1134,7 @@ class Swarm:
         except ContextWindowExceededError as e:
             raise ContextLengthError(
                 message="Context window exceeded even after optimization",
-                current_length=len(optimized),
+                current_length=len(optimized_messages),
                 original_error=e,
             ) from e
 
@@ -1283,7 +1288,7 @@ class Swarm:
 
                 await self._activate_agent(next_agent, self._context_variables)
 
-            agent_messages = await self._prepare_agent_context(
+            agent_messages = await self._create_agent_context(
                 agent=self._active_agent,
                 context_variables=self._context_variables,
             )
