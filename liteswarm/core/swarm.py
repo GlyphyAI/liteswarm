@@ -1220,12 +1220,12 @@ class Swarm:
         self,
         iteration_count: int = 0,
         agent_switch_count: int = 0,
-    ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream responses from active and subsequent agents in the swarm.
+    ) -> AsyncGenerator[AgentResponseChunk, None]:
+        """Stream response chunks from active and subsequent agents in the swarm.
 
         Manages the core response generation loop of the swarm, handling:
         - Agent activation and switching
-        - Response generation and streaming
+        - Response chunk generation and streaming
         - Tool call processing and execution
         - Message history updates
         - State transitions
@@ -1237,7 +1237,7 @@ class Swarm:
                 Used to enforce maximum switch limits. Defaults to 0.
 
         Yields:
-            AgentResponse objects containing:
+            AgentResponseChunk objects containing:
             - Response content and deltas
             - Tool calls and their results
             - Usage statistics if enabled
@@ -1407,35 +1407,28 @@ class Swarm:
     ) -> SwarmStream:
         """Stream responses from a swarm of agents.
 
-        This is the main entry point for streaming responses from a swarm of agents.
-        Returns a SwarmStream that provides both streaming and result collection:
-        - Async iteration for real-time updates
-        - Final result accumulation
-        - Usage and cost tracking
-        - Parsed content handling
-        - Error recovery
+        Main entry point for streaming responses from agents. Returns a SwarmStream
+        that provides both streaming and result collection capabilities. The stream
+        can be consumed multiple times if needed.
 
-        The SwarmStream maintains internal state to:
-        - Track the last received response
-        - Accumulate complete content
-        - Combine usage statistics
-        - Aggregate cost information
-        - Handle parsed content formats
+        This is a synchronous method that returns an async object (SwarmStream).
+        The returned stream should be consumed using async iteration or its async
+        result collection methods.
 
         Args:
-            agent: Initial agent for handling conversations.
+            agent: Agent to execute the task.
             prompt: Optional user prompt to process.
-            messages: Optional list of previous conversation messages.
-            context_variables: Optional variables for dynamic resolution.
+            messages: Optional list of previous conversation messages for context.
+            context_variables: Optional variables for dynamic instruction resolution.
 
         Returns:
-            SwarmStream wrapper providing both streaming and result capabilities.
+            SwarmStream wrapper providing both async streaming and result collection.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
-            ContextLengthError: If context becomes too large.
-            MaxAgentSwitchesError: If too many switches occur.
-            MaxResponseContinuationsError: If response needs too many continuations.
+            ContextLengthError: If context becomes too large to process.
+            MaxAgentSwitchesError: If too many agent switches occur.
+            MaxResponseContinuationsError: If response requires too many continuations.
 
         Examples:
             Streaming mode:
@@ -1469,7 +1462,6 @@ class Swarm:
             - Internal state tracks complete response accumulation
             - Usage and cost statistics are combined properly
             - Parsed content is handled according to format rules
-            - The stream can be consumed multiple times if needed
         """
         return SwarmStream(
             stream=self._create_swarm_stream(
@@ -1489,33 +1481,21 @@ class Swarm:
     ) -> AgentExecutionResult:
         """Execute a prompt and return the complete response.
 
-        This is a convenience method that wraps the stream() method to provide
-        a simpler interface when streaming isn't required. It accumulates all
-        content from the stream and returns the final response as a string.
-
-        The method provides the same functionality as stream() but with:
-        - Automatic response accumulation
-        - Simplified error handling
-        - Single string return value
-        - Blocking execution until completion
+        Convenience method that wraps stream() to provide a simpler interface when
+        streaming isn't required. Blocks until the complete response is generated.
 
         Args:
             agent: Agent to execute the task.
             prompt: The user's input prompt to process.
             messages: Optional list of previous conversation messages for context.
-                If provided, these messages are used as conversation history.
-            context_variables: Optional variables for dynamic instruction resolution
-                and tool execution. These variables are passed to agents and tools.
+            context_variables: Optional variables for dynamic instruction resolution.
 
         Returns:
-            ConversationState containing:
-            - Final response content
-            - Active agent and message history
-            - Token usage and cost statistics (if enabled)
+            Complete execution result with final content, agent state, and usage statistics.
 
         Raises:
             SwarmError: If an unrecoverable error occurs during processing.
-            ContextLengthError: If the context becomes too large to process.
+            ContextLengthError: If context becomes too large to process.
             MaxAgentSwitchesError: If too many agent switches occur.
             MaxResponseContinuationsError: If response requires too many continuations.
 
