@@ -44,32 +44,33 @@ from liteswarm.utils.typing import is_callable, is_subtype
 class SwarmTeam:
     """Experimental framework for orchestrating complex agent workflows.
 
-    SwarmTeam provides a two-phase approach to task execution:
+    SwarmTeam provides a high-level interface for executing tasks using a team of
+    specialized AI agents. The framework uses a two-phase approach to task execution:
 
     1. Planning Phase: Analyzes prompts to create structured plans
-       - Uses planning agent to break down work into tasks
-       - Validates task types and dependencies
-       - Supports interactive feedback loop
-       - Can use OpenAI-compatible schemas or custom formats
+        - Uses planning agent to break down work into tasks
+        - Validates task types and dependencies
+        - Supports interactive feedback loop
+        - Uses Pydantic models for schema definitions
 
     2. Execution Phase: Executes tasks with specialized agents
-       - Assigns tasks to capable team members
-       - Handles structured inputs/outputs via framework-level parsing
-       - Tracks execution state
-       - Produces artifacts with results
+        - Assigns tasks to capable team members
+        - Handles structured inputs/outputs via framework-level parsing
+        - Tracks execution state
+        - Produces artifacts with results
 
-    The framework supports both OpenAI-compatible structured outputs and custom
-    formats through its two-layer parsing system. Users can choose to:
-    - Use OpenAI-compatible schemas for direct LLM structured outputs
-    - Use custom formats with framework-level parsing
-    - Combine both approaches for robust validation
+    The framework supports structured outputs through a two-layer parsing system
+    using Pydantic models that transform to JSON schemas. Users can choose to:
+        - Use Pydantic models for direct LLM structured outputs (if supported)
+        - Use custom formats with framework-level parsing
+        - Combine both approaches for robust validation
 
     Examples:
-        Create a team for code review:
+        Create a team for code review (complete setup):
             ```python
-            # 1. Define task type (OpenAI-compatible in this example)
+            # 1. Define task type using Pydantic model
             class ReviewTask(Task):
-                type: Literal["code_review"]  # Discriminator
+                type: Literal["code_review"]  # Discriminator for task type
                 pr_url: str
                 review_type: str
 
@@ -132,15 +133,49 @@ class SwarmTeam:
                     print(f"Approved: {output.approved}")
             ```
 
-    Note:
-        This is an experimental agent orchestration feature that demonstrates:
-        - Two-layer structured output handling (LLM-level and Framework-level)
-        - Complex workflow orchestration
-        - Team-based task execution
-        - OpenAI-compatible schemas
+        Interactive plan feedback:
+            ```python
+            class InteractiveFeedback(PlanFeedbackHandler):
+                async def handle(
+                    self,
+                    plan: Plan,
+                    prompt: str,
+                    context: ContextVariables | None,
+                ) -> tuple[str, ContextVariables | None] | None:
+                    print("Proposed plan:")
+                    for task in plan.tasks:
+                        print(f"- {task.title}")
+
+                    if input("Approve? [y/N]: ").lower() == "y":
+                        return None
+
+                    feedback = input("Enter feedback: ")
+                    return f"Previous plan needs adjustments: {feedback}", context
+
+
+            # Using async interface
+            artifact = await team.execute(
+                prompt="Create a Flutter TODO app",
+                feedback_handler=InteractiveFeedback(),
+            )
+
+            # Or using sync interface
+            artifact = team.execute_sync(
+                prompt="Create a Flutter TODO app",
+                feedback_handler=InteractiveFeedback(),
+            )
+            ```
+
+    Notes:
+        - Automated task planning and execution
+        - Parallel task execution when possible
+        - Task dependency management
+        - Event-based progress tracking
+        - Plan feedback and refinement
+        - Structured output handling using Pydantic models
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         swarm: Swarm,
         members: list[TeamMember],
