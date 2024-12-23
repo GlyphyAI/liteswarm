@@ -10,7 +10,7 @@ from typing_extensions import override
 
 from liteswarm.core.event_handler import LiteSwarmEventHandler
 from liteswarm.types.events import (
-    SwarmAgentResponseEvent,
+    SwarmAgentResponseChunkEvent,
     SwarmAgentSwitchEvent,
     SwarmCompleteEvent,
     SwarmErrorEvent,
@@ -92,7 +92,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         """
         match event:
             # Swarm Events
-            case SwarmAgentResponseEvent():
+            case SwarmAgentResponseChunkEvent():
                 await self._handle_response(event)
             case SwarmToolCallEvent():
                 await self._handle_tool_call(event)
@@ -115,24 +115,24 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
             case SwarmTeamPlanCompletedEvent():
                 await self._handle_team_plan_completed(event)
 
-    async def _handle_response(self, event: SwarmAgentResponseEvent) -> None:
+    async def _handle_response(self, event: SwarmAgentResponseChunkEvent) -> None:
         """Handle agent response events.
 
         Args:
             event: Response event to handle.
         """
-        if event.response.finish_reason == "length":
+        if event.chunk.finish_reason == "length":
             print("\n[...continuing...]", end="", flush=True)
 
-        if content := event.response.delta.content:
-            agent_id = event.response.agent.id
+        if content := event.chunk.delta.content:
+            agent_id = event.chunk.agent.id
             if self._last_agent_id != agent_id:
                 print(f"\n[{agent_id}] ", end="", flush=True)
                 self._last_agent_id = agent_id
 
             print(content, end="", flush=True)
 
-        if event.response.finish_reason:
+        if event.chunk.finish_reason:
             print("", flush=True)
 
     async def _handle_tool_call(self, event: SwarmToolCallEvent) -> None:
