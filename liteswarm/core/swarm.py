@@ -648,16 +648,13 @@ class Swarm:
         try:
             accumulated_content: str = ""
             continuation_count: int = 0
-            current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
+            current_stream: CustomStreamWrapper = await self._get_initial_stream(
                 agent=agent,
                 agent_messages=agent_messages,
                 context_variables=context_variables,
             )
 
             while continuation_count < self.max_response_continuations:
-                if not current_stream:
-                    break
-
                 async for chunk in current_stream:
                     response_chunk = self._process_stream_chunk(agent, chunk)
                     if response_chunk.delta.content:
