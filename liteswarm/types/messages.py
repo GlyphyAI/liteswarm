@@ -136,6 +136,9 @@ class MessageRecord(Message):
             )
             ```
         """
+        if isinstance(message, MessageRecord):
+            return message.model_copy()
+
         return cls(
             # Copy all fields from Message
             role=message.role,
