@@ -27,7 +27,7 @@ class SwarmEventHandler(Protocol):
         class ConsoleEventHandler(SwarmEventHandler):
             async def on_event(self, event: SwarmEventType) -> None:
                 match event:
-                    case SwarmAgentResponseEvent():
+                    case SwarmAgentResponseChunkEvent():
                         if event.response.delta.content:
                             print(event.response.delta.content, end="", flush=True)
                     case SwarmAgentSwitchEvent():
@@ -57,8 +57,8 @@ class SwarmEventHandler(Protocol):
 
         Args:
             event: The event to process, which can be:
-                - SwarmCompletionResponseEvent: Raw LLM response
-                - SwarmAgentResponseEvent: Processed agent response
+                - SwarmCompletionResponseChunkEvent: Raw LLM response chunk
+                - SwarmAgentResponseChunkEvent: Processed agent response chunk
                 - SwarmToolCallEvent: Tool call by an agent
                 - SwarmAgentSwitchEvent: Agent transition
                 - SwarmErrorEvent: Error during execution
@@ -68,7 +68,7 @@ class SwarmEventHandler(Protocol):
             ```python
             async def on_event(self, event: SwarmEventType) -> None:
                 match event:
-                    case SwarmAgentResponseEvent():
+                    case SwarmAgentResponseChunkEvent():
                         await self.process_response(event.response)
                     case SwarmErrorEvent():
                         await self.handle_error(event.error)
@@ -99,7 +99,7 @@ class LiteSwarmEventHandler(SwarmEventHandler):
         class LoggingEventHandler(LiteSwarmEventHandler):
             async def on_event(self, event: SwarmEventType) -> None:
                 match event:
-                    case SwarmAgentResponseEvent():
+                    case SwarmAgentResponseChunkEvent():
                         print(f"Response: {event.response.delta.content}")
                     case SwarmErrorEvent():
                         print(f"Error: {event.error}")
@@ -139,7 +139,7 @@ class SwarmEventGenerator(SwarmEventHandler):
 
         async for event in generator:
             match event:
-                case SwarmAgentResponseEvent():
+                case SwarmAgentResponseChunkEvent():
                     print(event.response.delta.content)
                 case SwarmErrorEvent():
                     print(f"Error: {event.error}")

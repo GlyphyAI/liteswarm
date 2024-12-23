@@ -628,16 +628,17 @@ class ToolCallFailureResult(ToolCallResult):
     """Error that occurred during execution."""
 
 
-class CompletionResponse(BaseModel):
-    """Response chunk from the language model.
+class CompletionResponseChunk(BaseModel):
+    """Single chunk in a streaming completion response.
 
-    Represents a single chunk in a streaming response with
-    content and metadata.
+    Represents an incremental update from the language model including content
+    delta and metadata. Each chunk contains the latest changes and running
+    statistics.
 
     Examples:
-        Process response chunk:
+        Process chunk:
             ```python
-            response = CompletionResponse(
+            chunk = CompletionResponseChunk(
                 delta=Delta(content="Hello"),
                 finish_reason=None,
                 usage=Usage(prompt_tokens=10, completion_tokens=1, total_tokens=11),
@@ -668,17 +669,17 @@ class CompletionResponse(BaseModel):
     )
 
 
-class AgentResponse(BaseModel):
-    """Streaming response chunk from an agent with accumulated state.
+class AgentResponseChunk(BaseModel):
+    """Single chunk in a streaming agent response.
 
-    Contains both incremental and accumulated state including:
+    Contains both the latest delta and accumulated state from previous chunks:
     - Current delta update (new content/tool calls)
     - Accumulated content from previous chunks
     - Collected tool calls and their states
     - Running usage and cost statistics
     - Parsed content when format specified
 
-    This class represents each streaming step with:
+    Each chunk represents a streaming step with:
     - Latest content or tool call updates
     - Progressive content accumulation
     - Ongoing statistics tracking
@@ -688,7 +689,7 @@ class AgentResponse(BaseModel):
     Examples:
         Content update:
             ```python
-            response = AgentResponse(
+            chunk = AgentResponseChunk(
                 agent=agent,
                 delta=Delta(content=" world"),
                 content="Hello world",  # Full content so far
@@ -696,13 +697,13 @@ class AgentResponse(BaseModel):
                 finish_reason=None,
                 usage=Usage(prompt_tokens=10, completion_tokens=2),
             )
-            print(response.delta.content)  # Latest: " world"
-            print(response.content)  # Total: "Hello world"
+            print(chunk.delta.content)  # Latest: " world"
+            print(chunk.content)  # Total: "Hello world"
             ```
 
         Tool call update:
             ```python
-            response = AgentResponse(
+            chunk = AgentResponseChunk(
                 agent=agent,
                 delta=Delta(tool_calls=[new_call]),
                 content="Let me calculate that",
@@ -725,7 +726,7 @@ class AgentResponse(BaseModel):
     """
 
     agent: Agent
-    """Agent that produced this response."""
+    """Agent that produced this chunk."""
 
     delta: Delta
     """Current content update."""

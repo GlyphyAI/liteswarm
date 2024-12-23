@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 from typing_extensions import override
 
-from liteswarm.types.swarm import AgentExecutionResult, AgentResponse, ResponseCost, Usage
+from liteswarm.types.swarm import AgentExecutionResult, AgentResponseChunk, ResponseCost, Usage
 from liteswarm.utils.usage import combine_response_cost, combine_usage
 
 if TYPE_CHECKING:
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from liteswarm.types.misc import JSON
 
 
-class SwarmStream(AsyncIterator[AgentResponse]):
+class SwarmStream(AsyncIterator[AgentResponseChunk]):
     """Wrapper for Swarm stream that provides execution result capabilities.
 
     SwarmStream enhances the base stream functionality by:
@@ -71,22 +71,22 @@ class SwarmStream(AsyncIterator[AgentResponse]):
             ```
     """
 
-    def __init__(self, stream: AsyncGenerator[AgentResponse, None]) -> None:
+    def __init__(self, stream: AsyncGenerator[AgentResponseChunk, None]) -> None:
         """Initialize stream wrapper with base generator.
 
         Args:
-            stream: Base AsyncGenerator[AgentResponse] to wrap.
-                Must yield AgentResponse objects.
+            stream: Base AsyncGenerator[AgentResponseChunk] to wrap.
+                Must yield AgentResponseChunk objects.
         """
         self._stream = stream
-        self._last_response: AgentResponse | None = None
+        self._last_response: AgentResponseChunk | None = None
         self._accumulated_content: str | None = None
         self._accumulated_parsed_content: JSON | BaseModel | None = None
         self._accumulated_usage: Usage | None = None
         self._accumulated_response_cost: ResponseCost | None = None
 
     @override
-    def __aiter__(self) -> AsyncIterator[AgentResponse]:
+    def __aiter__(self) -> AsyncIterator[AgentResponseChunk]:
         """Provide async iterator interface.
 
         Returns:
@@ -95,17 +95,11 @@ class SwarmStream(AsyncIterator[AgentResponse]):
         return self
 
     @override
-    async def __anext__(self) -> AgentResponse:
-        """Get next response from stream with accumulation.
-
-        Retrieves the next response while maintaining:
-        - Content accumulation
-        - Usage statistics
-        - Cost tracking
-        - Parsed content handling
+    async def __anext__(self) -> AgentResponseChunk:
+        """Get the next chunk from the stream.
 
         Returns:
-            Next AgentResponse from the stream.
+            Next AgentResponseChunk from the stream.
 
         Raises:
             StopAsyncIteration: When stream is exhausted.
@@ -159,7 +153,7 @@ class SwarmStream(AsyncIterator[AgentResponse]):
         async for _ in self:
             pass
 
-    def _accumulate_agent_response(self, agent_response: AgentResponse) -> None:
+    def _accumulate_agent_response(self, agent_response: AgentResponseChunk) -> None:
         """Accumulate response data from stream.
 
         Updates internal state with:

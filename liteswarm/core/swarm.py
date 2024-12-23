@@ -13,7 +13,7 @@ from typing import Any
 import json_repair
 import litellm
 import orjson
-from litellm import CustomStreamWrapper, acompletion
+from litellm import CustomStreamWrapper
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 from litellm.utils import token_counter
@@ -24,7 +24,7 @@ from liteswarm.core.event_handler import LiteSwarmEventHandler, SwarmEventHandle
 from liteswarm.core.message_store import LiteMessageStore, MessageStore
 from liteswarm.core.swarm_stream import SwarmStream
 from liteswarm.types.events import (
-    SwarmAgentResponseEvent,
+    SwarmAgentResponseChunkEvent,
     SwarmAgentSwitchEvent,
     SwarmCompleteEvent,
     SwarmErrorEvent,
@@ -43,9 +43,9 @@ from liteswarm.types.misc import JSON
 from liteswarm.types.swarm import (
     Agent,
     AgentExecutionResult,
-    AgentResponse,
+    AgentResponseChunk,
     AgentState,
-    CompletionResponse,
+    CompletionResponseChunk,
     ContextVariables,
     Delta,
     FinishReason,
@@ -89,28 +89,12 @@ class Swarm:
         Basic calculation:
             ```python
             def add(a: float, b: float) -> float:
-                \"\"\"Add two numbers together.
-
-                Args:
-                    a: First number.
-                    b: Second number.
-
-                Returns:
-                    Sum of the two numbers.
-                \"\"\"
                 return a + b
 
+
             def multiply(a: float, b: float) -> float:
-                \"\"\"Multiply two numbers together.
-
-                Args:
-                    a: First number.
-                    b: Second number.
-
-                Returns:
-                    Product of the two numbers.
-                \"\"\"
                 return a * b
+
 
             agent_instructions = (
                 "You are a math assistant. Use tools to perform calculations. "
@@ -133,7 +117,7 @@ class Swarm:
             swarm = Swarm(include_usage=True)
             result = await swarm.execute(
                 agent=agent,
-                prompt="What is (2 + 3) * 4?"
+                prompt="What is (2 + 3) * 4?",
             )
 
             # The agent will:
@@ -145,7 +129,7 @@ class Swarm:
     Notes:
         - Maintains internal state during conversations
         - Create separate instances for concurrent conversations
-    """  # noqa: D214
+    """
 
     def __init__(
         self,
@@ -193,7 +177,7 @@ class Swarm:
         # Public configuration
         self.event_handler = event_handler or LiteSwarmEventHandler()
         self.message_store = message_store or LiteMessageStore()
-        self.context_manager = context_manager or LiteContextManager()
+        self.context_manager = context_manager or LiteContextManager(self.message_store)
         self.include_usage = include_usage
         self.include_cost = include_cost
 
@@ -452,7 +436,7 @@ class Swarm:
 
         return results
 
-    async def _process_tool_call_result(
+    def _process_tool_call_result(
         self,
         result: ToolCallResult,
     ) -> ToolMessage:
@@ -514,31 +498,19 @@ class Swarm:
     # MARK: Response Handling
     # ================================================
 
-    async def _create_completion(
+    def _prepare_completion_kwargs(
         self,
         agent: Agent,
         messages: list[Message],
-    ) -> CustomStreamWrapper:
-        """Create a completion request with comprehensive configuration.
-
-        Prepares and sends a completion request with full configuration:
-        - Message history with proper formatting
-        - Tool configurations and permissions
-        - Response format specifications
-        - Usage tracking and cost monitoring settings
-        - Model-specific parameters from agent
+    ) -> dict[str, Any]:
+        """Prepare completion kwargs for both sync and async completions.
 
         Args:
             agent: Agent to use for completion, providing model settings.
             messages: Messages to send as conversation context.
 
         Returns:
-            Response stream from the completion API.
-
-        Raises:
-            ValueError: If agent parameters are invalid or inconsistent.
-            TypeError: If response format is unexpected.
-            ContextWindowExceededError: If context window is exceeded.
+            Dictionary of completion kwargs ready for litellm.completion/acompletion.
         """
         exclude_keys = {"response_format", "litellm_kwargs"}
         llm_messages = dump_messages(messages, exclude_none=True)
@@ -577,7 +549,36 @@ class Swarm:
             level="DEBUG",
         )
 
-        response_stream = await acompletion(**completion_kwargs)
+        return completion_kwargs
+
+    async def _create_completion(
+        self,
+        agent: Agent,
+        messages: list[Message],
+    ) -> CustomStreamWrapper:
+        """Create an async completion request with comprehensive configuration.
+
+        Prepares and sends a completion request with full configuration:
+        - Message history with proper formatting
+        - Tool configurations and permissions
+        - Response format specifications
+        - Usage tracking and cost monitoring settings
+        - Model-specific parameters from agent
+
+        Args:
+            agent: Agent to use for completion, providing model settings.
+            messages: Messages to send as conversation context.
+
+        Returns:
+            Response stream from the completion API.
+
+        Raises:
+            ValueError: If agent parameters are invalid or inconsistent.
+            TypeError: If response format is unexpected.
+            ContextWindowExceededError: If context window is exceeded.
+        """
+        completion_kwargs = self._prepare_completion_kwargs(agent, messages)
+        response_stream = await litellm.acompletion(**completion_kwargs)
         if not isinstance(response_stream, CustomStreamWrapper):
             raise TypeError("Expected a CustomStreamWrapper instance.")
 
@@ -619,8 +620,8 @@ class Swarm:
         agent: Agent,
         agent_messages: list[Message],
         context_variables: ContextVariables,
-    ) -> AsyncGenerator[CompletionResponse, None]:
-        """Stream agent completion responses handling continuations and errors.
+    ) -> AsyncGenerator[CompletionResponseChunk, None]:
+        """Stream completion response chunks from the language model.
 
         Manages the complete response lifecycle with advanced features:
         - Initial response stream creation and validation
@@ -635,7 +636,7 @@ class Swarm:
             context_variables: Context for dynamic resolution.
 
         Yields:
-            CompletionResponse containing:
+            CompletionResponseChunk containing:
             - Current response delta with content updates
             - Finish reason for proper flow control
             - Usage statistics for monitoring (if enabled)
@@ -648,24 +649,21 @@ class Swarm:
         try:
             accumulated_content: str = ""
             continuation_count: int = 0
-            current_stream: CustomStreamWrapper | None = await self._get_initial_stream(
+            current_stream: CustomStreamWrapper = await self._get_initial_stream(
                 agent=agent,
                 agent_messages=agent_messages,
                 context_variables=context_variables,
             )
 
             while continuation_count < self.max_response_continuations:
-                if not current_stream:
-                    break
-
                 async for chunk in current_stream:
-                    response = await self._process_stream_chunk(agent, chunk)
-                    if response.delta.content:
-                        accumulated_content += response.delta.content
+                    response_chunk = self._process_stream_chunk(agent, chunk)
+                    if response_chunk.delta.content:
+                        accumulated_content += response_chunk.delta.content
 
-                    yield response
+                    yield response_chunk
 
-                    if response.finish_reason == "length":
+                    if response_chunk.finish_reason == "length":
                         continuation_count += 1
                         current_stream = await self._handle_continuation(
                             agent=agent,
@@ -732,11 +730,11 @@ class Swarm:
                 context_variables=context_variables,
             )
 
-    async def _process_stream_chunk(
+    def _process_stream_chunk(
         self,
         agent: Agent,
         chunk: ModelResponse,
-    ) -> CompletionResponse:
+    ) -> CompletionResponseChunk:
         """Process a raw stream chunk into a structured completion response.
 
         Performs stream chunk processing:
@@ -771,7 +769,7 @@ class Swarm:
                 usage=usage,
             )
 
-        return CompletionResponse(
+        return CompletionResponseChunk(
             delta=delta,
             finish_reason=finish_reason,
             usage=usage,
@@ -854,7 +852,7 @@ class Swarm:
             or is_subtype(response_format, ResponseSchema)
         )
 
-    async def _parse_agent_response_content(
+    def _parse_agent_response_content(
         self,
         full_content: str,
         finish_reason: FinishReason | None,
@@ -901,11 +899,11 @@ class Swarm:
         agent: Agent,
         agent_messages: list[Message],
         context_variables: ContextVariables,
-    ) -> AsyncGenerator[AgentResponse, None]:
+    ) -> AsyncGenerator[AgentResponseChunk, None]:
         """Process agent responses with state management and tracking.
 
         Implements agent response handling:
-        - Streams completion responses with proper buffering
+        - Streams completion response chunks with proper buffering
         - Accumulates content and tool calls accurately
         - Updates event handler with progress
         - Maintains conversation state consistency
@@ -917,7 +915,7 @@ class Swarm:
             context_variables: Context for dynamic resolution.
 
         Yields:
-            AgentResponse containing:
+            AgentResponseChunk containing:
             - Current response delta with updates
             - Accumulated content for context
             - Parsed content if response format is specified
@@ -945,13 +943,13 @@ class Swarm:
             backoff_factor=self.backoff_factor,
         )
 
-        async for completion_response in completion_stream(
+        async for completion_chunk in completion_stream(
             agent=agent,
             agent_messages=agent_messages,
             context_variables=context_variables,
         ):
-            delta = completion_response.delta
-            finish_reason = completion_response.finish_reason
+            delta = completion_chunk.delta
+            finish_reason = completion_chunk.finish_reason
 
             if delta.content:
                 if full_content is None:
@@ -960,7 +958,7 @@ class Swarm:
                     full_content += delta.content
 
             if should_parse_content and full_content:
-                parsed_content = await self._parse_agent_response_content(
+                parsed_content = self._parse_agent_response_content(
                     full_content=full_content,
                     finish_reason=finish_reason,
                     response_format=agent.llm.response_format,
@@ -978,20 +976,20 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            response = AgentResponse(
+            response_chunk = AgentResponseChunk(
                 agent=agent,
                 delta=delta,
                 finish_reason=finish_reason,
                 content=full_content,
                 parsed_content=parsed_content,
                 tool_calls=full_tool_calls,
-                usage=completion_response.usage,
-                response_cost=completion_response.response_cost,
+                usage=completion_chunk.usage,
+                response_cost=completion_chunk.response_cost,
             )
 
-            await self.event_handler.on_event(SwarmAgentResponseEvent(response=response))
+            await self.event_handler.on_event(SwarmAgentResponseChunkEvent(chunk=response_chunk))
 
-            yield response
+            yield response_chunk
 
     async def _process_assistant_response(
         self,
@@ -1042,7 +1040,7 @@ class Swarm:
             )
 
             for tool_call_result in tool_call_results:
-                tool_message = await self._process_tool_call_result(tool_call_result)
+                tool_message = self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
                     agent.state = AgentState.STALE
                     self._agent_queue.append(tool_message.agent)
@@ -1058,7 +1056,27 @@ class Swarm:
     # MARK: Context Management
     # ================================================
 
-    async def _prepare_agent_context(
+    async def _optimize_context(self, agent: Agent) -> list[Message]:
+        """Optimize the message context for an agent's execution.
+
+        Uses the context manager to optimize the conversation history by:
+        - Filtering irrelevant messages
+        - Summarizing long conversations
+        - Removing redundant content
+        - Maintaining conversation coherence
+        - Preserving critical context
+
+        Args:
+            agent: Agent requiring context optimization.
+
+        Returns:
+            List of optimized messages ready for agent execution.
+        """
+        return await self.context_manager.optimize_context(
+            model=agent.llm.model,
+        )
+
+    async def _create_agent_context(
         self,
         agent: Agent,
         prompt: str | None = None,
@@ -1072,27 +1090,18 @@ class Swarm:
         3. Optional prompt as user message
 
         Args:
-            agent: Agent requiring context preparation
-            prompt: Optional user prompt to include
-            context_variables: Variables for dynamic resolution
+            agent: Agent requiring context creation.
+            prompt: Optional user prompt to include.
+            context_variables: Optional variables for dynamic resolution.
 
         Returns:
-            List of messages ready for agent execution.
-
-        Notes:
-            - Resolves dynamic instructions with context
-            - Filters system messages from history
-            - Maintains chronological order
-            - Adds prompt as final message if provided
+            List of messages ready for execution.
         """
-        instructions = unwrap_instructions(agent.instructions, context_variables)
-        history = [msg for msg in self.message_store.get_messages() if msg.role != "system"]
-
-        messages = [Message(role="system", content=instructions), *history]
-        if prompt:
-            messages.append(Message(role="user", content=prompt))
-
-        return messages
+        return await self.context_manager.create_context(
+            agent=agent,
+            prompt=prompt,
+            context_variables=context_variables,
+        )
 
     async def _reduce_context_size(
         self,
@@ -1115,14 +1124,8 @@ class Swarm:
         Raises:
             ContextLengthError: If context remains too large after optimization
         """
-        messages = self.message_store.get_messages()
-        optimized = await self.context_manager.optimize(
-            messages=messages,
-            model=agent.llm.model,
-        )
-
-        self.message_store.set_messages(optimized)
-        agent_messages = await self._prepare_agent_context(
+        optimized_messages = await self._optimize_context(agent)
+        agent_messages = await self._create_agent_context(
             agent=agent,
             context_variables=context_variables,
         )
@@ -1132,7 +1135,7 @@ class Swarm:
         except ContextWindowExceededError as e:
             raise ContextLengthError(
                 message="Context window exceeded even after optimization",
-                current_length=len(optimized),
+                current_length=len(optimized_messages),
                 original_error=e,
             ) from e
 
@@ -1163,7 +1166,8 @@ class Swarm:
 
         if add_system_message:
             instructions = unwrap_instructions(agent.instructions, context_variables)
-            self.message_store.add_message(Message(role="system", content=instructions))
+            message = Message(role="system", content=instructions)
+            await self.message_store.add_message(message)
 
     async def _initialize_conversation(
         self,
@@ -1201,7 +1205,7 @@ class Swarm:
             raise SwarmError("Please provide at least one message or prompt")
 
         if messages:
-            self.message_store.set_messages(messages)
+            await self.message_store.set_messages(messages)
 
         await self._activate_agent(
             agent=agent,
@@ -1210,18 +1214,19 @@ class Swarm:
         )
 
         if prompt:
-            self.message_store.add_message(Message(role="user", content=prompt))
+            message = Message(role="user", content=prompt)
+            await self.message_store.add_message(message)
 
     async def _stream_agent_execution(
         self,
         iteration_count: int = 0,
         agent_switch_count: int = 0,
-    ) -> AsyncGenerator[AgentResponse, None]:
-        """Stream responses from active and subsequent agents in the swarm.
+    ) -> AsyncGenerator[AgentResponseChunk, None]:
+        """Stream response chunks from active and subsequent agents in the swarm.
 
         Manages the core response generation loop of the swarm, handling:
         - Agent activation and switching
-        - Response generation and streaming
+        - Response chunk generation and streaming
         - Tool call processing and execution
         - Message history updates
         - State transitions
@@ -1233,7 +1238,7 @@ class Swarm:
                 Used to enforce maximum switch limits. Defaults to 0.
 
         Yields:
-            AgentResponse objects containing:
+            AgentResponseChunk objects containing:
             - Response content and deltas
             - Tool calls and their results
             - Usage statistics if enabled
@@ -1284,12 +1289,12 @@ class Swarm:
 
                 await self._activate_agent(next_agent, self._context_variables)
 
-            agent_messages = await self._prepare_agent_context(
+            agent_messages = await self._create_agent_context(
                 agent=self._active_agent,
                 context_variables=self._context_variables,
             )
 
-            last_agent_response: AgentResponse | None = None
+            last_agent_response: AgentResponseChunk | None = None
             async for agent_response in self._process_agent_response(
                 agent=self._active_agent,
                 agent_messages=agent_messages,
@@ -1309,13 +1314,12 @@ class Swarm:
                     tool_calls=last_agent_response.tool_calls,
                 )
 
-                for message in new_messages:
-                    self.message_store.add_message(message)
+                await self.message_store.add_messages(new_messages)
             else:
                 # We might not want to do this, but it's a good fallback
                 # Please consider removing this if it leads to unexpected behavior
                 empty_message = Message(role="assistant", content="<empty>")
-                self.message_store.add_message(empty_message)
+                await self.message_store.add_message(empty_message)
                 log_verbose(
                     "Empty response received, appending placeholder message",
                     level="WARNING",
@@ -1330,7 +1334,7 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-    ) -> AsyncGenerator[AgentResponse, None]:
+    ) -> AsyncGenerator[AgentResponseChunk, None]:
         """Create the base swarm execution stream.
 
         Internal method that creates the underlying async generator for SwarmStream.
@@ -1347,7 +1351,7 @@ class Swarm:
             context_variables: Optional variables for dynamic resolution.
 
         Yields:
-            AgentResponse objects containing streaming updates.
+            AgentResponseChunk objects containing streaming updates.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
@@ -1383,7 +1387,7 @@ class Swarm:
             raise
 
         finally:
-            all_messages = self.message_store.get_messages()
+            all_messages = await self.message_store.get_messages()
             await self.event_handler.on_event(
                 SwarmCompleteEvent(
                     messages=all_messages,
@@ -1404,35 +1408,28 @@ class Swarm:
     ) -> SwarmStream:
         """Stream responses from a swarm of agents.
 
-        This is the main entry point for streaming responses from a swarm of agents.
-        Returns a SwarmStream that provides both streaming and result collection:
-        - Async iteration for real-time updates
-        - Final result accumulation
-        - Usage and cost tracking
-        - Parsed content handling
-        - Error recovery
+        Main entry point for streaming responses from agents. Returns a SwarmStream
+        that provides both streaming and result collection capabilities. The stream
+        can be consumed multiple times if needed.
 
-        The SwarmStream maintains internal state to:
-        - Track the last received response
-        - Accumulate complete content
-        - Combine usage statistics
-        - Aggregate cost information
-        - Handle parsed content formats
+        This is a synchronous method that returns an async object (SwarmStream).
+        The returned stream should be consumed using async iteration or its async
+        result collection methods.
 
         Args:
-            agent: Initial agent for handling conversations.
+            agent: Agent to execute the task.
             prompt: Optional user prompt to process.
-            messages: Optional list of previous conversation messages.
-            context_variables: Optional variables for dynamic resolution.
+            messages: Optional list of previous conversation messages for context.
+            context_variables: Optional variables for dynamic instruction resolution.
 
         Returns:
-            SwarmStream wrapper providing both streaming and result capabilities.
+            SwarmStream wrapper providing both async streaming and result collection.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
-            ContextLengthError: If context becomes too large.
-            MaxAgentSwitchesError: If too many switches occur.
-            MaxResponseContinuationsError: If response needs too many continuations.
+            ContextLengthError: If context becomes too large to process.
+            MaxAgentSwitchesError: If too many agent switches occur.
+            MaxResponseContinuationsError: If response requires too many continuations.
 
         Examples:
             Streaming mode:
@@ -1466,7 +1463,6 @@ class Swarm:
             - Internal state tracks complete response accumulation
             - Usage and cost statistics are combined properly
             - Parsed content is handled according to format rules
-            - The stream can be consumed multiple times if needed
         """
         return SwarmStream(
             stream=self._create_swarm_stream(
@@ -1486,33 +1482,21 @@ class Swarm:
     ) -> AgentExecutionResult:
         """Execute a prompt and return the complete response.
 
-        This is a convenience method that wraps the stream() method to provide
-        a simpler interface when streaming isn't required. It accumulates all
-        content from the stream and returns the final response as a string.
-
-        The method provides the same functionality as stream() but with:
-        - Automatic response accumulation
-        - Simplified error handling
-        - Single string return value
-        - Blocking execution until completion
+        Convenience method that wraps stream() to provide a simpler interface when
+        streaming isn't required. Blocks until the complete response is generated.
 
         Args:
             agent: Agent to execute the task.
             prompt: The user's input prompt to process.
             messages: Optional list of previous conversation messages for context.
-                If provided, these messages are used as conversation history.
-            context_variables: Optional variables for dynamic instruction resolution
-                and tool execution. These variables are passed to agents and tools.
+            context_variables: Optional variables for dynamic instruction resolution.
 
         Returns:
-            ConversationState containing:
-            - Final response content
-            - Active agent and message history
-            - Token usage and cost statistics (if enabled)
+            Complete execution result with final content, agent state, and usage statistics.
 
         Raises:
             SwarmError: If an unrecoverable error occurs during processing.
-            ContextLengthError: If the context becomes too large to process.
+            ContextLengthError: If context becomes too large to process.
             MaxAgentSwitchesError: If too many agent switches occur.
             MaxResponseContinuationsError: If response requires too many continuations.
 
@@ -1552,7 +1536,7 @@ class Swarm:
 
         return await stream.get_result()
 
-    def cleanup(
+    async def cleanup(
         self,
         clear_agents: bool = True,
         clear_context: bool = False,
@@ -1639,4 +1623,4 @@ class Swarm:
             self._context_variables.clear()
 
         if clear_messages:
-            self.message_store.clear()
+            await self.message_store.clear()

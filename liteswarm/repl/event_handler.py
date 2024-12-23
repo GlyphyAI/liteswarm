@@ -5,7 +5,7 @@ from typing_extensions import override
 
 from liteswarm.core.console_handler import ConsoleEventHandler
 from liteswarm.types.events import (
-    SwarmAgentResponseEvent,
+    SwarmAgentResponseChunkEvent,
     SwarmAgentSwitchEvent,
     SwarmCompleteEvent,
     SwarmErrorEvent,
@@ -64,26 +64,26 @@ class ReplEventHandler(ConsoleEventHandler):
         self._last_agent: Agent | None = None
 
     @override
-    async def _handle_response(self, event: SwarmAgentResponseEvent) -> None:
+    async def _handle_response(self, event: SwarmAgentResponseChunkEvent) -> None:
         """Handle agent response events.
 
         Args:
             event: Response event to handle.
         """
-        if event.response.finish_reason == "length":
+        if event.chunk.finish_reason == "length":
             print("\n[...continuing...]", end="", flush=True)
 
-        if content := event.response.delta.content:
+        if content := event.chunk.delta.content:
             # Only print agent ID prefix for the first character of a new message
-            if self._last_agent != event.response.agent:
-                agent_id = event.response.agent.id
+            if self._last_agent != event.chunk.agent:
+                agent_id = event.chunk.agent.id
                 print(f"\n[{agent_id}] ", end="", flush=True)
-                self._last_agent = event.response.agent
+                self._last_agent = event.chunk.agent
 
             print(content, end="", flush=True)
 
         # Always ensure a newline at the end of a complete response
-        if event.response.finish_reason:
+        if event.chunk.finish_reason:
             print("", flush=True)
 
     @override

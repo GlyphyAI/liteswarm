@@ -13,8 +13,8 @@ from pydantic import BaseModel, ConfigDict, Discriminator
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import (
     Agent,
-    AgentResponse,
-    CompletionResponse,
+    AgentResponseChunk,
+    CompletionResponseChunk,
     Message,
     ToolCall,
 )
@@ -38,24 +38,24 @@ class SwarmEvent(BaseModel):
     )
 
 
-class SwarmCompletionResponseEvent(SwarmEvent):
+class SwarmCompletionResponseChunkEvent(SwarmEvent):
     """Event emitted for each streaming update from the language model.
 
     Called each time new content is received from the model, before any
     agent-specific processing occurs. Used for monitoring raw model output.
     """
 
-    type: Literal["completion_response"] = "completion_response"
+    type: Literal["completion_response_chunk"] = "completion_response_chunk"
     """Discriminator field."""
 
     agent: Agent
-    """Agent that generated the completion response."""
+    """Agent that generated the completion response chunk."""
 
-    response: CompletionResponse
-    """Raw completion response from the model."""
+    chunk: CompletionResponseChunk
+    """Raw completion response chunk from the model."""
 
 
-class SwarmAgentResponseEvent(SwarmEvent):
+class SwarmAgentResponseChunkEvent(SwarmEvent):
     """Event emitted for each streaming update from an agent.
 
     Called each time new content is received from an agent, including both
@@ -63,11 +63,11 @@ class SwarmAgentResponseEvent(SwarmEvent):
     agent responses.
     """
 
-    type: Literal["agent_response"] = "agent_response"
+    type: Literal["agent_response_chunk"] = "agent_response_chunk"
     """Discriminator field."""
 
-    response: AgentResponse
-    """Processed agent response."""
+    chunk: AgentResponseChunk
+    """Processed agent response chunk."""
 
 
 class SwarmToolCallEvent(SwarmEvent):
@@ -229,8 +229,8 @@ class SwarmTeamPlanCompletedEvent(SwarmEvent):
 
 
 SwarmEventType: TypeAlias = Annotated[
-    SwarmCompletionResponseEvent
-    | SwarmAgentResponseEvent
+    SwarmCompletionResponseChunkEvent
+    | SwarmAgentResponseChunkEvent
     | SwarmToolCallEvent
     | SwarmToolCallResultEvent
     | SwarmAgentSwitchEvent

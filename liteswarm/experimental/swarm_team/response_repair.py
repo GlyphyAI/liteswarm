@@ -241,7 +241,7 @@ class LiteResponseRepairAgent:
             ```
         """
         last_n = 2
-        last_messages = self.swarm.message_store.get_messages(
+        last_messages = await self.swarm.message_store.get_messages(
             filter=LiteMessageStoreFilter(last_n=last_n)
         )
 
@@ -253,8 +253,9 @@ class LiteResponseRepairAgent:
             raise ResponseRepairError("No user message found to regenerate")
 
         # Remove the last messages to regenerate the response
-        self.swarm.message_store.remove_message(last_user_message.id)
-        self.swarm.message_store.remove_message(last_assistant_message.id)
+        await self.swarm.message_store.remove_messages(
+            [last_user_message.id, last_assistant_message.id]
+        )
 
         try:
             result = await self.swarm.execute(
@@ -270,8 +271,9 @@ class LiteResponseRepairAgent:
 
         except Exception as e:
             # Restore the last removed messages if repair fails
-            self.swarm.message_store.add_message(last_user_message)
-            self.swarm.message_store.add_message(last_assistant_message)
+            await self.swarm.message_store.add_messages(
+                [last_user_message, last_assistant_message],
+            )
 
             raise ResponseRepairError(
                 f"Failed to regenerate response: {e}",

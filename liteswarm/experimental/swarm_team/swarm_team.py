@@ -44,32 +44,33 @@ from liteswarm.utils.typing import is_callable, is_subtype
 class SwarmTeam:
     """Experimental framework for orchestrating complex agent workflows.
 
-    SwarmTeam provides a two-phase approach to task execution:
+    SwarmTeam provides a high-level interface for executing tasks using a team of
+    specialized AI agents. The framework uses a two-phase approach to task execution:
 
     1. Planning Phase: Analyzes prompts to create structured plans
-       - Uses planning agent to break down work into tasks
-       - Validates task types and dependencies
-       - Supports interactive feedback loop
-       - Can use OpenAI-compatible schemas or custom formats
+        - Uses planning agent to break down work into tasks
+        - Validates task types and dependencies
+        - Supports interactive feedback loop
+        - Uses Pydantic models for schema definitions
 
     2. Execution Phase: Executes tasks with specialized agents
-       - Assigns tasks to capable team members
-       - Handles structured inputs/outputs via framework-level parsing
-       - Tracks execution state
-       - Produces artifacts with results
+        - Assigns tasks to capable team members
+        - Handles structured inputs/outputs via framework-level parsing
+        - Tracks execution state
+        - Produces artifacts with results
 
-    The framework supports both OpenAI-compatible structured outputs and custom
-    formats through its two-layer parsing system. Users can choose to:
-    - Use OpenAI-compatible schemas for direct LLM structured outputs
-    - Use custom formats with framework-level parsing
-    - Combine both approaches for robust validation
+    The framework supports structured outputs through a two-layer parsing system
+    using Pydantic models that transform to JSON schemas. Users can choose to:
+        - Use Pydantic models for direct LLM structured outputs (if supported)
+        - Use custom formats with framework-level parsing
+        - Combine both approaches for robust validation
 
     Examples:
-        Create a team for code review:
+        Create a team for code review (complete setup):
             ```python
-            # 1. Define task type (OpenAI-compatible in this example)
+            # 1. Define task type using Pydantic model
             class ReviewTask(Task):
-                type: Literal["code_review"]  # Discriminator
+                type: Literal["code_review"]  # Discriminator for task type
                 pr_url: str
                 review_type: str
 
@@ -132,15 +133,49 @@ class SwarmTeam:
                     print(f"Approved: {output.approved}")
             ```
 
-    Note:
-        This is an experimental agent orchestration feature that demonstrates:
-        - Two-layer structured output handling (LLM-level and Framework-level)
-        - Complex workflow orchestration
-        - Team-based task execution
-        - OpenAI-compatible schemas
+        Interactive plan feedback:
+            ```python
+            class InteractiveFeedback(PlanFeedbackHandler):
+                async def handle(
+                    self,
+                    plan: Plan,
+                    prompt: str,
+                    context: ContextVariables | None,
+                ) -> tuple[str, ContextVariables | None] | None:
+                    print("Proposed plan:")
+                    for task in plan.tasks:
+                        print(f"- {task.title}")
+
+                    if input("Approve? [y/N]: ").lower() == "y":
+                        return None
+
+                    feedback = input("Enter feedback: ")
+                    return f"Previous plan needs adjustments: {feedback}", context
+
+
+            # Using async interface
+            artifact = await team.execute(
+                prompt="Create a Flutter TODO app",
+                feedback_handler=InteractiveFeedback(),
+            )
+
+            # Or using sync interface
+            artifact = team.execute_sync(
+                prompt="Create a Flutter TODO app",
+                feedback_handler=InteractiveFeedback(),
+            )
+            ```
+
+    Notes:
+        - Automated task planning and execution
+        - Parallel task execution when possible
+        - Task dependency management
+        - Event-based progress tracking
+        - Plan feedback and refinement
+        - Structured output handling using Pydantic models
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         swarm: Swarm,
         members: list[TeamMember],
@@ -602,61 +637,6 @@ class SwarmTeam:
     # MARK: Public API
     # ================================================
 
-    async def create_plan(
-        self,
-        prompt: str,
-        context: ContextVariables | None = None,
-    ) -> Plan:
-        """Create a task execution plan from a natural language prompt.
-
-        Uses a planning agent to analyze the prompt, break it down into tasks,
-        and create a structured plan with appropriate dependencies.
-
-        Args:
-            prompt: Natural language description of work to be done.
-            context: Optional context for plan customization (e.g., URLs, paths).
-
-        Returns:
-            A structured plan with ordered tasks.
-
-        Raises:
-            PlanValidationError: If plan creation or validation fails.
-            ResponseParsingError: If the planning response cannot be parsed.
-
-        Examples:
-            Basic usage:
-                ```python
-                try:
-                    context = ContextVariables()
-                    plan = await team.create_plan("Review and test PR #123", context)
-                    print(f"Created plan with {len(plan.tasks)} tasks")
-                except PlanValidationError as e:
-                    print(f"Invalid plan: {e}")
-                ```
-
-            With additional context:
-                ```python
-                try:
-                    context = ContextVariables(
-                        pr_url="github.com/org/repo/123",
-                        focus_areas=["security", "performance"],
-                    )
-                    plan = await team.create_plan(
-                        prompt="Review authentication changes in PR #123",
-                        context=context,
-                    )
-                except (PlanValidationError, ResponseParsingError) as e:
-                    print(f"Planning failed: {e}")
-                ```
-        """
-        result = await self.planning_agent.create_plan(
-            prompt=prompt,
-            context=context,
-        )
-
-        await self.event_handler.on_event(SwarmTeamPlanCreatedEvent(plan=result))
-        return result
-
     async def execute(
         self,
         prompt: str,
@@ -664,23 +644,26 @@ class SwarmTeam:
         *,
         feedback_handler: PlanFeedbackHandler | None = None,
     ) -> Artifact:
-        r"""Execute a user request by creating and running a plan, with optional feedback loop.
+        """Execute a user request by creating and running a plan.
 
-        This is a high-level interface that combines plan creation and execution.
-        If a feedback handler is provided, it will be called after plan creation
-        to allow for plan refinement before execution.
+        Creates a plan from the prompt, optionally refines it through feedback,
+        and executes all tasks in order.
 
         Args:
             prompt: Natural language description of work to be done.
             context: Optional context for plan customization and task execution.
-            feedback_handler: Optional handler for reviewing and refining plans
-                before execution.
+            feedback_handler: Optional handler for reviewing and refining plans.
 
         Returns:
-            An execution artifact that includes the plan, results, and any errors.
+            Execution artifact containing plan, results, and any errors.
+
+        Raises:
+            SwarmTeamError: If team execution fails.
+            PlanValidationError: If plan validation fails.
+            TaskExecutionError: If task execution fails.
 
         Examples:
-            Basic execution:
+            Basic usage:
                 ```python
                 context = ContextVariables(pr_url="github.com/org/repo/123")
                 artifact = await team.execute(
@@ -702,7 +685,7 @@ class SwarmTeam:
                         prompt: str,
                         context: ContextVariables | None,
                     ) -> tuple[str, ContextVariables | None] | None:
-                        print("\nProposed plan:")
+                        print("Proposed plan:")
                         for task in plan.tasks:
                             print(f"- {task.title}")
 
@@ -710,8 +693,7 @@ class SwarmTeam:
                             return None
 
                         feedback = input("Enter feedback: ")
-                        new_prompt = f"Previous plan needs adjustments: {feedback}"
-                        return new_prompt, context
+                        return f"Previous plan needs adjustments: {feedback}", context
 
 
                 artifact = await team.execute(
@@ -720,35 +702,10 @@ class SwarmTeam:
                 )
                 ```
 
-            With automated validation:
-                ```python
-                class TaskLimitValidator(PlanFeedbackHandler):
-                    def __init__(self, max_tasks: int = 5) -> None:
-                        self.max_tasks = max_tasks
-
-                    async def handle(
-                        self,
-                        plan: Plan,
-                        prompt: str,
-                        context: ContextVariables | None,
-                    ) -> tuple[str, ContextVariables | None] | None:
-                        if len(plan.tasks) > self.max_tasks:
-                            new_context = ContextVariables(context or {})
-                            new_context.update({"max_tasks": self.max_tasks})
-                            return "Please create a more focused plan", new_context
-                        return None
-
-
-                context = ContextVariables(
-                    tech_stack={"framework": "Django"},
-                    security_requirements=["2FA", "OAuth"],
-                )
-                artifact = await team.execute(
-                    prompt="Implement authentication",
-                    context=context,
-                    feedback_handler=TaskLimitValidator(max_tasks=3),
-                )
-                ```
+        Notes:
+            - Plan creation and execution can be customized with context
+            - Feedback handlers can modify plans before execution
+            - Execution artifacts are stored for history tracking
         """
         current_prompt = prompt
         current_context = context
@@ -773,6 +730,69 @@ class SwarmTeam:
 
             return await self.execute_plan(plan, current_context)
 
+    async def create_plan(
+        self,
+        prompt: str,
+        context: ContextVariables | None = None,
+    ) -> Plan:
+        """Create a task execution plan from a natural language prompt.
+
+        Analyzes the prompt and generates a structured plan with ordered tasks
+        that can be executed by team members.
+
+        Args:
+            prompt: Natural language description of work to be done.
+            context: Optional context for plan customization.
+
+        Returns:
+            Structured plan with ordered tasks.
+
+        Raises:
+            PlanValidationError: If plan creation or validation fails.
+            ResponseParsingError: If the planning response cannot be parsed.
+
+        Examples:
+            Basic usage:
+                ```python
+                try:
+                    context = ContextVariables()
+                    plan = await team.create_plan(
+                        prompt="Review and test PR #123",
+                        context=context,
+                    )
+                    print(f"Created plan with {len(plan.tasks)} tasks")
+                except PlanValidationError as e:
+                    print(f"Invalid plan: {e}")
+                ```
+
+            With additional context:
+                ```python
+                try:
+                    context = ContextVariables(
+                        pr_url="github.com/org/repo/123",
+                        focus_areas=["security", "performance"],
+                    )
+                    plan = await team.create_plan(
+                        prompt="Review authentication changes in PR #123",
+                        context=context,
+                    )
+                except (PlanValidationError, ResponseParsingError) as e:
+                    print(f"Planning failed: {e}")
+                ```
+
+        Notes:
+            - Plan creation can be customized with context variables
+            - Plans are validated before being returned
+            - Events are emitted for plan creation tracking
+        """
+        result = await self.planning_agent.create_plan(
+            prompt=prompt,
+            context=context,
+        )
+
+        await self.event_handler.on_event(SwarmTeamPlanCreatedEvent(plan=result))
+        return result
+
     async def execute_plan(
         self,
         plan: Plan,
@@ -780,33 +800,26 @@ class SwarmTeam:
     ) -> Artifact:
         """Execute a plan by running all its tasks in dependency order.
 
-        Manages the complete execution lifecycle:
-            1. Creates an execution artifact to track progress.
-            2. Executes tasks when their dependencies are met.
-            3. Tracks execution results and updates artifact status.
-            4. Handles failures and notifies via event handler.
+        Assigns tasks to appropriate team members and executes them in parallel
+        when possible, respecting dependencies.
 
         Args:
             plan: Plan with tasks to execute.
             context: Optional context for task execution.
 
         Returns:
-            An execution artifact that includes:
-                - The execution plan.
-                - All task results (including those completed before any failure).
-                - Final execution status (COMPLETED or FAILED).
-                - Any errors that occurred during execution.
+            Execution artifact containing results and task outputs.
+
+        Raises:
+            SwarmTeamError: If team execution fails.
+            TaskExecutionError: If task execution fails.
 
         Examples:
-            Create and execute a plan:
+            Execute a plan:
                 ```python
                 context = ContextVariables(pr_url="github.com/org/repo/123")
-                plan_result = await team.create_plan("Review PR #123", context)
-                if plan_result.error:
-                    print(f"Planning failed: {plan_result.error}")
-                    return  # or raise
-
-                artifact = await team.execute_plan(plan_result.value, context)
+                plan = await team.create_plan("Review PR #123", context)
+                artifact = await team.execute_plan(plan, context)
 
                 if artifact.status == ArtifactStatus.FAILED:
                     print(f"Execution failed: {artifact.error}")
@@ -818,6 +831,11 @@ class SwarmTeam:
                     print(f"Task: {task_result.task.title}")
                     print(f"Status: {task_result.task.status}")
                 ```
+
+        Notes:
+            - Tasks are executed in parallel when dependencies allow
+            - Execution artifacts are stored for history tracking
+            - Events are emitted for execution progress tracking
         """
         artifact_id = f"artifact_{len(self._artifacts) + 1}"
         artifact = Artifact(id=artifact_id, plan=plan, status=ArtifactStatus.EXECUTING)
@@ -859,11 +877,8 @@ class SwarmTeam:
     ) -> TaskResult:
         """Execute a single task using an appropriate team member.
 
-        Handles the complete task lifecycle:
-            1. Selects a capable team member.
-            2. Prepares execution context and instructions.
-            3. Executes task and processes response.
-            4. Updates task status and history.
+        Finds a capable team member and assigns them to execute the task,
+        monitoring progress and collecting results.
 
         Args:
             task: Task to execute, must match a registered task type.
@@ -874,17 +889,15 @@ class SwarmTeam:
 
         Raises:
             TaskExecutionError: If execution fails or no capable member is found.
-            ValueError: If no task definition is found or agent returns no content.
 
         Examples:
-            Execute a review task:
+            Execute a task:
                 ```python
                 try:
                     context = ContextVariables(pr_url="github.com/org/repo/123")
                     task_result = await team.execute_task(
                         ReviewTask(
-                            # Base Task required fields
-                            type="code_review",  # Must match Literal
+                            type="code_review",
                             id="review-1",
                             title="Security review of auth changes",
                             description="Review PR for security vulnerabilities",
@@ -892,7 +905,6 @@ class SwarmTeam:
                             assignee=None,
                             dependencies=[],
                             metadata=None,
-                            # ReviewTask specific fields
                             pr_url="github.com/org/repo/123",
                             review_type="security",
                         ),
@@ -905,6 +917,11 @@ class SwarmTeam:
                 except TaskExecutionError as e:
                     print(f"Task execution failed: {e}")
                 ```
+
+        Notes:
+            - Task execution can be customized with context
+            - Task results are validated against schemas
+            - Events are emitted for task progress tracking
         """
         assignee = self._select_matching_member(task)
         if not assignee:
@@ -966,6 +983,9 @@ class SwarmTeam:
     def get_artifacts(self) -> list[Artifact]:
         """Get all execution artifacts.
 
+        Retrieves all execution artifacts in chronological order, providing
+        a complete history of team executions.
+
         Returns:
             List of all execution artifacts in chronological order.
 
@@ -981,11 +1001,19 @@ class SwarmTeam:
                     else:
                         print(f"Completed {len(artifact.task_results)} tasks")
                 ```
+
+        Notes:
+            - Artifacts are returned in chronological order
+            - Each artifact contains a complete execution record
+            - Failed executions include error information
         """
         return self._artifacts
 
     def get_latest_artifact(self) -> Artifact | None:
         """Get the most recent execution artifact.
+
+        Retrieves the most recent execution artifact, providing quick access
+        to the latest team execution results.
 
         Returns:
             The most recent artifact or None if no artifacts exist.
@@ -1003,5 +1031,10 @@ class SwarmTeam:
                 else:
                     print("No executions yet")
                 ```
+
+        Notes:
+            - Returns None if no executions have occurred
+            - Provides quick access to latest results
+            - Includes both successful and failed executions
         """
         return self._artifacts[-1] if self._artifacts else None

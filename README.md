@@ -305,6 +305,7 @@ import json
 
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent, ToolResult
+from liteswarm.utils import dump_messages
 
 
 async def main() -> None:
@@ -343,14 +344,14 @@ async def main() -> None:
 
     # Agent will automatically switch when needed
     swarm = Swarm()
-    result = await swarm.execute(
+    await swarm.execute(
         agent=main_agent,
         prompt="What is 234 * 567?",
     )
 
     # Print the full conversation history
-    messages = [m.model_dump(exclude_none=True) for m in result.messages]
-    print(json.dumps(messages, indent=2))
+    messages = await swarm.message_store.get_messages()
+    print(json.dumps(dump_messages(messages), indent=2))
 
 
 if __name__ == "__main__":
@@ -393,8 +394,9 @@ import json
 from typing import Literal
 
 from pydantic import BaseModel
+from typing_extensions import override
 
-from liteswarm.core import Swarm
+from liteswarm.core import ConsoleEventHandler, Swarm
 from liteswarm.experimental import SwarmTeam
 from liteswarm.types import (
     LLM,
@@ -436,6 +438,7 @@ class ReviewFeedback(BaseModel):
 
 # 2. (Optional) Create interactive feedback handler
 class InteractiveFeedback(PlanFeedbackHandler):
+    @override
     async def handle(
         self,
         plan: Plan,
@@ -533,10 +536,13 @@ async def main() -> None:
     )
 
     # 6. Create swarm team
+    event_handler = ConsoleEventHandler()
+    swarm = Swarm(event_handler=event_handler)
     team = SwarmTeam(
-        swarm=Swarm(),
+        swarm=swarm,
         members=[writer_member, reviewer_member],
         task_definitions=[write_doc, review_doc],
+        event_handler=event_handler,
     )
 
     # 7. Execute the user request
@@ -618,7 +624,7 @@ class EntitiesModel(BaseModel):
     animals: list[str]
 
 
-async def main():
+async def main() -> None:
     # Create an agent for entity extraction
     agent = Agent(
         id="extract-entities-agent",
@@ -695,27 +701,20 @@ LiteSwarm provides comprehensive error handling with built-in retry mechanisms. 
 
 ```python
 import asyncio
-from typing import Optional
 
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent
-from liteswarm.exceptions import (
-    SwarmError,
-    ContextLengthError,
-    MaxAgentSwitchesError,
-    MaxResponseContinuationsError,
-    RetryError,
-)
+from liteswarm.types.exceptions import RetryError, SwarmError
 
 
-async def main():
+async def main() -> None:
     # Create swarm with custom retry settings
     swarm = Swarm(
         # Retry Configuration
-        max_retries=3,              # Maximum number of retry attempts
-        initial_retry_delay=1.0,    # Initial delay between retries (seconds)
-        max_retry_delay=10.0,       # Maximum delay between retries (seconds)
-        backoff_factor=2.0,         # Exponential backoff multiplier
+        max_retries=3,  # Maximum number of retry attempts
+        initial_retry_delay=1.0,  # Initial delay between retries (seconds)
+        max_retry_delay=10.0,  # Maximum delay between retries (seconds)
+        backoff_factor=2.0,  # Exponential backoff multiplier
     )
 
     agent = Agent(
@@ -948,7 +947,7 @@ mock_database = {
 }
 
 
-async def main():
+async def main() -> None:
     def get_user_preferences(user_id: str) -> ToolResult:
         """Get user preferences from a simulated database."""
         user_preferences = mock_database.get(user_id, {})
@@ -1008,7 +1007,7 @@ async def main():
     result = await swarm.execute(
         agent=agent,
         prompt="What should Alice learn first?",
-        context_variables=result.context_variables,
+        # Context variables are preserved from the previous execution
     )
     print("\nFirst Topic Suggestion:", result.content)
 
@@ -1016,7 +1015,7 @@ async def main():
     result = await swarm.execute(
         agent=agent,
         prompt="Alice completed the first topic. What's next?",
-        context_variables=result.context_variables,
+        # Context variables are preserved from the previous execution
     )
     print("\nProgress Update:", result.content)
 
@@ -1080,7 +1079,7 @@ async def main() -> None:
     )
 
     if not isinstance(result.parsed_content, ReviewOutput):
-        print("Agent failed to produce a response")
+        print("Agent failed to produce a response of type ReviewOutput")
         return
 
     if result.parsed_content.issues:
@@ -1103,7 +1102,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from liteswarm.core import Swarm
+from liteswarm.core import ConsoleEventHandler, Swarm
 from liteswarm.experimental import LitePlanningAgent, SwarmTeam
 from liteswarm.types import (
     LLM,
@@ -1190,11 +1189,13 @@ async def main() -> None:
     )
 
     # 6. Set up swarm team
-    swarm = Swarm()
+    event_handler = ConsoleEventHandler()
+    swarm = Swarm(event_handler=event_handler)
     team = SwarmTeam(
         swarm=swarm,
         members=[review_member],
         task_definitions=[review_def],
+        event_handler=event_handler,
         planning_agent=LitePlanningAgent(
             swarm=swarm,
             agent=planning_agent,
@@ -1322,8 +1323,8 @@ See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for
    ```python
    class MyEventHandler(SwarmEventHandler):
        async def on_event(self, event: SwarmEventType) -> None:
-            if event.type == "agent_response":
-                print(event.delta.content, end="", flush=True)
+            if event.type == "agent_response_chunk":
+                print(event.chunk.delta.content, end="", flush=True)
    ```
 
 ## Examples
@@ -1449,7 +1450,7 @@ If you use LiteSwarm in your research or project, please cite our work:
     year = {2024},
     url = {https://github.com/glyphyai/liteswarm},
     license = {MIT},
-    version = {0.2.0}
+    version = {0.3.0}
 }
 ```
 
