@@ -39,7 +39,7 @@ async def instructions_example() -> None:
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = swarm.message_store.get_messages()
+    messages = await swarm.message_store.get_messages()
     print(json.dumps(dump_messages(messages), indent=2))
 
 
@@ -91,7 +91,7 @@ async def agent_switching_example() -> None:
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = swarm.message_store.get_messages()
+    messages = await swarm.message_store.get_messages()
     print(json.dumps(dump_messages(messages), indent=2, ensure_ascii=False))
 
 
@@ -119,16 +119,17 @@ async def error_handling_example() -> None:
         prompt="What is the weather in Orgrimmar?",
     )
 
-    messages = swarm.message_store.get_messages()
+    messages = await swarm.message_store.get_messages()
     print(json.dumps(dump_messages(messages), indent=2))
 
 
-async def pydantic_example() -> None:
-    class User(BaseModel):
-        id: str
-        name: str
-        age: int
+class User(BaseModel):
+    id: str
+    name: str
+    age: int
 
+
+async def pydantic_example() -> None:
     def fetch_user_info(user_id: str) -> User:
         """Fetch user info for a user."""
         return User(id=user_id, name="John", age=27)
@@ -149,7 +150,7 @@ async def pydantic_example() -> None:
         prompt="What is the name of a user with id 1?",
     )
 
-    messages = swarm.message_store.get_messages()
+    messages = await swarm.message_store.get_messages()
     print(json.dumps(dump_messages(messages), indent=2))
 
 
