@@ -14,7 +14,11 @@ from typing import Any, NoReturn, get_args
 from litellm import token_counter
 from typing_extensions import override
 
-from liteswarm.core.context_manager import ContextManager, LiteOptimizationStrategy
+from liteswarm.core.context_manager import (
+    ContextManager,
+    LiteContextManager,
+    LiteOptimizationStrategy,
+)
 from liteswarm.core.message_store import MessageStore
 from liteswarm.core.swarm import Swarm
 from liteswarm.repl.event_handler import ReplEventHandler
@@ -116,12 +120,12 @@ class AgentRepl:
 
         # Internal state (private)
         self._messages: list[Message] = []
-        self._usage: Usage | None = None
-        self._response_cost: ResponseCost | None = None
+        self._accumulated_usage: Usage | None = None
+        self._accumulated_cost: ResponseCost | None = None
         self._active_agent: Agent | None = None
         self._agent_queue: deque[Agent] = deque()
 
-    def _print_welcome(self) -> None:
+    async def _print_welcome(self) -> None:
         """Print welcome message and usage instructions.
 
         Displays:
@@ -149,7 +153,7 @@ class AgentRepl:
         print("\nEnter your queries and press Enter. Use commands above to control the REPL.")
         print("\n" + "=" * 50 + "\n")
 
-    def _print_history(self) -> None:
+    async def _print_history(self) -> None:
         """Print the conversation messages.
 
         Displays all non-system messages in chronological order, including:
@@ -168,13 +172,13 @@ class AgentRepl:
                 print(f"\n[{msg.role}]: {content}")
         print("\n" + "=" * 50 + "\n")
 
-    def _print_stats(self) -> None:
+    async def _print_stats(self) -> None:
         """Print conversation statistics.
 
         Displays comprehensive statistics about the conversation:
         - Message counts
-        - Token usage details (if enabled)
-        - Cost information (if enabled)
+        - Accumulated token usage details (if enabled)
+        - Accumulated cost information (if enabled)
         - Active agent information
         - Queue status
 
@@ -182,35 +186,40 @@ class AgentRepl:
             - Token usage shown only if include_usage=True
             - Costs shown only if include_cost=True
             - Detailed breakdowns provided when available
+            - Usage and costs are accumulated across all agents
         """
         print("\n📊 Conversation Statistics:")
         print(f"Message count: {len(self._messages)} messages")
 
-        if self._usage:
-            print("\nToken Usage:")
-            print(f"  Prompt tokens: {self._usage.prompt_tokens or 0:,}")
-            print(f"  Completion tokens: {self._usage.completion_tokens or 0:,}")
-            print(f"  Total tokens: {self._usage.total_tokens or 0:,}")
+        if self._accumulated_usage:
+            print("\nAccumulated Token Usage:")
+            print(f"  Prompt tokens: {self._accumulated_usage.prompt_tokens or 0:,}")
+            print(f"  Completion tokens: {self._accumulated_usage.completion_tokens or 0:,}")
+            print(f"  Total tokens: {self._accumulated_usage.total_tokens or 0:,}")
 
             # Only print token details if they exist and are not empty
-            if self._usage.prompt_tokens_details:
+            if self._accumulated_usage.prompt_tokens_details:
                 print("\nPrompt Token Details:")
-                for key, value in self._usage.prompt_tokens_details.model_dump().items():
+                prompt_token_details = self._accumulated_usage.prompt_tokens_details
+                items = prompt_token_details.model_dump().items()
+                for key, value in items:
                     if value is not None:
                         print(f"  {key}: {value:,}")
 
-            if self._usage.completion_tokens_details:
+            if self._accumulated_usage.completion_tokens_details:
                 print("\nCompletion Token Details:")
-                for key, value in self._usage.completion_tokens_details.model_dump().items():
+                completion_token_details = self._accumulated_usage.completion_tokens_details
+                items = completion_token_details.model_dump().items()
+                for key, value in items:
                     if value is not None:
                         print(f"  {key}: {value:,}")
 
-        if self._response_cost:
-            prompt_cost = self._response_cost.prompt_tokens_cost or 0
-            completion_cost = self._response_cost.completion_tokens_cost or 0
+        if self._accumulated_cost:
+            prompt_cost = self._accumulated_cost.prompt_tokens_cost or 0
+            completion_cost = self._accumulated_cost.completion_tokens_cost or 0
             total_cost = prompt_cost + completion_cost
 
-            print("\nResponse Cost:")
+            print("\nAccumulated Response Cost:")
             print(f"  Prompt tokens: ${prompt_cost:.6f}")
             print(f"  Completion tokens: ${completion_cost:.6f}")
             print(f"  Total cost: ${total_cost:.6f}")
@@ -226,7 +235,7 @@ class AgentRepl:
         print(f"\nPending agents in queue: {len(self._agent_queue)}")
         print("\n" + "=" * 50 + "\n")
 
-    def _save_history(self, filename: str = "conversation_memory.json") -> None:
+    async def _save_history(self, filename: str = "conversation_memory.json") -> None:
         """Save the conversation memory to a file.
 
         Args:
@@ -244,7 +253,7 @@ class AgentRepl:
         print(f"\n📤 Conversation memory saved to {filename}")
         print(f"Messages: {len(memory['messages'])} messages")
 
-    def _load_history(self, filename: str = "conversation_memory.json") -> None:
+    async def _load_history(self, filename: str = "conversation_memory.json") -> None:
         """Load the conversation memory from a file.
 
         Args:
@@ -266,7 +275,7 @@ class AgentRepl:
             self._messages = messages
 
             # Update swarm message store
-            self.swarm.message_store.set_messages(messages)
+            await self.swarm.message_store.set_messages(messages)
 
             print(f"\n📥 Conversation memory loaded from {filename}")
             print(f"Messages: {len(messages)} messages")
@@ -283,18 +292,18 @@ class AgentRepl:
         except Exception as e:
             print(f"\n❌ Error loading memory: {str(e)}")
 
-    def _clear_history(self) -> None:
+    async def _clear_history(self) -> None:
         """Clear the conversation memory.
 
         Resets memory and clears the swarm state.
         """
         self._messages = []
-        self._usage = None
-        self._response_cost = None
+        self._accumulated_usage = None
+        self._accumulated_cost = None
         self._active_agent = None
         self._agent_queue.clear()
 
-        self.swarm.cleanup(
+        await self.swarm.cleanup(
             clear_agents=True,
             clear_context=True,
             clear_messages=True,
@@ -345,7 +354,7 @@ class AgentRepl:
             return parsed
 
         except argparse.ArgumentError as e:
-            print(f"\n�� {str(e)}")
+            print(f"\n❌ {str(e)}")
             parser.print_usage()
             return None
 
@@ -420,17 +429,17 @@ class AgentRepl:
                 print("\n👋 Goodbye!")
                 return True
             case "/help":
-                self._print_welcome()
+                await self._print_welcome()
             case "/clear":
-                self._clear_history()
+                await self._clear_history()
             case "/history":
-                self._print_history()
+                await self._print_history()
             case "/stats":
-                self._print_stats()
+                await self._print_stats()
             case "/save":
-                self._save_history()
+                await self._save_history()
             case "/load":
-                self._load_history()
+                await self._load_history()
             case "/optimize":
                 await self._optimize_context(args)
             case "/find":
@@ -440,13 +449,77 @@ class AgentRepl:
 
         return False
 
+    def _update_usage(self, new_usage: Usage | None) -> None:
+        """Update accumulated usage with new usage data.
+
+        Args:
+            new_usage: New usage data to add to accumulation.
+        """
+        if not new_usage:
+            return
+
+        if not self._accumulated_usage:
+            self._accumulated_usage = new_usage
+            return
+
+        # Prompt tokens from latest response already include all previous messages
+        self._accumulated_usage.prompt_tokens = new_usage.prompt_tokens
+
+        # Accumulate completion tokens
+        self._accumulated_usage.completion_tokens += new_usage.completion_tokens
+
+        # Update total tokens
+        self._accumulated_usage.total_tokens = (
+            self._accumulated_usage.prompt_tokens + self._accumulated_usage.completion_tokens
+        )
+
+        # Update token details if available
+        if new_usage.prompt_tokens_details:
+            self._accumulated_usage.prompt_tokens_details = new_usage.prompt_tokens_details
+
+        if new_usage.completion_tokens_details:
+            if not self._accumulated_usage.completion_tokens_details:
+                self._accumulated_usage.completion_tokens_details = (
+                    new_usage.completion_tokens_details
+                )
+            else:
+                completion_token_details = self._accumulated_usage.completion_tokens_details
+                items = completion_token_details.model_dump().items()
+                for key, value in items:
+                    if value is not None:
+                        current = (
+                            getattr(self._accumulated_usage.completion_tokens_details, key) or 0
+                        )
+                        setattr(
+                            self._accumulated_usage.completion_tokens_details, key, current + value
+                        )
+
+    def _update_cost(self, new_cost: ResponseCost | None) -> None:
+        """Update accumulated cost with new cost data.
+
+        Args:
+            new_cost: New cost data to add to accumulation.
+        """
+        if not new_cost:
+            return
+
+        if not self._accumulated_cost:
+            self._accumulated_cost = new_cost
+            return
+
+        # Prompt cost from latest response already includes all previous messages
+        self._accumulated_cost.prompt_tokens_cost = new_cost.prompt_tokens_cost
+
+        # Accumulate completion cost
+        self._accumulated_cost.completion_tokens_cost += new_cost.completion_tokens_cost
+
     async def _process_query(self, query: str) -> None:
         """Process a user query through the agent system.
 
         Handles the complete query processing lifecycle:
         - Sends query to the swarm
         - Updates conversation memory
-        - Tracks usage and costs
+        - Accumulates usage and costs
         - Maintains agent state
         - Handles errors
 
@@ -457,7 +530,7 @@ class AgentRepl:
             - Updates multiple aspects of REPL state
             - Maintains conversation continuity
             - Preserves error context for user feedback
-            - Automatically updates statistics if enabled
+            - Accumulates statistics if enabled
         """
         try:
             agent = self._active_agent or self.agent
@@ -466,9 +539,9 @@ class AgentRepl:
                 prompt=query,
             )
 
-            self._messages = validate_messages(self.swarm.message_store.get_messages())
-            self._usage = result.usage
-            self._response_cost = result.response_cost
+            self._messages = validate_messages(await self.swarm.message_store.get_messages())
+            self._update_usage(result.usage)
+            self._update_cost(result.response_cost)
             self._active_agent = result.agent
             self._agent_queue = self.swarm._agent_queue
             print("\n" + "=" * 50 + "\n")
@@ -495,21 +568,24 @@ class AgentRepl:
                 return
 
             # Get current messages
-            messages = self.swarm.message_store.get_messages()
+            messages = await self.swarm.message_store.get_messages()
             if not messages:
                 print("\n❌ No messages to optimize")
                 return
 
+            if not isinstance(self.swarm.context_manager, LiteContextManager):
+                print("\n❌ Context manager does not support optimization")
+                return
+
             # Run optimization
-            optimized = await self.swarm.context_manager.optimize(
-                messages=messages,
+            optimized = await self.swarm.context_manager.optimize_context(
                 model=parsed.model or self.agent.llm.model,
                 strategy=parsed.strategy,
                 query=parsed.query,
             )
 
             # Update memory
-            self.swarm.message_store.set_messages(optimized)
+            await self.swarm.message_store.set_messages(optimized)
             self._messages = validate_messages(optimized)
 
             print(f"\n✨ Context optimized using {parsed.strategy} strategy")
@@ -542,14 +618,17 @@ class AgentRepl:
                 return
 
             # Get current messages
-            messages = self.swarm.message_store.get_messages()
+            messages = await self.swarm.message_store.get_messages()
             if not messages:
                 print("\n❌ No messages to search")
                 return
 
+            if not isinstance(self.swarm.context_manager, LiteContextManager):
+                print("\n❌ Context manager does not support RAG")
+                return
+
             # Find relevant messages
-            relevant = await self.swarm.context_manager.get_relevant_context(
-                messages=messages,
+            relevant = await self.swarm.context_manager.find_context(
                 query=parsed.query,
                 max_messages=parsed.count,
                 embedding_model="text-embedding-ada-002",
@@ -595,7 +674,7 @@ class AgentRepl:
             - Errors don't terminate the loop
             - Graceful shutdown on interrupts
         """
-        self._print_welcome()
+        await self._print_welcome()
 
         while True:
             try:
