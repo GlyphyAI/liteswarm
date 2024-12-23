@@ -729,7 +729,7 @@ class Swarm:
                 context_variables=context_variables,
             )
 
-    async def _process_stream_chunk(
+    def _process_stream_chunk(
         self,
         agent: Agent,
         chunk: ModelResponse,
@@ -851,7 +851,7 @@ class Swarm:
             or is_subtype(response_format, ResponseSchema)
         )
 
-    async def _parse_agent_response_content(
+    def _parse_agent_response_content(
         self,
         full_content: str,
         finish_reason: FinishReason | None,
@@ -957,7 +957,7 @@ class Swarm:
                     full_content += delta.content
 
             if should_parse_content and full_content:
-                parsed_content = await self._parse_agent_response_content(
+                parsed_content = self._parse_agent_response_content(
                     full_content=full_content,
                     finish_reason=finish_reason,
                     response_format=agent.llm.response_format,
@@ -1039,7 +1039,7 @@ class Swarm:
             )
 
             for tool_call_result in tool_call_results:
-                tool_message = await self._process_tool_call_result(tool_call_result)
+                tool_message = self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
                     agent.state = AgentState.STALE
                     self._agent_queue.append(tool_message.agent)
