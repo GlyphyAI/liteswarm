@@ -63,8 +63,13 @@ async def generate_structured_response_typed(
         ValueError: If response content is empty.
         ValidationError: If response doesn't match expected format.
     """
-    swarm = Swarm(event_handler=EventHandler())
-    result = await swarm.execute(agent=agent, prompt=user_prompt)
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent=agent,
+        prompt=user_prompt,
+        event_handler=EventHandler(),
+    )
+
     if not result.content:
         raise ValueError("No response content")
 
