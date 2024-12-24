@@ -109,19 +109,7 @@ class ReplEventHandler(ConsoleEventHandler):
         print(f"\n🔄 Switching from {prev_id} to {curr_id}...")
 
     @override
-    async def _handle_tool_call(self, event: SwarmToolCallEvent) -> None:
-        """Handle tool call events.
-
-        Args:
-            event: Tool call event to handle.
-        """
-        agent_id = event.agent.id
-        tool_name = event.tool_call.function.name
-        tool_id = event.tool_call.id
-        print(f"\n🔧 [{agent_id}] Tool '{tool_name}' [{tool_id}] is being called...")
-
-    @override
-    async def _handle_tool_call_result(self, event: SwarmToolCallResultEvent) -> None:
+    async def _handle_tool_call_result(self, event: ToolCallResultEvent) -> None:
         """Handle tool result events.
 
         Args:
