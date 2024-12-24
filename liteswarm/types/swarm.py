@@ -731,11 +731,8 @@ class AgentResponseChunk(BaseModel):
     agent: Agent
     """Agent that produced this chunk."""
 
-    delta: Delta
-    """Current content update."""
-
-    finish_reason: FinishReason | None = None
-    """Reason for response generation stopping."""
+    completion: CompletionResponseChunk
+    """Completion response chunk."""
 
     content: str | None = None
     """Accumulated content so far."""
@@ -745,12 +742,6 @@ class AgentResponseChunk(BaseModel):
 
     tool_calls: list[ToolCall] = Field(default_factory=list)
     """Accumulated tool calls."""
-
-    usage: Usage | None = None
-    """Token usage statistics."""
-
-    response_cost: ResponseCost | None = None
-    """Cost information."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
