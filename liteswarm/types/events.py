@@ -5,9 +5,8 @@
 # https://opensource.org/licenses/MIT.
 
 from collections.abc import Sequence
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Literal
 
-from litellm.types.utils import ChatCompletionDeltaToolCall
 from pydantic import BaseModel, ConfigDict, Discriminator
 
 from liteswarm.types.context import ContextVariables
@@ -16,7 +15,7 @@ from liteswarm.types.swarm import (
     AgentResponseChunk,
     CompletionResponseChunk,
     Message,
-    ToolCall,
+    ToolCallResult,
 )
 from liteswarm.types.swarm_team import Artifact, Plan, Task, TaskResult
 
@@ -38,7 +37,7 @@ class SwarmEvent(BaseModel):
     )
 
 
-class SwarmCompletionResponseChunkEvent(SwarmEvent):
+class CompletionResponseChunkEvent(SwarmEvent):
     """Event emitted for each streaming update from the language model.
 
     Called each time new content is received from the model, before any
@@ -55,7 +54,7 @@ class SwarmCompletionResponseChunkEvent(SwarmEvent):
     """Raw completion response chunk from the model."""
 
 
-class SwarmAgentResponseChunkEvent(SwarmEvent):
+class AgentResponseChunkEvent(SwarmEvent):
     """Event emitted for each streaming update from an agent.
 
     Called each time new content is received from an agent, including both
@@ -83,14 +82,11 @@ class ToolCallResultEvent(SwarmEvent):
     agent: Agent
     """Agent that made the tool call."""
 
-    tool_call: ToolCall
-    """Details of the tool being called."""
-
-    tool_call_result: Any
+    tool_call_result: ToolCallResult
     """Result of the tool execution."""
 
 
-class SwarmAgentSwitchEvent(SwarmEvent):
+class AgentSwitchEvent(SwarmEvent):
     """Event emitted when switching between agents.
 
     Called when the conversation transitions from one agent to another.
@@ -107,7 +103,7 @@ class SwarmAgentSwitchEvent(SwarmEvent):
     """Agent being switched to, never None."""
 
 
-class SwarmErrorEvent(SwarmEvent):
+class ErrorEvent(SwarmEvent):
     """Event emitted when an error occurs during execution.
 
     Called when an error occurs during any phase of operation, including
@@ -125,7 +121,7 @@ class SwarmErrorEvent(SwarmEvent):
     """Exception that occurred."""
 
 
-class SwarmCompleteEvent(SwarmEvent):
+class CompleteEvent(SwarmEvent):
     """Event emitted when execution reaches completion.
 
     Called when a conversation reaches its natural conclusion or is
@@ -143,7 +139,7 @@ class SwarmCompleteEvent(SwarmEvent):
     """Complete conversation history."""
 
 
-class SwarmTeamPlanCreatedEvent(SwarmEvent):
+class PlanCreatedEvent(SwarmEvent):
     """Event emitted when a new plan is successfully created.
 
     Called after a planning agent successfully creates a structured plan
@@ -158,7 +154,7 @@ class SwarmTeamPlanCreatedEvent(SwarmEvent):
     """Newly created execution plan."""
 
 
-class SwarmTeamTaskStartedEvent(SwarmEvent):
+class TaskStartedEvent(SwarmEvent):
     """Event emitted when a task begins execution.
 
     Called when a task starts execution, after member assignment but
@@ -173,7 +169,7 @@ class SwarmTeamTaskStartedEvent(SwarmEvent):
     """Task beginning execution."""
 
 
-class SwarmTeamTaskCompletedEvent(SwarmEvent):
+class TaskCompletedEvent(SwarmEvent):
     """Event emitted when a task finishes execution.
 
     Called when a task completes execution successfully. Used to process
@@ -193,7 +189,7 @@ class SwarmTeamTaskCompletedEvent(SwarmEvent):
     """Context used during task execution."""
 
 
-class SwarmTeamPlanCompletedEvent(SwarmEvent):
+class PlanCompletedEvent(SwarmEvent):
     """Event emitted when all tasks in a plan are completed.
 
     Called when all tasks in a plan have finished execution successfully.
@@ -210,18 +206,17 @@ class SwarmTeamPlanCompletedEvent(SwarmEvent):
     """Artifact containing the results of plan execution."""
 
 
-SwarmEventType: TypeAlias = Annotated[
-    SwarmCompletionResponseChunkEvent
-    | SwarmAgentResponseChunkEvent
-    | SwarmToolCallEvent
-    | SwarmToolCallResultEvent
-    | SwarmAgentSwitchEvent
-    | SwarmErrorEvent
-    | SwarmCompleteEvent
-    | SwarmTeamPlanCreatedEvent
-    | SwarmTeamTaskStartedEvent
-    | SwarmTeamTaskCompletedEvent
-    | SwarmTeamPlanCompletedEvent,
+SwarmEventType = Annotated[
+    CompletionResponseChunkEvent
+    | AgentResponseChunkEvent
+    | ToolCallResultEvent
+    | AgentSwitchEvent
+    | ErrorEvent
+    | CompleteEvent
+    | PlanCreatedEvent
+    | TaskStartedEvent
+    | TaskCompletedEvent
+    | PlanCompletedEvent,
     Discriminator("type"),
 ]
 """Type alias for all Swarm events."""
