@@ -893,29 +893,32 @@ class Swarm:
     ) -> AsyncStream[SwarmEventType, AgentResponseChunk | None]:
         """Process agent response and stream completion events.
 
-        Implements agent response handling:
-        - Streams completion response chunks with proper buffering
-        - Accumulates content and tool calls accurately
-        - Updates event handler with progress
-        - Maintains conversation state consistency
-        - Tracks usage and costs throughout
+        Handles the core response processing from the language model. Streams both raw
+        completion chunks and processed agent response chunks, accumulates content and
+        tool calls, and handles response parsing. The @returnable decorator enables
+        streaming both types of events while returning the final accumulated response
+        chunk for further processing.
 
         Args:
             agent: Agent processing the response.
             agent_messages: Messages providing conversation context.
             context_variables: Context for dynamic resolution.
 
-        Yields:
-            AgentResponseChunk containing:
-            - Current response delta with updates
-            - Accumulated content for context
-            - Parsed content if response format is specified
-            - Collected tool calls for execution
-            - Usage and cost statistics for monitoring
+        Returns:
+            ReturnableAsyncGenerator yielding completion and response events,
+            returning the final accumulated response chunk or None.
 
         Raises:
             CompletionError: If completion fails after retries.
             ContextLengthError: If context exceeds limits after reduction.
+
+        Notes:
+            - Internal method used by _stream_agent_execution()
+            - Streams both raw completion and processed response events
+            - Accumulates content and tool calls incrementally
+            - Handles response format parsing if specified
+            - Uses retry with backoff for completion errors
+            - Returns final response for tool call processing
         """
         full_content: str | None = None
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
@@ -991,12 +994,11 @@ class Swarm:
     ) -> AsyncStream[SwarmEventType, list[Message]]:
         """Process assistant response and stream tool call events.
 
-        Handles the full response cycle with proper ordering:
-        - Creates formatted assistant message with content
-        - Processes tool calls in correct sequence
-        - Manages potential agent switches
-        - Maintains message relationships
-        - Updates conversation state
+        Handles assistant response processing and tool execution. Creates messages
+        for the response and any tool calls, manages agent switching if needed,
+        and updates context. The @returnable decorator enables streaming tool call
+        events during processing while returning the complete list of generated
+        messages at the end.
 
         Args:
             agent: Agent that generated the response.
@@ -1005,15 +1007,16 @@ class Swarm:
             tool_calls: Tool calls to process in order.
 
         Returns:
-            Messages including all components:
-            - Primary assistant message
-            - Tool response messages
-            - Switch notification messages
-            - Related status updates
+            ReturnableAsyncGenerator yielding tool call events and returning
+            the list of generated messages.
 
         Notes:
-            Updates agent state and queue when switches occur by marking the current
-            agent as stale and adding the new agent to the queue.
+            - Internal method used by _stream_agent_execution()
+            - Creates assistant message with content and tool calls
+            - Processes tool calls and yields events for each
+            - Handles agent switching through tool results
+            - Updates context variables from tool results
+            - Returns all generated messages for history
         """
         messages: list[Message] = [
             Message(
@@ -1218,28 +1221,31 @@ class Swarm:
     ) -> AsyncStream[SwarmEventType, None]:
         """Stream events from active agent and handle agent switching.
 
+        Core execution loop of the swarm. Manages agent lifecycle, processes responses,
+        and handles agent switching when needed. Streams events for agent responses,
+        tool calls, and switches. The @returnable decorator provides consistent event
+        streaming, with None as the final return value since result accumulation
+        happens at a higher level.
+
         Args:
             iteration_count: Current number of processing iterations.
                 Used to enforce maximum iteration limits. Defaults to 0.
             agent_switch_count: Number of agent switches performed.
                 Used to enforce maximum switch limits. Defaults to 0.
 
-        Yields:
-            AgentResponseChunk objects containing:
-            - Response content and deltas
-            - Tool calls and their results
-            - Usage statistics if enabled
-            - Cost information if enabled
+        Returns:
+            ReturnableAsyncGenerator yielding events and returning None.
 
         Raises:
             SwarmError: If no active agent is available.
-            MaxAgentSwitchesError: If maximum number of agent switches is exceeded.
+            MaxAgentSwitchesError: If maximum number of switches is exceeded.
 
         Notes:
-            - Agents become STALE when they complete without tool calls
-            - Agent switches trigger system message additions
-            - Empty responses are marked with <empty> placeholder
-            - Processing stops when queue is empty or limits are reached
+            - Internal method used by _create_swarm_event_stream()
+            - Manages agent state transitions (IDLE -> ACTIVE -> STALE)
+            - Handles agent queue for switching
+            - Enforces iteration and switch limits
+            - Delegates response processing to _process_agent_response()
         """
         if not self._active_agent:
             raise SwarmError("No active agent available to process messages")
@@ -1324,14 +1330,13 @@ class Swarm:
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
     ) -> AsyncStream[SwarmEventType, None]:
-        """Create the base swarm execution stream.
+        """Create the base event stream for swarm execution.
 
-        Internal method that creates the underlying async generator for SwarmStream.
-        Handles the complete streaming lifecycle:
-        - Conversation initialization
-        - Agent response processing
-        - Error handling and recovery
-        - Stream event notifications
+        Core implementation of swarm's event streaming. Initializes conversation,
+        processes agent responses, handles tool calls, and manages agent switches.
+        Yields various events during execution but doesn't accumulate a final result.
+        The @returnable decorator is used here primarily for consistent event streaming,
+        with None as the final return value.
 
         Args:
             agent: Initial agent for handling conversations.
@@ -1339,8 +1344,8 @@ class Swarm:
             messages: Optional list of previous conversation messages.
             context_variables: Optional variables for dynamic resolution.
 
-        Yields:
-            AgentResponseChunk objects containing streaming updates.
+        Returns:
+            ReturnableAsyncGenerator yielding events and returning None.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
@@ -1349,10 +1354,10 @@ class Swarm:
             MaxResponseContinuationsError: If response needs too many continuations.
 
         Notes:
-            - This is an internal method used by stream()
-            - State is preserved between conversations
-            - Stream handler is notified of completion/errors
-            - Cleanup must be performed manually when needed
+            - Internal method used by stream()
+            - Handles core event generation
+            - Manages conversation state
+            - Doesn't accumulate final result
         """
         try:
             self._context_variables.update(context_variables or {})
@@ -1390,13 +1395,11 @@ class Swarm:
     ) -> AsyncStream[SwarmEventType, AgentExecutionResult]:
         """Stream swarm events and return final execution result.
 
-        Main entry point for streaming responses from agents. Returns a SwarmStream
-        that provides both streaming and result collection capabilities. The stream
-        can be consumed multiple times if needed.
-
-        This is a synchronous method that returns an async object (SwarmStream).
-        The returned stream should be consumed using async iteration or its async
-        result collection methods.
+        Main entry point for swarm execution. Processes user input through the agent,
+        streaming various events (responses, tool calls, errors) during execution.
+        Accumulates content and metadata to produce a final result. The @returnable
+        decorator extends the async generator to support both streaming events during
+        execution and returning a final result value when complete.
 
         Args:
             agent: Agent to execute the task.
@@ -1405,7 +1408,7 @@ class Swarm:
             context_variables: Optional variables for dynamic instruction resolution.
 
         Returns:
-            SwarmStream wrapper providing both async streaming and result collection.
+            ReturnableAsyncGenerator yielding events and returning final result.
 
         Raises:
             SwarmError: If neither prompt nor messages are provided.
@@ -1414,37 +1417,35 @@ class Swarm:
             MaxResponseContinuationsError: If response requires too many continuations.
 
         Examples:
-            Streaming mode:
-                ```python
-                async for response in swarm.stream(agent, prompt="Hello"):
-                    print(response.delta.content)  # Print updates as they arrive
-                ```
-
-            Result collection:
-                ```python
-                stream = swarm.stream(agent, prompt="Hello")
-                result = await stream.get_result()  # Wait for complete response
-                print(result.content)  # Print final content
-                ```
-
-            Combined usage:
+            Stream events and get result:
                 ```python
                 stream = swarm.stream(agent, prompt="Hello")
 
-                # Stream partial responses
-                async for response in stream:
-                    print("Partial:", response.delta.content)
+                # Process events during execution
+                async for event in stream:
+                    match event.type:
+                        case "agent_response_chunk":
+                            print(event.chunk.completion.delta.content)
+                        case "error":
+                            print(f"Error: {event.error}")
 
-                # Get final result
+                # Get final result after completion
                 result = await stream.get_result()
-                print("Final:", result.content)
+                print(f"Final content: {result.content}")
+                ```
+
+            Just get final result:
+                ```python
+                stream = swarm.stream(agent, prompt="Hello")
+                result = await stream.get_result()
+                print(result.content)
                 ```
 
         Notes:
-            - SwarmStream supports both streaming and final result modes
-            - Internal state tracks complete response accumulation
-            - Usage and cost statistics are combined properly
-            - Parsed content is handled according to format rules
+            - AsyncStream supports both event streaming and final result
+            - Events provide real-time updates during execution
+            - Final result contains complete response with metadata
+            - Stream can be consumed multiple times if needed
         """
         event_stream = self._create_swarm_event_stream(
             agent=agent,
@@ -1498,50 +1499,61 @@ class Swarm:
     ) -> AgentExecutionResult:
         """Execute user prompt and return final execution result.
 
-        Convenience method that wraps stream() to provide a simpler interface when
-        streaming isn't required. Blocks until the complete response is generated.
+        Convenience method that wraps stream() to provide event handling and result
+        collection. Events are processed through the provided handler if specified,
+        and the final result is returned.
 
         Args:
             agent: Agent to execute the task.
-            prompt: The user's input prompt to process.
+            prompt: Optional user prompt to process.
             messages: Optional list of previous conversation messages for context.
             context_variables: Optional variables for dynamic instruction resolution.
+            event_handler: Optional handler for processing execution events.
 
         Returns:
-            Complete execution result with final content, agent state, and usage statistics.
+            Complete execution result with final content and metadata.
 
         Raises:
-            SwarmError: If an unrecoverable error occurs during processing.
+            SwarmError: If neither prompt nor messages are provided.
             ContextLengthError: If context becomes too large to process.
             MaxAgentSwitchesError: If too many agent switches occur.
             MaxResponseContinuationsError: If response requires too many continuations.
 
         Examples:
-            Basic usage:
+            With event handler:
                 ```python
-                def get_instructions(context: ContextVariables) -> str:
-                    return f"Help {context['user_name']} with their task."
+                class LoggingHandler(SwarmEventHandler):
+                    async def on_event(self, event: SwarmEventType) -> None:
+                        match event.type:
+                            case "agent_response_chunk":
+                                print(event.chunk.completion.delta.content)
+                            case "error":
+                                print(f"Error: {event.error}")
 
-
-                agent = Agent(
-                    id="helper",
-                    instructions=get_instructions,
-                    llm=LLM(model="gpt-4o"),
-                )
 
                 result = await swarm.execute(
                     agent=agent,
-                    prompt="Hello!",
-                    context_variables=ContextVariables({"user_name": "Bob"}),
+                    prompt="Hello",
+                    event_handler=LoggingHandler(),
                 )
-                print(result.content)  # Response will be personalized for Bob
+                print(f"Final content: {result.content}")
+                ```
+
+            Without event handler:
+                ```python
+                result = await swarm.execute(
+                    agent=agent,
+                    prompt="Hello",
+                    context_variables={"user": "Alice"},
+                )
+                print(result.content)
                 ```
 
         Notes:
-            - This method blocks until the complete response is generated
-            - All streaming responses are accumulated internally
-            - The same error handling and recovery as stream() applies
-            - The conversation history is preserved in the same way
+            - Events are processed through handler if provided
+            - Final result is returned after completion
+            - Same error handling as stream() applies
+            - Conversation history is preserved
         """
         stream = self.stream(
             agent=agent,
