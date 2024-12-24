@@ -356,13 +356,6 @@ class Swarm:
                 error=ValueError(f"Unknown function: {function_name}"),
             )
 
-        await self.event_handler.on_event(
-            SwarmToolCallEvent(
-                tool_call=tool_call,
-                agent=agent,
-            )
-        )
-
         try:
             args = orjson.loads(tool_call.function.arguments)
             function_tool = function_tools_map[function_name]
@@ -373,14 +366,6 @@ class Swarm:
             tool_call_result = self._parse_tool_call_result(
                 tool_call=tool_call,
                 result=function_tool_result,
-            )
-
-            await self.event_handler.on_event(
-                SwarmToolCallResultEvent(
-                    tool_call=tool_call,
-                    tool_call_result=function_tool_result,
-                    agent=agent,
-                )
             )
 
         except Exception as error:
