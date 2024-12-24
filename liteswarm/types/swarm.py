@@ -15,7 +15,7 @@ from litellm.types.utils import (
     Usage,
 )
 from litellm.types.utils import Delta as LiteDelta
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_serializer
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.llm import LLM
@@ -97,6 +97,9 @@ Contains audio data and metadata:
 
 Used in conversations with audio capabilities.
 """
+
+DYNAMIC_INSTRUCTIONS = "<dynamic_instructions>"
+"""Constant indicating that agent instructions are dynamic (callable)."""
 
 
 class Message(BaseModel):
@@ -408,6 +411,20 @@ class Agent(BaseModel):
         use_attribute_docstrings=True,
         extra="forbid",
     )
+
+    @field_serializer("instructions")
+    def serialize_instructions(self, instructions: AgentInstructions) -> str:
+        """Serialize agent instructions for storage or transmission.
+
+        Static instructions are serialized as-is. Dynamic instructions (functions)
+        are serialized as a special constant string.
+
+        Returns:
+            Original instructions string or DYNAMIC_INSTRUCTIONS constant.
+        """
+        if callable(instructions):
+            return DYNAMIC_INSTRUCTIONS
+        return instructions
 
 
 class ToolResult(BaseModel):
