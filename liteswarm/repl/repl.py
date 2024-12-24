@@ -110,7 +110,6 @@ class AgentRepl:
         # Public configuration
         self.agent = agent
         self.swarm = Swarm(
-            event_handler=ReplEventHandler(),
             message_store=message_store,
             context_manager=context_manager,
             include_usage=include_usage,
@@ -119,6 +118,7 @@ class AgentRepl:
         )
 
         # Internal state (private)
+        self._event_handler = ReplEventHandler()
         self._messages: list[Message] = []
         self._accumulated_usage: Usage | None = None
         self._accumulated_cost: ResponseCost | None = None
@@ -537,6 +537,7 @@ class AgentRepl:
             result = await self.swarm.execute(
                 agent=agent,
                 prompt=query,
+                event_handler=self._event_handler,
             )
 
             self._messages = validate_messages(await self.swarm.message_store.get_messages())
