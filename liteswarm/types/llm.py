@@ -374,6 +374,38 @@ class LLM(BaseModel):
         extra="forbid",
     )
 
+    @field_serializer("tools")
+    def serialize_tools(
+        self,
+        tools: list[AgentTool] | None,
+    ) -> list[dict[str, str]] | None:
+        """Serialize tool functions for storage or transmission.
+
+        Captures essential metadata about each tool:
+        - name: Function name.
+        - doc: Function docstring.
+        - module: Module where function is defined.
+
+        Note that the actual function implementation cannot be serialized,
+        so tools will need to be provided again when recreating the LLM.
+
+        Returns:
+            List of tool metadata or None if no tools.
+        """
+        if not tools:
+            return None
+
+        tool_info: list[dict[str, str]] = []
+        for tool in tools:
+            info = {
+                "name": tool.__name__,
+                "doc": tool.__doc__ or "No description available",
+                "module": tool.__module__ or "<unknown>",
+            }
+            tool_info.append(info)
+
+        return tool_info
+
     @field_serializer("response_format")
     def serialize_response_format(
         self,
