@@ -10,17 +10,16 @@ from typing_extensions import override
 
 from liteswarm.core.event_handler import LiteSwarmEventHandler
 from liteswarm.types.events import (
-    SwarmAgentResponseChunkEvent,
-    SwarmAgentSwitchEvent,
-    SwarmCompleteEvent,
-    SwarmErrorEvent,
+    AgentResponseChunkEvent,
+    AgentSwitchEvent,
+    CompleteEvent,
+    ErrorEvent,
+    PlanCompletedEvent,
+    PlanCreatedEvent,
     SwarmEventType,
-    SwarmTeamPlanCompletedEvent,
-    SwarmTeamPlanCreatedEvent,
-    SwarmTeamTaskCompletedEvent,
-    SwarmTeamTaskStartedEvent,
-    SwarmToolCallEvent,
-    SwarmToolCallResultEvent,
+    TaskCompletedEvent,
+    TaskStartedEvent,
+    ToolCallResultEvent,
 )
 
 
@@ -92,39 +91,38 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         """
         match event:
             # Swarm Events
-            case SwarmAgentResponseChunkEvent():
+            case AgentResponseChunkEvent():
                 await self._handle_response(event)
-            case SwarmToolCallEvent():
-                await self._handle_tool_call(event)
-            case SwarmToolCallResultEvent():
+            case ToolCallResultEvent():
                 await self._handle_tool_call_result(event)
-            case SwarmAgentSwitchEvent():
+            case AgentSwitchEvent():
                 await self._handle_agent_switch(event)
-            case SwarmErrorEvent():
+            case ErrorEvent():
                 await self._handle_error(event)
-            case SwarmCompleteEvent():
+            case CompleteEvent():
                 await self._handle_complete(event)
 
             # Swarm Team Events
-            case SwarmTeamPlanCreatedEvent():
+            case PlanCreatedEvent():
                 await self._handle_team_plan_created(event)
-            case SwarmTeamTaskStartedEvent():
+            case TaskStartedEvent():
                 await self._handle_team_task_started(event)
-            case SwarmTeamTaskCompletedEvent():
+            case TaskCompletedEvent():
                 await self._handle_team_task_completed(event)
-            case SwarmTeamPlanCompletedEvent():
+            case PlanCompletedEvent():
                 await self._handle_team_plan_completed(event)
 
-    async def _handle_response(self, event: SwarmAgentResponseChunkEvent) -> None:
+    async def _handle_response(self, event: AgentResponseChunkEvent) -> None:
         """Handle agent response events.
 
         Args:
             event: Response event to handle.
         """
-        if event.chunk.finish_reason == "length":
+        completion = event.chunk.completion
+        if completion.finish_reason == "length":
             print("\n[...continuing...]", end="", flush=True)
 
-        if content := event.chunk.delta.content:
+        if content := completion.delta.content:
             agent_id = event.chunk.agent.id
             if self._last_agent_id != agent_id:
                 print(f"\n[{agent_id}] ", end="", flush=True)
@@ -132,31 +130,21 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
 
             print(content, end="", flush=True)
 
-        if event.chunk.finish_reason:
+        if completion.finish_reason:
             print("", flush=True)
 
-    async def _handle_tool_call(self, event: SwarmToolCallEvent) -> None:
-        """Handle tool call events.
-
-        Args:
-            event: Tool call event to handle.
-        """
-        agent_id = event.agent.id
-        tool_name = event.tool_call.function.name
-        print(f"\n\n🔧 [{agent_id}] Tool '{tool_name}' is being called...", flush=True)
-
-    async def _handle_tool_call_result(self, event: SwarmToolCallResultEvent) -> None:
+    async def _handle_tool_call_result(self, event: ToolCallResultEvent) -> None:
         """Handle tool call result events.
 
         Args:
             event: Tool call result event to handle.
         """
         agent_id = event.agent.id
-        tool_name = event.tool_call.function.name
-        tool_result = event.tool_call_result
-        print(f"\n\n📎 [{agent_id}] Tool '{tool_name}' returned: {tool_result}", flush=True)
+        tool_call = event.tool_call_result.tool_call
+        tool_name = tool_call.function.name
+        print(f"\n\n📎 [{agent_id}] Tool '{tool_name}' [{tool_call.id}] called", flush=True)
 
-    async def _handle_agent_switch(self, event: SwarmAgentSwitchEvent) -> None:
+    async def _handle_agent_switch(self, event: AgentSwitchEvent) -> None:
         """Handle agent switch events.
 
         Args:
@@ -166,7 +154,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         curr_id = event.current.id
         print(f"\n\n🔄 Switching from {prev_id} to {curr_id}...", flush=True)
 
-    async def _handle_error(self, event: SwarmErrorEvent) -> None:
+    async def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error events.
 
         Args:
@@ -177,7 +165,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         print(f"\n\n❌ Error from {agent_id}: {error}", file=sys.stderr, flush=True)
         self._last_agent_id = None
 
-    async def _handle_complete(self, event: SwarmCompleteEvent) -> None:
+    async def _handle_complete(self, event: CompleteEvent) -> None:
         """Handle completion events.
 
         Args:
@@ -187,7 +175,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         self._last_agent_id = None
         print(f"\n\n✅ [{agent_id}] Completed\n", flush=True)
 
-    async def _handle_team_plan_created(self, event: SwarmTeamPlanCreatedEvent) -> None:
+    async def _handle_team_plan_created(self, event: PlanCreatedEvent) -> None:
         """Handle team plan created events.
 
         Args:
@@ -197,7 +185,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         task_count = len(event.plan.tasks)
         print(f"\n\n🔧 Plan created (task count: {task_count}): {plan_id}\n", flush=True)
 
-    async def _handle_team_task_started(self, event: SwarmTeamTaskStartedEvent) -> None:
+    async def _handle_team_task_started(self, event: TaskStartedEvent) -> None:
         """Handle team task started events.
 
         Args:
@@ -207,7 +195,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         assignee_id = event.task.assignee if event.task.assignee else "unknown"
         print(f"\n\n🔧 Task started: {task_id} by {assignee_id}\n", flush=True)
 
-    async def _handle_team_task_completed(self, event: SwarmTeamTaskCompletedEvent) -> None:
+    async def _handle_team_task_completed(self, event: TaskCompletedEvent) -> None:
         """Handle team task completed events.
 
         Args:
@@ -221,7 +209,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
             flush=True,
         )
 
-    async def _handle_team_plan_completed(self, event: SwarmTeamPlanCompletedEvent) -> None:
+    async def _handle_team_plan_completed(self, event: PlanCompletedEvent) -> None:
         """Handle team plan completed events.
 
         Args:
