@@ -520,6 +520,9 @@ class ToolCallResult(BaseModel):
     tool_call: ToolCall
     """Tool call that produced this result."""
 
+    result: Any
+    """Result of the tool call."""
+
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
