@@ -413,31 +413,44 @@ class LLM(BaseModel):
     ) -> dict[str, Any] | None:
         """Serialize response format for API requests.
 
-        Converts different format types into API-compatible representations:
-        - Pydantic models -> JSON schema.
-        - Pydantic instances -> JSON.
-        - Dict formats -> Pass through.
+        Handles different response format types:
+        - ResponseFormatBasic: Pass through (e.g., {"type": "text"})
+        - ResponseFormatJsonSchema: Pass through with schema
+        - type[BaseModel]: Convert to JSON schema
 
         Args:
             response_format: Format to serialize.
 
         Returns:
-            API-compatible format specification.
+            API-compatible format specification or None.
 
         Examples:
-            Model class to schema:
+            Basic format:
+                ```python
+                llm = LLM(response_format={"type": "text"})
+                ```
+
+            JSON schema format:
+                ```python
+                llm = LLM(
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": ResponseSchema(
+                            name="review",
+                            json_schema={"type": "object"},
+                        ),
+                    }
+                )
+                ```
+
+            Pydantic model format:
                 ```python
                 class Output(BaseModel):
                     value: int
                     details: str
 
 
-                llm = LLM(response_format=Output)
-                ```
-
-            Dict format:
-                ```python
-                llm = LLM(response_format={"type": "json_object"})
+                llm = LLM(response_format=Output)  # Converted to JSON schema
                 ```
         """
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):
