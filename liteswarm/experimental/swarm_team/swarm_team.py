@@ -18,10 +18,10 @@ from liteswarm.experimental.swarm_team.response_repair import (
     ResponseRepairAgent,
 )
 from liteswarm.types.events import (
-    SwarmTeamPlanCompletedEvent,
-    SwarmTeamPlanCreatedEvent,
-    SwarmTeamTaskCompletedEvent,
-    SwarmTeamTaskStartedEvent,
+    PlanCompletedEvent,
+    PlanCreatedEvent,
+    TaskCompletedEvent,
+    TaskStartedEvent,
 )
 from liteswarm.types.exceptions import TaskExecutionError
 from liteswarm.types.swarm import ContextVariables
@@ -803,7 +803,7 @@ class SwarmTeam:
             context=context,
         )
 
-        await self.event_handler.on_event(SwarmTeamPlanCreatedEvent(plan=result))
+        await self.event_handler.on_event(PlanCreatedEvent(plan=result))
         return result
 
     async def execute_plan(
@@ -870,7 +870,7 @@ class SwarmTeam:
 
             artifact.status = ArtifactStatus.COMPLETED
             await self.event_handler.on_event(
-                SwarmTeamPlanCompletedEvent(
+                PlanCompletedEvent(
                     plan=plan,
                     artifact=artifact,
                 )
@@ -944,7 +944,7 @@ class SwarmTeam:
             )
 
         try:
-            await self.event_handler.on_event(SwarmTeamTaskStartedEvent(task=task))
+            await self.event_handler.on_event(TaskStartedEvent(task=task))
             task.status = TaskStatus.IN_PROGRESS
             task.assignee = assignee.agent.id
 
@@ -976,7 +976,7 @@ class SwarmTeam:
             )
 
             await self.event_handler.on_event(
-                SwarmTeamTaskCompletedEvent(
+                TaskCompletedEvent(
                     task=task,
                     task_result=task_result,
                     task_context=task_context,
