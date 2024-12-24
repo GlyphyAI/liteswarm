@@ -72,42 +72,43 @@ litellm.modify_params = True
 
 
 class Swarm:
-    """Orchestrator for AI agent conversations and interactions.
+    """Provider-agnostic orchestrator for AI agent interactions with batteries included.
 
     Swarm orchestrates complex conversations involving multiple AI agents,
-    handling message history, tool execution, and agent switching. It provides both
-    streaming and synchronous interfaces for agent interactions.
+    handling message history, tool execution, and agent switching. Powered by
+    100+ supported LLMs, it provides both streaming and synchronous interfaces
+    for agent interactions.
 
-    Manages complex conversations with multiple AI agents, handling:
-    - Message history and automatic summarization
-    - Tool execution and agent switching
-    - Response streaming with custom handlers
-    - Token usage and cost tracking
-    - Automatic retry with exponential backoff
-    - Response continuation for length limits
-    - Safety limits for responses and switches
+    Key features:
+    - Modular architecture with customizable components:
+      - Message storage and history management
+      - Context creation and optimization
+      - Event streaming and handling
+    - Powerful agent capabilities:
+      - Tool execution and agent switching
+      - Response validation and continuation
+      - Context length management
+    - Built-in reliability features:
+      - Automatic retries with backoff
+      - Usage and cost tracking
+      - Context length error handling
 
     Examples:
-        Basic calculation:
+        Basic streaming:
             ```python
-            def add(a: float, b: float) -> float:
+            # Tools are created as plain Python functions
+            def add(a: int, b: int) -> int:
                 return a + b
 
 
-            def multiply(a: float, b: float) -> float:
+            def multiply(a: int, b: int) -> int:
                 return a * b
 
 
-            agent_instructions = (
-                "You are a math assistant. Use tools to perform calculations. "
-                "When making tool calls, you must provide valid JSON arguments with correct quotes. "
-                "After calculations, output must strictly follow this format: 'The result is <tool_result>'"
-            )
-
-            # Create an agent with math tools
+            # Create agent with tools
             agent = Agent(
                 id="math",
-                instructions=agent_instructions,
+                instructions="You are a math assistant. Use tools for calculations.",
                 llm=LLM(
                     model="gpt-4o",
                     tools=[add, multiply],
@@ -115,27 +116,74 @@ class Swarm:
                 ),
             )
 
-            # Initialize swarm and run calculation
-            swarm = Swarm(include_usage=True)
+            # Stream events and get result
+            stream = swarm.stream(agent, prompt="Calculate (2 + 3) * 4")
+            async for event in stream:
+                if event.type == "agent_response_chunk":
+                    print(event.chunk.completion.delta.content)
+                elif event.type == "tool_call_result":
+                    print(f"Tool result: {event.tool_call_result.result}")
+
+            result = await stream.get_result()
+            print(f"Final result: {result.content}")  # "The result is 20"
+            ```
+
+        Event handler:
+            ```python
+            class ConsoleHandler(SwarmEventHandler):
+                async def on_event(self, event: SwarmEventType) -> None:
+                    if event.type == "agent_response_chunk":
+                        print(event.chunk.completion.delta.content)
+                    elif event.type == "agent_switch":
+                        print(f"Switching to {event.current.id}")
+                    elif event.type == "error":
+                        print(f"Error: {event.error}")
+
+
             result = await swarm.execute(
                 agent=agent,
-                prompt="What is (2 + 3) * 4?",
+                prompt="Complex task requiring expertise",
+                event_handler=ConsoleHandler(),
+            )
+            ```
+
+        Agent switching:
+            ```python
+            def switch_to_expert(domain: str) -> ToolResult:
+                return ToolResult(
+                    content=f"Switching to {domain} expert",
+                    agent=Agent(
+                        id=f"{domain}-expert",
+                        instructions=f"You are a {domain} expert.",
+                        llm=LLM(model="gpt-4o"),
+                    ),
+                )
+
+
+            agent = Agent(
+                id="router",
+                instructions="Route questions to appropriate experts.",
+                llm=LLM(
+                    model="gpt-4o",
+                    tools=[switch_to_expert],
+                ),
             )
 
-            # The agent will:
-            # 1. Use add(2, 3) to get 5
-            # 2. Use multiply(5, 4) to get 20
-            print(result.content)  # "The result is 20"
+            # Stream will yield agent switch events
+            async for event in swarm.stream(agent, prompt="Explain quantum physics"):
+                if event.type == "agent_switch":
+                    print(f"Switched from {event.previous.id} to {event.current.id}")
             ```
 
     Notes:
-        - Maintains internal state during conversations
+        - Events provide real-time updates during execution
+        - State is maintained during conversations
         - Create separate instances for concurrent conversations
+        - Cleanup must be called explicitly when needed
     """
 
     def __init__(
         self,
-        event_handler: SwarmEventHandler | None = None,
         message_store: MessageStore[Any] | None = None,
         context_manager: ContextManager | None = None,
         include_usage: bool = False,
@@ -177,7 +225,6 @@ class Swarm:
         self._context_variables: ContextVariables = ContextVariables()
 
         # Public configuration
-        self.event_handler = event_handler or LiteSwarmEventHandler()
         self.message_store = message_store or LiteMessageStore()
         self.context_manager = context_manager or LiteContextManager(self.message_store)
         self.include_usage = include_usage
@@ -1423,11 +1470,10 @@ class Swarm:
 
                 # Process events during execution
                 async for event in stream:
-                    match event.type:
-                        case "agent_response_chunk":
-                            print(event.chunk.completion.delta.content)
-                        case "error":
-                            print(f"Error: {event.error}")
+                    if event.type == "agent_response_chunk":
+                        print(event.chunk.completion.delta.content)
+                    elif event.type == "error":
+                        print(f"Error: {event.error}")
 
                 # Get final result after completion
                 result = await stream.get_result()
@@ -1524,11 +1570,10 @@ class Swarm:
                 ```python
                 class LoggingHandler(SwarmEventHandler):
                     async def on_event(self, event: SwarmEventType) -> None:
-                        match event.type:
-                            case "agent_response_chunk":
-                                print(event.chunk.completion.delta.content)
-                            case "error":
-                                print(f"Error: {event.error}")
+                        if event.type == "agent_response_chunk":
+                            print(event.chunk.completion.delta.content)
+                        elif event.type == "error":
+                            print(f"Error: {event.error}")
 
 
                 result = await swarm.execute(
