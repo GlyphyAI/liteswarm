@@ -522,15 +522,16 @@ class ToolCallResult(BaseModel):
         # Framework internal processing
         class ToolEventHandler:
             async def handle_tool_call(self, result: ToolCallResult):
-                if isinstance(result, ToolCallMessageResult):
-                    # Process message result
-                    pass
-                elif isinstance(result, ToolCallAgentResult):
-                    # Process agent switch
-                    pass
-                elif isinstance(result, ToolCallFailureResult):
-                    # Handle failure
-                    pass
+                match result:
+                    case ToolCallMessageResult():
+                        # Process message result
+                        pass
+                    case ToolCallAgentResult():
+                        # Process agent switch
+                        pass
+                    case ToolCallFailureResult():
+                        # Handle failure
+                        pass
         ```
     """
 
@@ -692,18 +693,15 @@ class CompletionResponseChunk(BaseModel):
 class AgentResponseChunk(BaseModel):
     """Single chunk in a streaming agent response.
 
-    Contains both the latest delta and accumulated state from previous chunks:
-    - Current delta update (new content/tool calls)
+    Contains both the completion response chunk and accumulated state:
+    - Completion chunk (delta, finish reason, usage, cost)
     - Accumulated content from previous chunks
-    - Collected tool calls and their states
-    - Running usage and cost statistics
+    - Collected tool calls
     - Parsed content when format specified
 
     Each chunk represents a streaming step with:
-    - Latest content or tool call updates
+    - Latest completion response
     - Progressive content accumulation
-    - Ongoing statistics tracking
-    - Continuous state management
     - Real-time parsing when applicable
 
     Examples:
@@ -711,13 +709,14 @@ class AgentResponseChunk(BaseModel):
             ```python
             chunk = AgentResponseChunk(
                 agent=agent,
-                delta=Delta(content=" world"),
+                completion=CompletionResponseChunk(
+                    delta=Delta(content=" world"),
+                    usage=Usage(prompt_tokens=10, completion_tokens=2),
+                ),
                 content="Hello world",  # Full content so far
                 parsed_content=None,
-                finish_reason=None,
-                usage=Usage(prompt_tokens=10, completion_tokens=2),
             )
-            print(chunk.delta.content)  # Latest: " world"
+            print(chunk.completion.delta.content)  # Latest: " world"
             print(chunk.content)  # Total: "Hello world"
             ```
 
@@ -725,24 +724,25 @@ class AgentResponseChunk(BaseModel):
             ```python
             chunk = AgentResponseChunk(
                 agent=agent,
-                delta=Delta(tool_calls=[new_call]),
+                completion=CompletionResponseChunk(
+                    delta=Delta(tool_calls=[new_call]),
+                    usage=Usage(prompt_tokens=15, completion_tokens=5),
+                    response_cost=ResponseCost(
+                        prompt_tokens_cost=0.0001,
+                        completion_tokens_cost=0.0002,
+                    ),
+                ),
                 content="Let me calculate that",
                 parsed_content=None,
                 tool_calls=[previous_call, new_call],  # All calls so far
-                usage=Usage(prompt_tokens=15, completion_tokens=5),
-                response_cost=ResponseCost(
-                    prompt_tokens_cost=0.0001,
-                    completion_tokens_cost=0.0002,
-                ),
             )
             ```
 
     Notes:
-        - Delta contains only the latest update
+        - Completion contains the latest update with delta and metadata
         - Content and tool_calls maintain running state
-        - Usage and costs track cumulative totals
+        - Usage and costs are tracked in completion
         - Parsed content updates with format rules
-        - Finish reason indicates completion status
     """
 
     agent: Agent
