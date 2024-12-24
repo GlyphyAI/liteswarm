@@ -884,13 +884,14 @@ class Swarm:
                 original_error=e,
             ) from e
 
+    @returnable
     async def _process_agent_response(
         self,
         agent: Agent,
         agent_messages: list[Message],
         context_variables: ContextVariables,
-    ) -> AsyncGenerator[AgentResponseChunk, None]:
-        """Process agent responses with state management and tracking.
+    ) -> AsyncStream[SwarmEventType, AgentResponseChunk | None]:
+        """Process agent response and stream completion events.
 
         Implements agent response handling:
         - Streams completion response chunks with proper buffering
@@ -919,6 +920,7 @@ class Swarm:
         full_content: str | None = None
         full_tool_calls: list[ChatCompletionDeltaToolCall] = []
         parsed_content: JSON | BaseModel | None = None
+        last_response_chunk: AgentResponseChunk | None = None
 
         should_parse_content = self._should_parse_agent_response(
             model=agent.llm.model,
@@ -938,9 +940,10 @@ class Swarm:
             agent_messages=agent_messages,
             context_variables=context_variables,
         ):
+            yield YieldItem(CompletionResponseChunkEvent(agent=agent, chunk=completion_chunk))
+
             delta = completion_chunk.delta
             finish_reason = completion_chunk.finish_reason
-
             if delta.content:
                 if full_content is None:
                     full_content = delta.content
@@ -966,29 +969,27 @@ class Swarm:
                         last_tool_call = full_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
-            response_chunk = AgentResponseChunk(
+            last_response_chunk = AgentResponseChunk(
                 agent=agent,
-                delta=delta,
-                finish_reason=finish_reason,
+                completion=completion_chunk,
                 content=full_content,
                 parsed_content=parsed_content,
                 tool_calls=full_tool_calls,
-                usage=completion_chunk.usage,
-                response_cost=completion_chunk.response_cost,
             )
 
-            await self.event_handler.on_event(SwarmAgentResponseChunkEvent(chunk=response_chunk))
+            yield YieldItem(AgentResponseChunkEvent(chunk=last_response_chunk))
 
-            yield response_chunk
+        yield ReturnItem(last_response_chunk)
 
+    @returnable
     async def _process_assistant_response(
         self,
         agent: Agent,
         content: str | None,
         context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall],
-    ) -> list[Message]:
-        """Process complete assistant response, and handle tool calls.
+    ) -> AsyncStream[SwarmEventType, list[Message]]:
+        """Process assistant response and stream tool call events.
 
         Handles the full response cycle with proper ordering:
         - Creates formatted assistant message with content
@@ -1030,6 +1031,8 @@ class Swarm:
             )
 
             for tool_call_result in tool_call_results:
+                yield YieldItem(ToolCallResultEvent(agent=agent, tool_call_result=tool_call_result))
+
                 tool_message = self._process_tool_call_result(tool_call_result)
                 if tool_message.agent:
                     agent.state = AgentState.STALE
@@ -1040,7 +1043,7 @@ class Swarm:
 
                 messages.append(tool_message.message)
 
-        return messages
+        yield ReturnItem(messages)
 
     # ================================================
     # MARK: Context Management
@@ -1207,19 +1210,13 @@ class Swarm:
             message = Message(role="user", content=prompt)
             await self.message_store.add_message(message)
 
+    @returnable
     async def _stream_agent_execution(
         self,
         iteration_count: int = 0,
         agent_switch_count: int = 0,
-    ) -> AsyncGenerator[AgentResponseChunk, None]:
-        """Stream response chunks from active and subsequent agents in the swarm.
-
-        Manages the core response generation loop of the swarm, handling:
-        - Agent activation and switching
-        - Response chunk generation and streaming
-        - Tool call processing and execution
-        - Message history updates
-        - State transitions
+    ) -> AsyncStream[SwarmEventType, None]:
+        """Stream events from active agent and handle agent switching.
 
         Args:
             iteration_count: Current number of processing iterations.
@@ -1269,42 +1266,41 @@ class Swarm:
                 switch_history.append(next_agent.id)
 
                 log_verbose(f"Switching from agent {previous_agent.id} to {next_agent.id}")
-
-                await self.event_handler.on_event(
-                    SwarmAgentSwitchEvent(
-                        previous=previous_agent,
-                        current=next_agent,
-                    )
-                )
-
                 await self._activate_agent(next_agent, self._context_variables)
+
+                yield YieldItem(AgentSwitchEvent(previous=previous_agent, current=next_agent))
 
             agent_messages = await self._create_agent_context(
                 agent=self._active_agent,
                 context_variables=self._context_variables,
             )
 
-            last_agent_response: AgentResponseChunk | None = None
-            async for agent_response in self._process_agent_response(
+            agent_response_stream = self._process_agent_response(
                 agent=self._active_agent,
                 agent_messages=agent_messages,
                 context_variables=self._context_variables,
-            ):
-                yield agent_response
-                last_agent_response = agent_response
+            )
 
+            async for event in agent_response_stream:
+                yield YieldItem(event)
+
+            last_agent_response = await agent_response_stream.get_result()
             if not last_agent_response:
                 continue
 
             if last_agent_response.content or last_agent_response.tool_calls:
-                new_messages = await self._process_assistant_response(
+                new_messages_stream = self._process_assistant_response(
                     agent=self._active_agent,
                     content=last_agent_response.content,
                     context_variables=self._context_variables,
                     tool_calls=last_agent_response.tool_calls,
                 )
 
-                await self.message_store.add_messages(new_messages)
+                async for event in new_messages_stream:
+                    yield YieldItem(event)
+
+                messages = await new_messages_stream.get_result()
+                await self.message_store.add_messages(messages)
             else:
                 # We might not want to do this, but it's a good fallback
                 # Please consider removing this if it leads to unexpected behavior
@@ -1318,13 +1314,16 @@ class Swarm:
             if not last_agent_response.tool_calls:
                 self._active_agent.state = AgentState.STALE
 
-    async def _create_swarm_stream(
+        yield ReturnItem(None)
+
+    @returnable
+    async def _create_swarm_event_stream(
         self,
         agent: Agent,
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-    ) -> AsyncGenerator[AgentResponseChunk, None]:
+    ) -> AsyncStream[SwarmEventType, None]:
         """Create the base swarm execution stream.
 
         Internal method that creates the underlying async generator for SwarmStream.
@@ -1364,39 +1363,32 @@ class Swarm:
                 context_variables=self._context_variables,
             )
 
-            async for response in self._stream_agent_execution():
-                yield response
+            async for event in self._stream_agent_execution():
+                yield YieldItem(event)
+
+            yield ReturnItem(None)
 
         except Exception as e:
-            await self.event_handler.on_event(
-                SwarmErrorEvent(
-                    error=e,
-                    agent=self._active_agent,
-                )
-            )
+            yield YieldItem(ErrorEvent(agent=self._active_agent, error=e))
             raise
 
         finally:
             all_messages = await self.message_store.get_messages()
-            await self.event_handler.on_event(
-                SwarmCompleteEvent(
-                    messages=all_messages,
-                    agent=self._active_agent,
-                )
-            )
+            yield YieldItem(CompleteEvent(agent=self._active_agent, messages=all_messages))
 
     # ================================================
     # MARK: Public Interface
     # ================================================
 
-    def stream(
+    @returnable
+    async def stream(
         self,
         agent: Agent,
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-    ) -> SwarmStream:
-        """Stream responses from a swarm of agents.
+    ) -> AsyncStream[SwarmEventType, AgentExecutionResult]:
+        """Stream swarm events and return final execution result.
 
         Main entry point for streaming responses from agents. Returns a SwarmStream
         that provides both streaming and result collection capabilities. The stream
@@ -1454,14 +1446,47 @@ class Swarm:
             - Usage and cost statistics are combined properly
             - Parsed content is handled according to format rules
         """
-        return SwarmStream(
-            stream=self._create_swarm_stream(
-                agent=agent,
-                prompt=prompt,
-                messages=messages,
-                context_variables=context_variables,
-            ),
+        event_stream = self._create_swarm_event_stream(
+            agent=agent,
+            prompt=prompt,
+            messages=messages,
+            context_variables=context_variables,
         )
+
+        last_chunk: AgentResponseChunk | None = None
+        accumulated_content: str | None = None
+        accumulated_parsed_content: JSON | BaseModel | None = None
+        accumulated_usage: Usage | None = None
+        accumulated_response_cost: ResponseCost | None = None
+
+        async for event in event_stream:
+            yield YieldItem(event)
+
+            if event.type == "agent_response_chunk":
+                last_chunk = event.chunk
+                accumulated_content = last_chunk.content
+                accumulated_parsed_content = last_chunk.parsed_content
+                accumulated_usage = combine_usage(
+                    accumulated_usage,
+                    last_chunk.completion.usage,
+                )
+                accumulated_response_cost = combine_response_cost(
+                    accumulated_response_cost,
+                    last_chunk.completion.response_cost,
+                )
+
+        if last_chunk is None:
+            raise SwarmError("No agent response chunks received")
+
+        execution_result = AgentExecutionResult(
+            agent=last_chunk.agent,
+            content=accumulated_content,
+            parsed_content=accumulated_parsed_content,
+            usage=accumulated_usage,
+            response_cost=accumulated_response_cost,
+        )
+
+        yield ReturnItem(execution_result)
 
     async def execute(
         self,
@@ -1469,8 +1494,9 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
+        event_handler: SwarmEventHandler | None = None,
     ) -> AgentExecutionResult:
-        """Execute a prompt and return the complete response.
+        """Execute user prompt and return final execution result.
 
         Convenience method that wraps stream() to provide a simpler interface when
         streaming isn't required. Blocks until the complete response is generated.
@@ -1523,6 +1549,10 @@ class Swarm:
             messages=messages,
             context_variables=context_variables,
         )
+
+        if event_handler:
+            async for event in stream:
+                await event_handler.on_event(event)
 
         return await stream.get_result()
 
