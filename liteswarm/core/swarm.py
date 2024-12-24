@@ -272,6 +272,7 @@ class Swarm:
             case Agent() as agent:
                 return ToolCallAgentResult(
                     tool_call=tool_call,
+                    result=result,
                     agent=agent,
                     message=Message(
                         role="tool",
@@ -286,6 +287,7 @@ class Swarm:
                 if tool_output.agent:
                     return ToolCallAgentResult(
                         tool_call=tool_call,
+                        result=result,
                         agent=tool_output.agent,
                         message=Message(
                             role="tool",
@@ -297,6 +299,7 @@ class Swarm:
 
                 return ToolCallMessageResult(
                     tool_call=tool_call,
+                    result=result,
                     message=Message(
                         role="tool",
                         content=content,
@@ -308,6 +311,7 @@ class Swarm:
             case _:
                 return ToolCallMessageResult(
                     tool_call=tool_call,
+                    result=result,
                     message=Message(
                         role="tool",
                         content=parse_content(result),
@@ -348,6 +352,7 @@ class Swarm:
         if function_name not in function_tools_map:
             return ToolCallFailureResult(
                 tool_call=tool_call,
+                result=None,
                 error=ValueError(f"Unknown function: {function_name}"),
             )
 
@@ -379,13 +384,11 @@ class Swarm:
             )
 
         except Exception as error:
-            await self.event_handler.on_event(
-                SwarmErrorEvent(
-                    error=error,
-                    agent=agent,
-                )
+            tool_call_result = ToolCallFailureResult(
+                tool_call=tool_call,
+                result=None,
+                error=error,
             )
-            tool_call_result = ToolCallFailureResult(tool_call=tool_call, error=error)
 
         return tool_call_result
 
