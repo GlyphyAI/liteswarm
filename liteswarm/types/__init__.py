@@ -18,8 +18,6 @@ from .swarm import (
     CompletionResponseChunk,
     Delta,
     Message,
-    ToolCallResult,
-    ToolMessage,
     ToolResult,
 )
 from .swarm_team import (
@@ -61,7 +59,5 @@ __all__ = [
     "TaskResult",
     "TaskStatus",
     "TeamMember",
-    "ToolCallResult",
-    "ToolMessage",
     "ToolResult",
 ]

@@ -85,15 +85,11 @@ def create_team() -> SwarmTeam:
         A new SwarmTeam instance.
     """
     event_handler = SwarmEventHandler()
-    swarm = Swarm(
-        event_handler=event_handler,
-        include_usage=True,
-        include_cost=True,
-    )
+    swarm = Swarm(include_usage=True, include_cost=True)
 
     task_definitions = create_task_definitions()
     team_members = create_team_members()
-    planning_agent = create_planning_agent(swarm, task_definitions)
+    planning_agent = create_planning_agent(swarm, task_definitions, event_handler)
 
     team = SwarmTeam(
         swarm=swarm,

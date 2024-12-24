@@ -26,15 +26,15 @@ class SwarmEventHandler(Protocol):
         ```python
         class ConsoleEventHandler(SwarmEventHandler):
             async def on_event(self, event: SwarmEventType) -> None:
-                match event:
-                    case SwarmAgentResponseChunkEvent():
-                        if event.response.delta.content:
-                            print(event.response.delta.content, end="", flush=True)
-                    case SwarmAgentSwitchEvent():
+                match event.type:
+                    case "agent_response_chunk":
+                        if event.chunk.completion.delta.content:
+                            print(event.chunk.completion.delta.content, end="", flush=True)
+                    case "agent_switch":
                         print(f"\nSwitching to {event.current.id}")
-                    case SwarmErrorEvent():
+                    case "error":
                         print(f"\nError: {event.error}")
-                    case SwarmCompleteEvent():
+                    case "complete":
                         print("\nComplete!")
 
 
@@ -56,21 +56,15 @@ class SwarmEventHandler(Protocol):
         The handler should process the event quickly to avoid blocking the swarm.
 
         Args:
-            event: The event to process, which can be:
-                - SwarmCompletionResponseChunkEvent: Raw LLM response chunk
-                - SwarmAgentResponseChunkEvent: Processed agent response chunk
-                - SwarmToolCallEvent: Tool call by an agent
-                - SwarmAgentSwitchEvent: Agent transition
-                - SwarmErrorEvent: Error during execution
-                - SwarmCompleteEvent: Execution completion
+            event: The event to process.
 
         Example:
             ```python
             async def on_event(self, event: SwarmEventType) -> None:
-                match event:
-                    case SwarmAgentResponseChunkEvent():
-                        await self.process_response(event.response)
-                    case SwarmErrorEvent():
+                match event.type:
+                    case "agent_response_chunk":
+                        await self.process_response(event.chunk.completion)
+                    case "error":
                         await self.handle_error(event.error)
                     case _:
                         await self.process_other(event)
@@ -98,10 +92,10 @@ class LiteSwarmEventHandler(SwarmEventHandler):
         ```python
         class LoggingEventHandler(LiteSwarmEventHandler):
             async def on_event(self, event: SwarmEventType) -> None:
-                match event:
-                    case SwarmAgentResponseChunkEvent():
-                        print(f"Response: {event.response.delta.content}")
-                    case SwarmErrorEvent():
+                match event.type:
+                    case "agent_response_chunk":
+                        print(f"Response: {event.chunk.completion.delta.content}")
+                    case "error":
                         print(f"Error: {event.error}")
         ```
 

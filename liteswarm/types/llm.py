@@ -374,6 +374,38 @@ class LLM(BaseModel):
         extra="forbid",
     )
 
+    @field_serializer("tools")
+    def serialize_tools(
+        self,
+        tools: list[AgentTool] | None,
+    ) -> list[dict[str, str]] | None:
+        """Serialize tool functions for storage or transmission.
+
+        Captures essential metadata about each tool:
+        - name: Function name.
+        - doc: Function docstring.
+        - module: Module where function is defined.
+
+        Note that the actual function implementation cannot be serialized,
+        so tools will need to be provided again when recreating the LLM.
+
+        Returns:
+            List of tool metadata or None if no tools.
+        """
+        if not tools:
+            return None
+
+        tool_info: list[dict[str, str]] = []
+        for tool in tools:
+            info = {
+                "name": tool.__name__,
+                "doc": tool.__doc__ or "No description available",
+                "module": tool.__module__ or "<unknown>",
+            }
+            tool_info.append(info)
+
+        return tool_info
+
     @field_serializer("response_format")
     def serialize_response_format(
         self,
@@ -381,31 +413,44 @@ class LLM(BaseModel):
     ) -> dict[str, Any] | None:
         """Serialize response format for API requests.
 
-        Converts different format types into API-compatible representations:
-        - Pydantic models -> JSON schema.
-        - Pydantic instances -> JSON.
-        - Dict formats -> Pass through.
+        Handles different response format types:
+        - ResponseFormatBasic: Pass through (e.g., {"type": "text"})
+        - ResponseFormatJsonSchema: Pass through with schema
+        - type[BaseModel]: Convert to JSON schema
 
         Args:
             response_format: Format to serialize.
 
         Returns:
-            API-compatible format specification.
+            API-compatible format specification or None.
 
         Examples:
-            Model class to schema:
+            Basic format:
+                ```python
+                llm = LLM(response_format={"type": "text"})
+                ```
+
+            JSON schema format:
+                ```python
+                llm = LLM(
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": ResponseSchema(
+                            name="review",
+                            json_schema={"type": "object"},
+                        ),
+                    }
+                )
+                ```
+
+            Pydantic model format:
                 ```python
                 class Output(BaseModel):
                     value: int
                     details: str
 
 
-                llm = LLM(response_format=Output)
-                ```
-
-            Dict format:
-                ```python
-                llm = LLM(response_format={"type": "json_object"})
+                llm = LLM(response_format=Output)  # Converted to JSON schema
                 ```
         """
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):

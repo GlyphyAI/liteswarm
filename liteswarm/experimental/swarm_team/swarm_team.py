@@ -18,10 +18,10 @@ from liteswarm.experimental.swarm_team.response_repair import (
     ResponseRepairAgent,
 )
 from liteswarm.types.events import (
-    SwarmTeamPlanCompletedEvent,
-    SwarmTeamPlanCreatedEvent,
-    SwarmTeamTaskCompletedEvent,
-    SwarmTeamTaskStartedEvent,
+    PlanCompletedEvent,
+    PlanCreatedEvent,
+    TaskCompletedEvent,
+    TaskStartedEvent,
 )
 from liteswarm.types.exceptions import TaskExecutionError
 from liteswarm.types.swarm import ContextVariables
@@ -180,9 +180,9 @@ class SwarmTeam:
         swarm: Swarm,
         members: list[TeamMember],
         task_definitions: list[TaskDefinition],
-        event_handler: LiteSwarmEventHandler | None = None,
         planning_agent: PlanningAgent | None = None,
         response_repair_agent: ResponseRepairAgent | None = None,
+        event_handler: LiteSwarmEventHandler | None = None,
     ) -> None:
         """Initialize a new team.
 
@@ -190,10 +190,9 @@ class SwarmTeam:
             swarm: Swarm client for agent interactions.
             members: Team members with their capabilities.
             task_definitions: Task types the team can handle.
-            event_handler: Optional event handler for team events.
             planning_agent: Optional custom planning agent.
             response_repair_agent: Optional custom response repair agent.
-
+            event_handler: Optional event handler for team events.
         """
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
@@ -203,18 +202,32 @@ class SwarmTeam:
         # Public properties
         self.swarm = swarm
         self.members = {member.agent.id: member for member in members}
+        self.planning_agent = planning_agent or self._default_planning_agent(task_definitions)
+        self.response_repair_agent = response_repair_agent or self._default_response_repair_agent()
         self.event_handler = event_handler or LiteSwarmEventHandler()
-        self.planning_agent = planning_agent or LitePlanningAgent(
-            swarm=self.swarm,
-            task_definitions=task_definitions,
-        )
-        self.response_repair_agent = response_repair_agent or LiteResponseRepairAgent(
-            swarm=self.swarm,
-        )
 
     # ================================================
     # MARK: Internal Helpers
     # ================================================
+
+    def _default_planning_agent(self, task_definitions: list[TaskDefinition]) -> LitePlanningAgent:
+        """Create a default planning agent.
+
+        Args:
+            task_definitions: Task definitions to use for planning.
+
+        Returns:
+            Default planning agent.
+        """
+        return LitePlanningAgent(swarm=self.swarm, task_definitions=task_definitions)
+
+    def _default_response_repair_agent(self) -> LiteResponseRepairAgent:
+        """Create a default response repair agent.
+
+        Returns:
+            Default response repair agent.
+        """
+        return LiteResponseRepairAgent(swarm=self.swarm)
 
     def _get_team_capabilities(self, members: list[TeamMember]) -> dict[str, list[str]]:
         """Map task types to capable team members.
@@ -790,7 +803,7 @@ class SwarmTeam:
             context=context,
         )
 
-        await self.event_handler.on_event(SwarmTeamPlanCreatedEvent(plan=result))
+        await self.event_handler.on_event(PlanCreatedEvent(plan=result))
         return result
 
     async def execute_plan(
@@ -857,7 +870,7 @@ class SwarmTeam:
 
             artifact.status = ArtifactStatus.COMPLETED
             await self.event_handler.on_event(
-                SwarmTeamPlanCompletedEvent(
+                PlanCompletedEvent(
                     plan=plan,
                     artifact=artifact,
                 )
@@ -931,7 +944,7 @@ class SwarmTeam:
             )
 
         try:
-            await self.event_handler.on_event(SwarmTeamTaskStartedEvent(task=task))
+            await self.event_handler.on_event(TaskStartedEvent(task=task))
             task.status = TaskStatus.IN_PROGRESS
             task.assignee = assignee.agent.id
 
@@ -947,6 +960,7 @@ class SwarmTeam:
                 agent=assignee.agent,
                 prompt=task_instructions,
                 context_variables=task_context,
+                event_handler=self.event_handler,
             )
 
             if not result.content:
@@ -962,7 +976,7 @@ class SwarmTeam:
             )
 
             await self.event_handler.on_event(
-                SwarmTeamTaskCompletedEvent(
+                TaskCompletedEvent(
                     task=task,
                     task_result=task_result,
                     task_context=task_context,

@@ -16,5 +16,6 @@ class EventHandler(LiteSwarmEventHandler):
     @override
     async def on_event(self, event: SwarmEventType) -> None:
         if event.type == "agent_response_chunk":
-            if event.chunk.delta.content:
-                print(f"{event.chunk.delta.content}", end="", flush=True)
+            completion = event.chunk.completion
+            if content := completion.delta.content:
+                print(f"{content}", end="", flush=True)

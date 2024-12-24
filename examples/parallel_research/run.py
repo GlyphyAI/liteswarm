@@ -99,10 +99,11 @@ async def run() -> None:
         ),
     )
 
-    client = Swarm(event_handler=ConsoleEventHandler())
+    client = Swarm()
     result = await client.execute(
         agent=research_agent,
         prompt="Please analyze the city of Seattle and provide insights about its weather, population, tourism, and economy.",
+        event_handler=ConsoleEventHandler(),
     )
 
     print("\nFinal Analysis Complete!")

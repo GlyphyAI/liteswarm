@@ -4,7 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from liteswarm.core import Swarm
+from liteswarm.core import Swarm, SwarmEventHandler
 from liteswarm.experimental import LitePlanningAgent, PlanningAgent
 from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition, TaskStatus
 
@@ -156,7 +156,11 @@ def parse_planning_agent_response(response: str, context: ContextVariables) -> S
     return SoftwarePlan.model_validate(json_response)
 
 
-def create_planning_agent(swarm: Swarm, task_definitions: list[TaskDefinition]) -> PlanningAgent:
+def create_planning_agent(
+    swarm: Swarm,
+    task_definitions: list[TaskDefinition],
+    event_handler: SwarmEventHandler | None = None,
+) -> PlanningAgent:
     """Create a software planning agent."""
     agent = Agent(
         id="planner",
@@ -170,4 +174,5 @@ def create_planning_agent(swarm: Swarm, task_definitions: list[TaskDefinition]) 
         prompt_template=build_planning_agent_user_prompt,
         response_format=parse_planning_agent_response,
         task_definitions=task_definitions,
+        event_handler=event_handler,
     )

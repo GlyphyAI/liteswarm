@@ -11,6 +11,7 @@ import orjson
 from pydantic import ValidationError
 from typing_extensions import override
 
+from liteswarm.core.event_handler import SwarmEventHandler
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.experimental.swarm_team.response_repair import (
@@ -229,6 +230,7 @@ class LitePlanningAgent(PlanningAgent):
         task_definitions: list[TaskDefinition] | None = None,
         response_format: PlanResponseFormat | None = None,
         response_repair_agent: ResponseRepairAgent | None = None,
+        event_handler: SwarmEventHandler | None = None,
     ) -> None:
         """Initialize a new planner instance.
 
@@ -239,6 +241,7 @@ class LitePlanningAgent(PlanningAgent):
             task_definitions: Available task types.
             response_format: Optional plan response format.
             response_repair_agent: Optional custom response repair agent.
+            event_handler: Optional event handler for team events.
         """
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
@@ -249,6 +252,7 @@ class LitePlanningAgent(PlanningAgent):
         self.prompt_template = prompt_template or self._default_planning_prompt_template()
         self.response_format = response_format or self._default_planning_response_format()
         self.response_repair_agent = response_repair_agent or self._default_response_repair_agent()
+        self.event_handler = event_handler
 
     def _default_response_repair_agent(self) -> ResponseRepairAgent:
         """Create the default response repair agent for handling invalid planning responses.
@@ -829,6 +833,7 @@ class LitePlanningAgent(PlanningAgent):
             agent=self.agent,
             prompt=prompt,
             context_variables=context,
+            event_handler=self.event_handler,
         )
 
         return await self._process_planning_result(

@@ -10,7 +10,6 @@ from .event_handler import LiteSwarmEventHandler, SwarmEventHandler
 from .message_index import LiteMessageIndex, MessageIndex
 from .message_store import LiteMessageStore, MessageStore
 from .swarm import Swarm
-from .swarm_stream import SwarmStream
 
 __all__ = [
     "ConsoleEventHandler",
@@ -24,5 +23,4 @@ __all__ = [
     "MessageStore",
     "Swarm",
     "SwarmEventHandler",
-    "SwarmStream",
 ]
