@@ -70,25 +70,7 @@ class SwarmAgentResponseChunkEvent(SwarmEvent):
     """Processed agent response chunk."""
 
 
-class SwarmToolCallEvent(SwarmEvent):
-    """Event emitted when an agent initiates a tool call.
-
-    Called when an agent makes a tool call, before the tool is executed.
-    Used for logging or monitoring tool usage, validating calls, or
-    preparing for tool execution.
-    """
-
-    type: Literal["tool_call"] = "tool_call"
-    """Discriminator field."""
-
-    agent: Agent
-    """Agent making the tool call."""
-
-    tool_call: ChatCompletionDeltaToolCall
-    """Details of the tool being called."""
-
-
-class SwarmToolCallResultEvent(SwarmEvent):
+class ToolCallResultEvent(SwarmEvent):
     """Event emitted when a tool call execution completes.
 
     Called after a tool finishes execution, with either a result or error.
