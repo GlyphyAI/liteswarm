@@ -123,22 +123,38 @@ The Message Store is responsible for managing conversation history and message p
 
 Example usage:
 ```python
-from liteswarm.core import Swarm
+import asyncio
+
 from liteswarm.core.message_store import LiteMessageStore
 from liteswarm.types import Message
 
-# Create a message store
-message_store = LiteMessageStore()
 
-# Add messages
-message_store.add_message(Message(role="user", content="Hello!"))
+async def main() -> None:
+    # Create a message store
+    message_store = LiteMessageStore()
 
-# Get conversation history
-messages = message_store.get_messages()
+    # Add messages to the message store
+    await message_store.add_messages(
+        [
+            Message(role="user", content="Hello!"),
+            Message(role="assistant", content="Hello! How can I help you today?"),
+        ]
+    )
 
-# Use with Swarm
-swarm = Swarm(message_store=message_store)
+    # Get all messages in the message store
+    messages = await message_store.get_messages()
+
+    # Display results
+    print("Messages:")
+    for message in messages:
+        print(f"- {message.content}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+See [MessageStore](liteswarm/core/message_store.py) for more details.
 
 ### Message Index
 
@@ -152,20 +168,52 @@ The Message Index provides semantic search capabilities over conversation histor
 
 Example usage:
 ```python
-from liteswarm.core.message_index import LiteMessageIndex
+import asyncio
 
-# Create an index
-index = LiteMessageIndex()
+from liteswarm.core import LiteMessageIndex
+from liteswarm.types import Message, MessageRecord
 
-# Add messages to index
-index.add_messages(messages)
 
-# Find relevant messages
-relevant = await index.search(
-    query="project requirements",
-    max_results=5,
-)
+async def main() -> None:
+    # Create an index
+    index = LiteMessageIndex()
+
+    # Prepare chat messages for indexing
+    # fmt: off
+    messages = [
+        Message(role="user", content="Can you help me with setting up a development environment?"),
+        Message(role="assistant", content="Sure! What kind of development environment are you working on?"),
+        Message(role="user", content="I want to set up a Flutter development environment."),
+        Message(role="assistant", content="To set up Flutter, you’ll need to install Flutter SDK, an IDE like VS Code or Android Studio, and ensure you have the required tools for your platform."),
+        Message(role="user", content="What are the system requirements for running Flutter?"),
+        Message(role="assistant", content="The system requirements depend on your operating system. For example, on macOS, you need macOS 10.14 or later and Xcode installed."),
+    ]
+    # fmt: on
+
+    # Convert messages to MessageRecord
+    chat_messages = [MessageRecord.from_message(message) for message in messages]
+
+    # Add messages to index
+    await index.index(chat_messages)
+
+    # Find relevant messages
+    relevant_messages = await index.search(
+        query="system requirements for Flutter",
+        max_results=10,
+        score_threshold=0.6,
+    )
+
+    # Display the results
+    print("Relevant messages:")
+    for message, score in relevant_messages:
+        print(f"- {message.content} (score: {score:.2f})")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
+
+See [MessageIndex](liteswarm/core/message_index.py) for more details.
 
 ### Context Manager
 
@@ -179,25 +227,57 @@ The Context Manager optimizes conversation context to prevent token limits and i
 
 Example usage:
 ```python
-from liteswarm.core import Swarm
-from liteswarm.core.context_manager import (
-    LiteContextManager,
-    LiteOptimizationStrategy,
-)
+import asyncio
 
-# Create context manager
-context_manager = LiteContextManager()
+from liteswarm.core import LiteContextManager, LiteMessageStore
+from liteswarm.types import Message
+from liteswarm.types.context_manager import RAGStrategyConfig
 
-# Optimize context
-optimized = await context_manager.optimize(
-    messages=messages,
-    model="gpt-4o",
-    strategy="rag",
-    query="latest project updates",
-)
 
-# Use with Swarm
-swarm = Swarm(context_manager=context_manager)
+async def main() -> None:
+    # Create message store that the context manager will use
+    message_store = LiteMessageStore()
+
+    # Add messages to the message store
+    # fmt: off
+    await message_store.add_messages(
+        [
+            Message(role="user", content="Hi there!"),
+            Message(role="assistant", content="Hello! How can I assist you today?"),
+            Message(role="user", content="Can you tell me the weather in London?"),
+            Message(role="assistant", content="Sure! The weather in London is currently sunny with a high of 20°C."),
+            Message(role="user", content="Thanks! How about Paris?"),
+            Message(role="assistant", content="You're welcome! The weather in Paris is cloudy with occasional rain showers and a high of 15°C."),
+            Message(role="user", content="What should I pack for a trip to both cities?"),
+            Message(role="assistant", content="For London, pack light layers and sunglasses. For Paris, consider bringing an umbrella and a warm jacket."),
+            Message(role="user", content="Got it. What are some must-see attractions in both cities?"),
+            Message(role="assistant", content="In London, visit the Tower of London and Buckingham Palace. In Paris, don't miss the Eiffel Tower and the Louvre Museum."),
+        ]
+    )
+    # fmt: on
+
+    # Create context manager
+    context_manager = LiteContextManager(message_store=message_store)
+
+    # Optimize context using RAG strategy
+    optimized_context = await context_manager.optimize_context(
+        model="gpt-4o",
+        strategy="rag",
+        rag_config=RAGStrategyConfig(
+            query="weather in London",
+            max_messages=10,
+            score_threshold=0.6,
+        ),
+    )
+
+    # Display optimized context
+    print("Optimized context:")
+    for message in optimized_context:
+        print(f"{message.role}: {message.content}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
 
 The Context Manager supports several optimization strategies:
@@ -218,6 +298,8 @@ context_manager = LiteContextManager(
     default_embedding_model="text-embedding-3-small",  # Default model for embeddings
 )
 ```
+
+See [ContextManager](liteswarm/core/context_manager.py) for more details.
 
 ## Basic Usage
 
@@ -1418,16 +1500,16 @@ async def main() -> None:
     )
 
     # 4. Create agents
-    review_agent = Agent(
-        id="code-reviewer",
-        instructions="You are an expert code reviewer.",
-        llm=LLM(model="gpt-4o", response_format=CodeReviewOutput),
-    )
-
     planning_agent = Agent(
         id="planning-agent",
         instructions="You are a planning agent that creates plans for code review tasks.",
         llm=LLM(model="gpt-4o", response_format=CodeReviewPlan),
+    )
+
+    review_agent = Agent(
+        id="code-reviewer",
+        instructions="You are an expert code reviewer.",
+        llm=LLM(model="gpt-4o", response_format=CodeReviewOutput),
     )
 
     # 5. Create team members
@@ -1439,7 +1521,7 @@ async def main() -> None:
 
     # 6. Set up swarm team
     event_handler = ConsoleEventHandler()
-    swarm = Swarm(event_handler=event_handler)
+    swarm = Swarm()
     team = SwarmTeam(
         swarm=swarm,
         members=[review_member],
@@ -1451,6 +1533,7 @@ async def main() -> None:
             prompt_template=build_review_prompt,
             task_definitions=[review_def],
             response_format=CodeReviewPlan,
+            event_handler=event_handler,
         ),
     )
 
