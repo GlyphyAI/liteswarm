@@ -22,6 +22,7 @@ from liteswarm.core.context_manager import (
 from liteswarm.core.message_store import MessageStore
 from liteswarm.core.swarm import Swarm
 from liteswarm.repl.event_handler import ReplEventHandler
+from liteswarm.types.context_manager import RAGStrategyConfig
 from liteswarm.types.swarm import Agent, Message, ResponseCost, Usage
 from liteswarm.utils.logging import enable_logging as liteswarm_enable_logging
 from liteswarm.utils.messages import dump_messages, validate_messages
@@ -582,7 +583,11 @@ class AgentRepl:
             optimized = await self.swarm.context_manager.optimize_context(
                 model=parsed.model or self.agent.llm.model,
                 strategy=parsed.strategy,
-                query=parsed.query,
+                rag_config=RAGStrategyConfig(
+                    query=parsed.query,
+                    max_messages=10,
+                    score_threshold=0.5,
+                ),
             )
 
             # Update memory
