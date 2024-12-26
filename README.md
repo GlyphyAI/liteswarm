@@ -16,6 +16,7 @@ The framework is LLM-agnostic and supports 100+ language models through [litellm
 - [Key Features](#key-features)
 - [Core Components](#core-components)
 - [Basic Usage](#basic-usage)
+- [Event Streaming](#event-streaming)
 - [Advanced Features](#advanced-features)
 - [Key Concepts](#key-concepts)
 - [Best Practices](#best-practices)
@@ -104,7 +105,7 @@ See [litellm's documentation](https://docs.litellm.ai/docs/providers) for a comp
 - **Tool Integration**: Easy integration of Python functions as agent tools
 - **Structured Outputs**: Built-in support for validating and parsing agent responses
 - **Multi-Agent Teams**: Coordinate multiple specialized agents for complex tasks
-- **Streaming Support**: Real-time response streaming with customizable handlers
+- **Event Streaming**: Real-time streaming of agent responses, tool calls, and other events
 - **Context Management**: Smart handling of conversation history and context
 - **Cost Tracking**: Optional tracking of token usage and API costs
 
@@ -292,6 +293,226 @@ async def main() -> None:
 if __name__ == "__main__":
     asyncio.run(main())
 ```
+
+## Event Streaming
+
+LiteSwarm provides a powerful event streaming API that allows real-time monitoring of agent interactions:
+
+```python
+import asyncio
+
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent
+
+
+async def main() -> None:
+    agent = Agent(
+        id="assistant",
+        instructions="You are a helpful assistant.",
+        llm=LLM(model="gpt-4o"),
+    )
+
+    swarm = Swarm()
+    stream = swarm.stream(agent, prompt="Hello!")
+
+    # Method 1: Process events with if/else branching
+    async for event in stream:
+        if event.type == "agent_response_chunk":
+            # Handle content updates
+            if content := event.chunk.completion.delta.content:
+                print(content, end="", flush=True)
+            # Handle completion
+            if event.chunk.completion.finish_reason:
+                print("\nFinished:", event.chunk.completion.finish_reason)
+        elif event.type == "agent_switch":
+            # Handle agent switching
+            prev_id = event.previous.id if event.previous else "None"
+            print(f"\nSwitching from {prev_id} to {event.current.id}")
+        elif event.type == "tool_call_result":
+            # Handle tool execution results
+            print(f"\nTool result: {event.tool_call_result.result}")
+        elif event.type == "error":
+            # Handle errors
+            print(f"\nError: {event.error}")
+
+    # Get final result after streaming
+    result = await stream.get_result()
+    print(f"\nFinal result: {result.content}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Event Types
+
+LiteSwarm emits several types of events during execution:
+
+* **AgentResponseChunkEvent**:
+   - Content updates from the agent
+   - Completion status and reason
+   - Usage statistics and cost info
+
+* **AgentSwitchEvent**:
+   - Previous and current agent IDs
+   - Switching context and reason
+
+* **ToolCallResultEvent**:
+   - Tool execution results
+   - Tool call metadata
+   - Execution status
+
+* **ErrorEvent**:
+   - Error details and type
+   - Agent context
+   - Stack trace if available
+
+* **CompleteEvent**:
+   - Final conversation state
+   - Complete message history
+   - Execution metadata
+
+See [SwarmEventType](liteswarm/types/events.py) for more details.
+
+### Custom Event Handlers
+
+You can create custom event handlers for more sophisticated event processing:
+
+```python
+import asyncio
+
+from typing_extensions import override
+
+from liteswarm.core import Swarm, SwarmEventHandler
+from liteswarm.types import LLM, Agent, SwarmEventType
+
+
+class CustomHandler(SwarmEventHandler):
+    @override
+    async def on_event(self, event: SwarmEventType) -> None:
+        if event.type == "agent_response_chunk":
+            # Process content updates
+            if content := event.chunk.completion.delta.content:
+                print(content, end="", flush=True)
+
+            # Track completion
+            if event.chunk.completion.finish_reason:
+                print(f"\nFinished: {event.chunk.completion.finish_reason}")
+
+        elif event.type == "agent_switch":
+            # Log agent switches
+            prev_id = event.previous.id if event.previous else "None"
+            print(f"\nSwitching agents: {prev_id} -> {event.current.id}")
+
+        elif event.type == "tool_call_result":
+            # Process tool results
+            print(f"\nTool executed: {event.tool_call_result.tool_call.function.name}")
+            print(f"Result: {event.tool_call_result.result}")
+
+        elif event.type == "error":
+            # Handle errors
+            print(f"\nError occurred: {event.error}")
+
+        elif event.type == "complete":
+            # Process completion
+            print("\nExecution completed")
+            print(f"Messages: {len(event.messages)}")
+
+
+async def main() -> None:
+    agent = Agent(
+        id="assistant",
+        instructions="You are a helpful assistant.",
+        llm=LLM(model="gpt-4o"),
+    )
+
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent=agent,
+        prompt="Hello!",
+        event_handler=CustomHandler(),
+    )
+
+    print(f"\n\nResult: {result.model_dump_json(indent=2, exclude_none=True)}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Streaming with Result Collection
+
+The `stream()` method returns an `AsyncStream` that supports both event streaming and result collection:
+
+```python
+import asyncio
+
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent
+
+
+async def main() -> None:
+    agent = Agent(
+        id="assistant",
+        instructions="You are a helpful assistant.",
+        llm=LLM(model="gpt-4o"),
+    )
+
+    swarm = Swarm(
+        include_usage=True,
+        include_cost=True,
+    )
+
+    # Stream events and collect result
+    stream = swarm.stream(agent, prompt="Hello!")
+
+    # Process events during execution
+    async for event in stream:
+        if event.type == "agent_response_chunk":
+            print(event.chunk.completion.delta.content, end="", flush=True)
+
+    # Get final result after completion
+    result = await stream.get_result()
+    print(f"\nFinal content: {result.content}")
+
+    # Access metadata
+    if result.usage:
+        print(f"Tokens used: {result.usage.total_tokens}")
+
+    if result.response_cost:
+        prompt_cost = result.response_cost.prompt_tokens_cost
+        completion_cost = result.response_cost.completion_tokens_cost
+        total_cost = prompt_cost + completion_cost
+        print(f"Cost: ${total_cost}")
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+### Event-Driven Architecture
+
+LiteSwarm's event system enables:
+
+1. **Real-time Updates**:
+   - Stream content as it's generated
+   - Monitor agent state changes
+   - Track tool execution progress
+
+2. **Custom Processing**:
+   - Filter and transform events
+   - Implement custom logging
+   - Build interactive UIs
+
+3. **Error Handling**:
+   - Catch and process errors
+   - Implement recovery strategies
+   - Monitor execution health
+
+4. **Progress Tracking**:
+   - Monitor token usage
+   - Track execution costs
+   - Measure response times
 
 ## Advanced Features
 
@@ -605,9 +826,9 @@ The SwarmTeam will:
 
 See the [software_team example](examples/software_team/run.py) for a complete implementation of a development team workflow.
 
-### Streaming Responses
+### Streaming with Structured Outputs
 
-LiteSwarm provides flexible response handling through `SwarmStream`, which supports both real-time streaming and final result collection. Here's a complete example showcasing streaming with structured outputs:
+LiteSwarm provides two layers of structured output handling with real-time streaming support:
 
 ```python
 import asyncio
@@ -644,15 +865,19 @@ async def main() -> None:
 
     # Method 1: Stream responses and handle parsed content
     print("Streaming responses:")
-    async for response in stream:
-        # Handle raw content
-        if response.delta.content is not None:
-            print(response.delta.content, end="", flush=True)
+    async for event in stream:
+        if event.type == "agent_response_chunk":
+            response_chunk = event.chunk
+            completion = response_chunk.completion
 
-        # Handle structured outputs
-        if isinstance(response.parsed_content, EntitiesModel):
-            print("\nParsed content:")
-            print(response.parsed_content.model_dump_json(indent=2))
+            # Handle raw content
+            if completion.delta.content is not None:
+                print(completion.delta.content, end="", flush=True)
+
+            # Handle structured outputs
+            if isinstance(response_chunk.parsed_content, EntitiesModel):
+                print("\nParsed content:")
+                print(response_chunk.parsed_content.model_dump_json(indent=2))
 
     # Method 2: Get final result with parsed content
     result = await stream.get_result()
@@ -661,7 +886,11 @@ async def main() -> None:
         print(result.parsed_content.model_dump_json(indent=2))
 
     # Method 3: Direct execution with structured output
-    print("\nDirect execution:")
+    print("\n\n")
+    print("=" * 80)
+    print("Direct execution:")
+    print("=" * 80)
+
     result = await swarm.execute(
         agent,
         prompt="The quick brown fox jumps over the lazy dog with piercing blue eyes",
@@ -678,22 +907,29 @@ if __name__ == "__main__":
 
 The example demonstrates:
 
-1. **Structured Output Models**: Define Pydantic models for response formats
-   - `EntitiesModel` for extracting attributes, colors, and animals
+1. **Real-time Content Streaming**: 
+   - Stream raw content as it's generated
+   - Access structured output when parsing completes
+   - Handle both raw and parsed content in same stream
 
-2. **Agent Configuration**: Set up agent with structured output
-   - Configure agent with `response_format=EntitiesModel`
-   - Enable automatic parsing of responses
+2. **Structured Output Handling**:
+   - Define output schema with Pydantic
+   - Configure agent with response format
+   - Access parsed content through events
 
-3. **Response Handling**: Process both raw and structured content
-   - Stream parsed content as it arrives
-   - Access raw content through deltas
-   - Get final structured results
+3. **Multiple Access Methods**:
+   - Stream events for real-time updates
+   - Get final result for complete response
+   - Access both raw and parsed content
 
-The output will show:
-- Extracted entities in JSON format
-- Raw content as it streams
-- Final parsed results
+The streaming API provides:
+- `event.chunk.completion.delta.content`: Raw content updates
+- `event.chunk.parsed_content`: Parsed structured output
+- `event.chunk.completion.finish_reason`: Completion status
+- `event.chunk.completion.usage`: Token usage statistics
+- `event.chunk.completion.response_cost`: Cost tracking (if enabled)
+
+See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for more examples of different structured output strategies.
 
 ### Error Handling
 
@@ -1321,10 +1557,44 @@ See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for
 
 4. Leverage event handlers for real-time feedback:
    ```python
+   from typing_extensions import override
+   
+   from liteswarm.core import Swarm, SwarmEventHandler
+   from liteswarm.types import LLM, Agent, SwarmEventType
+
+   # Method 1: Custom event handler class
    class MyEventHandler(SwarmEventHandler):
+       @override
        async def on_event(self, event: SwarmEventType) -> None:
-            if event.type == "agent_response_chunk":
-                print(event.chunk.delta.content, end="", flush=True)
+           if event.type == "agent_response_chunk":
+               # Handle content updates
+               if content := event.chunk.completion.delta.content:
+                   print(content, end="", flush=True)
+               # Track completion
+               if event.chunk.completion.finish_reason:
+                   print(f"\nFinished: {event.chunk.completion.finish_reason}")
+           elif event.type == "tool_call_result":
+               print(f"\nTool executed: {event.tool_call_result.tool_call.function.name}")
+           elif event.type == "error":
+               print(f"\nError: {event.error}")
+
+   # Use with execute() method
+   result = await swarm.execute(
+       agent=agent,
+       prompt="Hello!",
+       event_handler=MyEventHandler(),
+   )
+
+   # Method 2: Direct stream processing
+   stream = swarm.stream(agent, prompt="Hello!")
+   async for event in stream:
+       if event.type == "agent_response_chunk":
+           print(event.chunk.completion.delta.content, end="", flush=True)
+       elif event.type == "tool_call_result":
+           print(f"\nTool: {event.tool_call_result.tool_call.function.name}")
+
+   # Get final result after streaming
+   result = await stream.get_result()
    ```
 
 ## Examples
