@@ -37,7 +37,11 @@ class ReplEventHandler(ConsoleEventHandler):
     Example:
         ```python
         handler = ReplEventHandler()
-        swarm = Swarm(event_handler=handler)
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=handler,
+        )
 
         # Handler will automatically format output:
         # [agent_id] This is a response...

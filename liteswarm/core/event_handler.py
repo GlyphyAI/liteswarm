@@ -37,8 +37,18 @@ class SwarmEventHandler(Protocol):
                     print("\nComplete!")
 
 
-        # Use in Swarm
-        swarm = Swarm(event_handler=ConsoleEventHandler())
+        # Use with execute() method
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=ConsoleEventHandler(),
+        )
+
+        # Or use streaming API directly
+        stream = swarm.stream(agent, prompt="Hello!")
+        async for event in stream:
+            if event.type == "agent_response_chunk":
+                print(event.chunk.completion.delta.content, end="", flush=True)
         ```
 
     Notes:
@@ -94,6 +104,14 @@ class LiteSwarmEventHandler(SwarmEventHandler):
                     print(f"Response: {event.chunk.completion.delta.content}")
                 elif event.type == "error":
                     print(f"Error: {event.error}")
+
+
+        # Use with execute() method
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=LoggingEventHandler(),
+        )
         ```
 
     Notes:
@@ -126,13 +144,11 @@ class SwarmEventGenerator(SwarmEventHandler):
     Example:
         ```python
         generator = SwarmEventGenerator()
-        swarm = Swarm(event_handler=generator)
-
-        async for event in generator:
-            if event.type == "agent_response_chunk":
-                print(event.chunk.completion.delta.content)
-            elif event.type == "error":
-                print(f"Error: {event.error}")
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=generator,
+        )
         ```
 
     Notes:

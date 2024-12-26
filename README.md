@@ -376,8 +376,21 @@ See [SwarmEvent page](liteswarm/types/events.py) for more details.
 
 ### Custom Event Handlers
 
-You can create custom event handlers for more sophisticated event processing:
+You can create custom event handlers for more sophisticated event processing. There are two main ways to handle events:
 
+1. Using the streaming API directly (recommended for most cases):
+```python
+stream = swarm.stream(agent, prompt="Hello!")
+async for event in stream:
+    if event.type == "agent_response_chunk":
+        print(event.chunk.completion.delta.content, end="", flush=True)
+    elif event.type == "tool_call_result":
+        print(f"\nTool: {event.tool_call_result.tool_call.function.name}")
+    elif event.type == "error":
+        print(f"\nError: {event.error}")
+```
+
+2. Using a custom event handler with `execute()` (useful for advanced event handling or non-async contexts):
 ```python
 import asyncio
 
@@ -442,7 +455,7 @@ if __name__ == "__main__":
 
 ### Streaming with Result Collection
 
-The `stream()` method returns an `AsyncStream` that supports both event streaming and result collection:
+The `stream()` method returns an async generator that supports both event streaming and result collection:
 
 ```python
 import asyncio
