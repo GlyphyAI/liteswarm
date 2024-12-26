@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.4.0 (2024-12-26)
+
+### Added
+- ReturnableAsyncGenerator for unified event streaming API
+- RAG strategy configuration type for better context optimization control
+- Tool call result field for improved result handling
+- Serialization support for agent instructions and LLM tools
+
+### Changed
+- Refactored event streaming architecture with cleaner separation of concerns
+- Embedded completion response into agent response model for better encapsulation
+- Renamed event models to remove redundant "Swarm" prefix
+- Removed SwarmStream in favor of ReturnableAsyncGenerator
+- Updated event handler to use new streaming API
+- Improved documentation with up-to-date examples for core components
+
+### Removed
+- Deprecated SwarmStream module
+- Redundant tool call event in favor of result-only events
+
+[0.4.0]: https://github.com/glyphyai/liteswarm/releases/tag/0.4.0
+
 ## 0.3.0 (2024-12-23)
 
 ### Added

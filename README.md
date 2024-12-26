@@ -1816,7 +1816,7 @@ If you use LiteSwarm in your research or project, please cite our work:
     year = {2024},
     url = {https://github.com/glyphyai/liteswarm},
     license = {MIT},
-    version = {0.3.0}
+    version = {0.4.0}
 }
 ```
 
