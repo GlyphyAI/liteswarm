@@ -7,14 +7,15 @@
 from typing_extensions import override
 
 from liteswarm.core import LiteSwarmEventHandler
-from liteswarm.types import SwarmEventType
+from liteswarm.types import SwarmEvent
 
 
 class EventHandler(LiteSwarmEventHandler):
     """Custom event handler for displaying LLM responses."""
 
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         if event.type == "agent_response_chunk":
-            if event.chunk.delta.content:
-                print(f"{event.chunk.delta.content}", end="", flush=True)
+            completion = event.chunk.completion
+            if content := completion.delta.content:
+                print(f"{content}", end="", flush=True)

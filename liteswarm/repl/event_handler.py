@@ -5,12 +5,11 @@ from typing_extensions import override
 
 from liteswarm.core.console_handler import ConsoleEventHandler
 from liteswarm.types.events import (
-    SwarmAgentResponseChunkEvent,
-    SwarmAgentSwitchEvent,
-    SwarmCompleteEvent,
-    SwarmErrorEvent,
-    SwarmToolCallEvent,
-    SwarmToolCallResultEvent,
+    AgentResponseChunkEvent,
+    AgentSwitchEvent,
+    CompleteEvent,
+    ErrorEvent,
+    ToolCallResultEvent,
 )
 
 if TYPE_CHECKING:
@@ -38,7 +37,11 @@ class ReplEventHandler(ConsoleEventHandler):
     Example:
         ```python
         handler = ReplEventHandler()
-        swarm = Swarm(event_handler=handler)
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=handler,
+        )
 
         # Handler will automatically format output:
         # [agent_id] This is a response...
@@ -64,16 +67,17 @@ class ReplEventHandler(ConsoleEventHandler):
         self._last_agent: Agent | None = None
 
     @override
-    async def _handle_response(self, event: SwarmAgentResponseChunkEvent) -> None:
+    async def _handle_response(self, event: AgentResponseChunkEvent) -> None:
         """Handle agent response events.
 
         Args:
             event: Response event to handle.
         """
-        if event.chunk.finish_reason == "length":
+        completion = event.chunk.completion
+        if completion.finish_reason == "length":
             print("\n[...continuing...]", end="", flush=True)
 
-        if content := event.chunk.delta.content:
+        if content := completion.delta.content:
             # Only print agent ID prefix for the first character of a new message
             if self._last_agent != event.chunk.agent:
                 agent_id = event.chunk.agent.id
@@ -83,11 +87,11 @@ class ReplEventHandler(ConsoleEventHandler):
             print(content, end="", flush=True)
 
         # Always ensure a newline at the end of a complete response
-        if event.chunk.finish_reason:
+        if completion.finish_reason:
             print("", flush=True)
 
     @override
-    async def _handle_error(self, event: SwarmErrorEvent) -> None:
+    async def _handle_error(self, event: ErrorEvent) -> None:
         """Handle error events.
 
         Args:
@@ -98,7 +102,7 @@ class ReplEventHandler(ConsoleEventHandler):
         self._last_agent = None
 
     @override
-    async def _handle_agent_switch(self, event: SwarmAgentSwitchEvent) -> None:
+    async def _handle_agent_switch(self, event: AgentSwitchEvent) -> None:
         """Handle agent switch events.
 
         Args:
@@ -109,31 +113,20 @@ class ReplEventHandler(ConsoleEventHandler):
         print(f"\n🔄 Switching from {prev_id} to {curr_id}...")
 
     @override
-    async def _handle_tool_call(self, event: SwarmToolCallEvent) -> None:
-        """Handle tool call events.
-
-        Args:
-            event: Tool call event to handle.
-        """
-        agent_id = event.agent.id
-        tool_name = event.tool_call.function.name
-        tool_id = event.tool_call.id
-        print(f"\n🔧 [{agent_id}] Tool '{tool_name}' [{tool_id}] is being called...")
-
-    @override
-    async def _handle_tool_call_result(self, event: SwarmToolCallResultEvent) -> None:
+    async def _handle_tool_call_result(self, event: ToolCallResultEvent) -> None:
         """Handle tool result events.
 
         Args:
             event: Tool result event to handle.
         """
         agent_id = event.agent.id
-        tool_name = event.tool_call.function.name
-        tool_id = event.tool_call.id
-        print(f"\n📎 [{agent_id}] Tool '{tool_name}' [{tool_id}] completed")
+        tool_call = event.tool_call_result.tool_call
+        tool_name = tool_call.function.name
+        tool_id = tool_call.id
+        print(f"\n📎 [{agent_id}] Tool '{tool_name}' [{tool_id}] called")
 
     @override
-    async def _handle_complete(self, event: SwarmCompleteEvent) -> None:
+    async def _handle_complete(self, event: CompleteEvent) -> None:
         """Handle completion events.
 
         Args:

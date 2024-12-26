@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 
 from typing_extensions import Protocol, override
 
-from liteswarm.types.events import SwarmEventType
+from liteswarm.types.events import SwarmEvent
 
 
 class SwarmEventHandler(Protocol):
@@ -25,21 +25,30 @@ class SwarmEventHandler(Protocol):
     Example:
         ```python
         class ConsoleEventHandler(SwarmEventHandler):
-            async def on_event(self, event: SwarmEventType) -> None:
-                match event:
-                    case SwarmAgentResponseChunkEvent():
-                        if event.response.delta.content:
-                            print(event.response.delta.content, end="", flush=True)
-                    case SwarmAgentSwitchEvent():
-                        print(f"\nSwitching to {event.current.id}")
-                    case SwarmErrorEvent():
-                        print(f"\nError: {event.error}")
-                    case SwarmCompleteEvent():
-                        print("\nComplete!")
+            async def on_event(self, event: SwarmEvent) -> None:
+                if event.type == "agent_response_chunk":
+                    if event.chunk.completion.delta.content:
+                        print(event.chunk.completion.delta.content, end="", flush=True)
+                elif event.type == "agent_switch":
+                    print(f"\nSwitching to {event.current.id}")
+                elif event.type == "error":
+                    print(f"\nError: {event.error}")
+                elif event.type == "complete":
+                    print("\nComplete!")
 
 
-        # Use in Swarm
-        swarm = Swarm(event_handler=ConsoleEventHandler())
+        # Use with execute() method
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=ConsoleEventHandler(),
+        )
+
+        # Or use streaming API directly
+        stream = swarm.stream(agent, prompt="Hello!")
+        async for event in stream:
+            if event.type == "agent_response_chunk":
+                print(event.chunk.completion.delta.content, end="", flush=True)
         ```
 
     Notes:
@@ -49,31 +58,24 @@ class SwarmEventHandler(Protocol):
         - Events carry full context
     """
 
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """Handle an event from the swarm.
 
         This method is called by the swarm when an event occurs.
         The handler should process the event quickly to avoid blocking the swarm.
 
         Args:
-            event: The event to process, which can be:
-                - SwarmCompletionResponseChunkEvent: Raw LLM response chunk
-                - SwarmAgentResponseChunkEvent: Processed agent response chunk
-                - SwarmToolCallEvent: Tool call by an agent
-                - SwarmAgentSwitchEvent: Agent transition
-                - SwarmErrorEvent: Error during execution
-                - SwarmCompleteEvent: Execution completion
+            event: The event to process.
 
         Example:
             ```python
-            async def on_event(self, event: SwarmEventType) -> None:
-                match event:
-                    case SwarmAgentResponseChunkEvent():
-                        await self.process_response(event.response)
-                    case SwarmErrorEvent():
-                        await self.handle_error(event.error)
-                    case _:
-                        await self.process_other(event)
+            async def on_event(self, event: SwarmEvent) -> None:
+                if event.type == "agent_response_chunk":
+                    await self.process_response(event.chunk.completion)
+                elif event.type == "error":
+                    await self.handle_error(event.error)
+                else:
+                    await self.process_other(event)
             ```
 
         Notes:
@@ -97,12 +99,19 @@ class LiteSwarmEventHandler(SwarmEventHandler):
     Example:
         ```python
         class LoggingEventHandler(LiteSwarmEventHandler):
-            async def on_event(self, event: SwarmEventType) -> None:
-                match event:
-                    case SwarmAgentResponseChunkEvent():
-                        print(f"Response: {event.response.delta.content}")
-                    case SwarmErrorEvent():
-                        print(f"Error: {event.error}")
+            async def on_event(self, event: SwarmEvent) -> None:
+                if event.type == "agent_response_chunk":
+                    print(f"Response: {event.chunk.completion.delta.content}")
+                elif event.type == "error":
+                    print(f"Error: {event.error}")
+
+
+        # Use with execute() method
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=LoggingEventHandler(),
+        )
         ```
 
     Notes:
@@ -113,7 +122,7 @@ class LiteSwarmEventHandler(SwarmEventHandler):
     """
 
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """No-op implementation of event handling.
 
         Args:
@@ -135,14 +144,11 @@ class SwarmEventGenerator(SwarmEventHandler):
     Example:
         ```python
         generator = SwarmEventGenerator()
-        swarm = Swarm(event_handler=generator)
-
-        async for event in generator:
-            match event:
-                case SwarmAgentResponseChunkEvent():
-                    print(event.response.delta.content)
-                case SwarmErrorEvent():
-                    print(f"Error: {event.error}")
+        result = await swarm.execute(
+            agent=agent,
+            prompt="Hello!",
+            event_handler=generator,
+        )
         ```
 
     Notes:
@@ -160,10 +166,10 @@ class SwarmEventGenerator(SwarmEventHandler):
                 Defaults to 100. Set to 0 for unbounded buffer.
         """
         self._buffer_size = buffer_size
-        self._events: list[SwarmEventType] = []
+        self._events: list[SwarmEvent] = []
         self._closed: bool = False
 
-    def __aiter__(self) -> AsyncGenerator[SwarmEventType, None]:
+    def __aiter__(self) -> AsyncGenerator[SwarmEvent, None]:
         """Get async iterator for events.
 
         Returns:
@@ -172,7 +178,7 @@ class SwarmEventGenerator(SwarmEventHandler):
         return self.stream()
 
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """Handle an event from the swarm.
 
         Args:
@@ -191,7 +197,7 @@ class SwarmEventGenerator(SwarmEventHandler):
 
         self._events.append(event)
 
-    async def stream(self) -> AsyncGenerator[SwarmEventType, None]:
+    async def stream(self) -> AsyncGenerator[SwarmEvent, None]:
         """Stream events from the generator.
 
         Yields:

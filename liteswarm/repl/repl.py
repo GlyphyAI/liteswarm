@@ -22,6 +22,7 @@ from liteswarm.core.context_manager import (
 from liteswarm.core.message_store import MessageStore
 from liteswarm.core.swarm import Swarm
 from liteswarm.repl.event_handler import ReplEventHandler
+from liteswarm.types.context_manager import RAGStrategyConfig
 from liteswarm.types.swarm import Agent, Message, ResponseCost, Usage
 from liteswarm.utils.logging import enable_logging as liteswarm_enable_logging
 from liteswarm.utils.messages import dump_messages, validate_messages
@@ -110,7 +111,6 @@ class AgentRepl:
         # Public configuration
         self.agent = agent
         self.swarm = Swarm(
-            event_handler=ReplEventHandler(),
             message_store=message_store,
             context_manager=context_manager,
             include_usage=include_usage,
@@ -119,6 +119,7 @@ class AgentRepl:
         )
 
         # Internal state (private)
+        self._event_handler = ReplEventHandler()
         self._messages: list[Message] = []
         self._accumulated_usage: Usage | None = None
         self._accumulated_cost: ResponseCost | None = None
@@ -537,6 +538,7 @@ class AgentRepl:
             result = await self.swarm.execute(
                 agent=agent,
                 prompt=query,
+                event_handler=self._event_handler,
             )
 
             self._messages = validate_messages(await self.swarm.message_store.get_messages())
@@ -581,7 +583,11 @@ class AgentRepl:
             optimized = await self.swarm.context_manager.optimize_context(
                 model=parsed.model or self.agent.llm.model,
                 strategy=parsed.strategy,
-                query=parsed.query,
+                rag_config=RAGStrategyConfig(
+                    query=parsed.query,
+                    max_messages=10,
+                    score_threshold=0.5,
+                ),
             )
 
             # Update memory

@@ -14,6 +14,7 @@ from typing_extensions import override
 from liteswarm.core.message_index import LiteMessageIndex, MessageIndex
 from liteswarm.core.message_store import MessageStore
 from liteswarm.types.context import ContextVariables
+from liteswarm.types.context_manager import RAGStrategyConfig
 from liteswarm.types.llm import LLM
 from liteswarm.types.messages import MessageRecord, MessageT
 from liteswarm.types.swarm import Agent, Message
@@ -189,6 +190,7 @@ class ContextManager(Protocol):
         query: str,
         context: Sequence[Message] | None = None,
         max_messages: int | None = None,
+        score_threshold: float | None = None,
         embedding_model: str | None = None,
     ) -> list[Message]:
         """Find messages matching the search query.
@@ -201,6 +203,7 @@ class ContextManager(Protocol):
             query: Search query text.
             context: Optional context to search within.
             max_messages: Optional maximum messages to return.
+            score_threshold: Optional minimum score to return.
             embedding_model: Optional model for computing embeddings.
 
         Returns:
@@ -249,6 +252,7 @@ class LiteContextManager(ContextManager):
         window_size: int = 50,
         preserve_recent: int = 25,
         relevant_window_size: int = 10,
+        relevant_score_threshold: float = 0.5,
         chunk_size: int = 10,
         default_optimization_strategy: LiteOptimizationStrategy = "trim",
         default_embedding_model: str = "text-embedding-3-small",
@@ -262,6 +266,7 @@ class LiteContextManager(ContextManager):
             window_size: Maximum messages in sliding window strategy.
             preserve_recent: Messages to preserve when summarizing.
             relevant_window_size: Maximum messages to return in search results.
+            relevant_score_threshold: Minimum score to return in search results.
             chunk_size: Number of messages per summary chunk.
             default_optimization_strategy: Default strategy for context optimization.
             default_embedding_model: Default model for computing embeddings.
@@ -272,6 +277,7 @@ class LiteContextManager(ContextManager):
         self.window_size = window_size
         self.preserve_recent = preserve_recent
         self.relevant_window_size = relevant_window_size
+        self.relevant_score_threshold = relevant_score_threshold
         self.chunk_size = chunk_size
         self.default_optimization_strategy = default_optimization_strategy
         self.default_embedding_model = default_embedding_model
@@ -517,7 +523,7 @@ class LiteContextManager(ContextManager):
         self,
         messages: Sequence[Message],
         model: str,
-        query: str | None = None,
+        config: RAGStrategyConfig | None = None,
     ) -> list[Message]:
         """Optimize context using semantic search.
 
@@ -527,12 +533,12 @@ class LiteContextManager(ContextManager):
         Args:
             messages: Messages to optimize.
             model: Model identifier to determine context limits.
-            query: Optional query for semantic search.
+            config: Configuration for RAG strategy.
 
         Returns:
             Optimized messages based on relevance.
         """
-        if not query:
+        if config is None:
             log_verbose(
                 "No query provided, falling to trim strategy",
                 level="DEBUG",
@@ -540,15 +546,16 @@ class LiteContextManager(ContextManager):
             return await self._trim_strategy(messages, model)
 
         log_verbose(
-            f"Searching for relevant messages with query: {query}",
+            f"Searching for relevant messages with query: {config.query}",
             level="DEBUG",
         )
 
         relevant = await self.find_context(
-            query=query,
-            max_messages=self.relevant_window_size,
             context=messages,
-            embedding_model=self.default_embedding_model,
+            query=config.query,
+            max_messages=config.max_messages,
+            score_threshold=config.score_threshold,
+            embedding_model=config.embedding_model,
         )
 
         if not relevant:
@@ -626,7 +633,7 @@ class LiteContextManager(ContextManager):
         self,
         model: str,
         strategy: LiteOptimizationStrategy | None = None,
-        query: str | None = None,
+        rag_config: RAGStrategyConfig | None = None,
     ) -> list[Message]:
         """Optimize context to fit model limits.
 
@@ -643,7 +650,7 @@ class LiteContextManager(ContextManager):
         Args:
             model: Model identifier to determine context limits.
             strategy: Optimization strategy to use.
-            query: Optional query for RAG strategy.
+            rag_config: Configuration for RAG strategy.
 
         Returns:
             Optimized list of messages.
@@ -674,7 +681,11 @@ class LiteContextManager(ContextManager):
             case "summarize":
                 optimized = await self._summarize_strategy(non_system_messages, model)
             case "rag":
-                optimized = await self._rag_strategy(non_system_messages, model, query)
+                optimized = await self._rag_strategy(
+                    messages=non_system_messages,
+                    model=model,
+                    config=rag_config,
+                )
             case _:
                 raise ValueError(f"Unknown strategy: {strategy}")
 
@@ -694,6 +705,7 @@ class LiteContextManager(ContextManager):
         query: str,
         context: Sequence[Message] | None = None,
         max_messages: int | None = None,
+        score_threshold: float | None = None,
         embedding_model: str | None = None,
     ) -> list[Message]:
         """Find messages matching the search query.
@@ -706,6 +718,7 @@ class LiteContextManager(ContextManager):
             query: Search query text.
             context: Optional context to search within.
             max_messages: Optional maximum messages to return.
+            score_threshold: Optional minimum score to return.
             embedding_model: Optional model for computing embeddings.
 
         Returns:
@@ -740,6 +753,7 @@ class LiteContextManager(ContextManager):
         result = await self.message_index.search(
             query=query,
             max_results=max_messages or self.relevant_window_size,
+            score_threshold=score_threshold or self.relevant_score_threshold,
         )
 
         relevant_messages = [msg for msg, _ in result]

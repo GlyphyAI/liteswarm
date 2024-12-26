@@ -9,10 +9,10 @@ from typing_extensions import override
 from liteswarm.core.console_handler import ConsoleEventHandler
 from liteswarm.types import ContextVariables, Plan, PlanFeedbackHandler
 from liteswarm.types.events import (
-    SwarmTeamPlanCompletedEvent,
-    SwarmTeamPlanCreatedEvent,
-    SwarmTeamTaskCompletedEvent,
-    SwarmTeamTaskStartedEvent,
+    PlanCompletedEvent,
+    PlanCreatedEvent,
+    TaskCompletedEvent,
+    TaskStartedEvent,
 )
 
 
@@ -20,7 +20,7 @@ class SwarmEventHandler(ConsoleEventHandler):
     """Software team event handler with detailed task and plan tracking."""
 
     @override
-    async def _handle_team_plan_created(self, event: SwarmTeamPlanCreatedEvent) -> None:
+    async def _handle_team_plan_created(self, event: PlanCreatedEvent) -> None:
         """Handle team plan created events with detailed task breakdown.
 
         Args:
@@ -42,7 +42,7 @@ class SwarmEventHandler(ConsoleEventHandler):
         print("-------------------------")
 
     @override
-    async def _handle_team_task_started(self, event: SwarmTeamTaskStartedEvent) -> None:
+    async def _handle_team_task_started(self, event: TaskStartedEvent) -> None:
         """Handle team task started events with assignment details.
 
         Args:
@@ -56,7 +56,7 @@ class SwarmEventHandler(ConsoleEventHandler):
             print(f"Dependencies: {', '.join(event.task.dependencies)}")
 
     @override
-    async def _handle_team_task_completed(self, event: SwarmTeamTaskCompletedEvent) -> None:
+    async def _handle_team_task_completed(self, event: TaskCompletedEvent) -> None:
         """Handle team task completed events with results.
 
         Args:
@@ -70,7 +70,7 @@ class SwarmEventHandler(ConsoleEventHandler):
             print(event.task_result.output.model_dump_json(indent=2))
 
     @override
-    async def _handle_team_plan_completed(self, event: SwarmTeamPlanCompletedEvent) -> None:
+    async def _handle_team_plan_completed(self, event: PlanCompletedEvent) -> None:
         """Handle team plan completed events with execution summary.
 
         Args:
