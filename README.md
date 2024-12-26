@@ -372,7 +372,7 @@ LiteSwarm emits several types of events during execution:
    - Complete message history
    - Execution metadata
 
-See [SwarmEventType](liteswarm/types/events.py) for more details.
+See [SwarmEvent page](liteswarm/types/events.py) for more details.
 
 ### Custom Event Handlers
 
@@ -384,12 +384,12 @@ import asyncio
 from typing_extensions import override
 
 from liteswarm.core import Swarm, SwarmEventHandler
-from liteswarm.types import LLM, Agent, SwarmEventType
+from liteswarm.types import LLM, Agent, SwarmEvent
 
 
 class CustomHandler(SwarmEventHandler):
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         if event.type == "agent_response_chunk":
             # Process content updates
             if content := event.chunk.completion.delta.content:
@@ -1560,12 +1560,12 @@ See [examples/structured_outputs/run.py](examples/structured_outputs/run.py) for
    from typing_extensions import override
    
    from liteswarm.core import Swarm, SwarmEventHandler
-   from liteswarm.types import LLM, Agent, SwarmEventType
+   from liteswarm.types import LLM, Agent, SwarmEvent
 
    # Method 1: Custom event handler class
    class MyEventHandler(SwarmEventHandler):
        @override
-       async def on_event(self, event: SwarmEventType) -> None:
+       async def on_event(self, event: SwarmEvent) -> None:
            if event.type == "agent_response_chunk":
                # Handle content updates
                if content := event.chunk.completion.delta.content:

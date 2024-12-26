@@ -16,7 +16,7 @@ from liteswarm.types.events import (
     ErrorEvent,
     PlanCompletedEvent,
     PlanCreatedEvent,
-    SwarmEventType,
+    SwarmEvent,
     TaskCompletedEvent,
     TaskStartedEvent,
     ToolCallResultEvent,
@@ -70,7 +70,7 @@ class ConsoleEventHandler(LiteSwarmEventHandler):
         self._last_agent_id: str | None = None
 
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """Process and display events.
 
         Formats and displays events with appropriate styling and context.

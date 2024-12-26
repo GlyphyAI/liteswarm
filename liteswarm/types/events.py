@@ -20,7 +20,7 @@ from liteswarm.types.swarm import (
 from liteswarm.types.swarm_team import Artifact, Plan, Task, TaskResult
 
 
-class SwarmEvent(BaseModel):
+class SwarmEventBase(BaseModel):
     """Base class for all Swarm events in the system.
 
     Used for pattern matching and routing of events throughout the system.
@@ -37,7 +37,7 @@ class SwarmEvent(BaseModel):
     )
 
 
-class CompletionResponseChunkEvent(SwarmEvent):
+class CompletionResponseChunkEvent(SwarmEventBase):
     """Event emitted for each streaming update from the language model.
 
     Called each time new content is received from the model, before any
@@ -54,7 +54,7 @@ class CompletionResponseChunkEvent(SwarmEvent):
     """Raw completion response chunk from the model."""
 
 
-class AgentResponseChunkEvent(SwarmEvent):
+class AgentResponseChunkEvent(SwarmEventBase):
     """Event emitted for each streaming update from an agent.
 
     Called each time new content is received from an agent, including both
@@ -69,7 +69,7 @@ class AgentResponseChunkEvent(SwarmEvent):
     """Processed agent response chunk."""
 
 
-class ToolCallResultEvent(SwarmEvent):
+class ToolCallResultEvent(SwarmEventBase):
     """Event emitted when a tool call execution completes.
 
     Called after a tool finishes execution, with either a result or error.
@@ -86,7 +86,7 @@ class ToolCallResultEvent(SwarmEvent):
     """Result of the tool execution."""
 
 
-class AgentSwitchEvent(SwarmEvent):
+class AgentSwitchEvent(SwarmEventBase):
     """Event emitted when switching between agents.
 
     Called when the conversation transitions from one agent to another.
@@ -103,7 +103,7 @@ class AgentSwitchEvent(SwarmEvent):
     """Agent being switched to, never None."""
 
 
-class ErrorEvent(SwarmEvent):
+class ErrorEvent(SwarmEventBase):
     """Event emitted when an error occurs during execution.
 
     Called when an error occurs during any phase of operation, including
@@ -121,7 +121,7 @@ class ErrorEvent(SwarmEvent):
     """Exception that occurred."""
 
 
-class CompleteEvent(SwarmEvent):
+class CompleteEvent(SwarmEventBase):
     """Event emitted when execution reaches completion.
 
     Called when a conversation reaches its natural conclusion or is
@@ -139,7 +139,7 @@ class CompleteEvent(SwarmEvent):
     """Complete conversation history."""
 
 
-class PlanCreatedEvent(SwarmEvent):
+class PlanCreatedEvent(SwarmEventBase):
     """Event emitted when a new plan is successfully created.
 
     Called after a planning agent successfully creates a structured plan
@@ -154,7 +154,7 @@ class PlanCreatedEvent(SwarmEvent):
     """Newly created execution plan."""
 
 
-class TaskStartedEvent(SwarmEvent):
+class TaskStartedEvent(SwarmEventBase):
     """Event emitted when a task begins execution.
 
     Called when a task starts execution, after member assignment but
@@ -169,7 +169,7 @@ class TaskStartedEvent(SwarmEvent):
     """Task beginning execution."""
 
 
-class TaskCompletedEvent(SwarmEvent):
+class TaskCompletedEvent(SwarmEventBase):
     """Event emitted when a task finishes execution.
 
     Called when a task completes execution successfully. Used to process
@@ -189,7 +189,7 @@ class TaskCompletedEvent(SwarmEvent):
     """Context used during task execution."""
 
 
-class PlanCompletedEvent(SwarmEvent):
+class PlanCompletedEvent(SwarmEventBase):
     """Event emitted when all tasks in a plan are completed.
 
     Called when all tasks in a plan have finished execution successfully.
@@ -206,7 +206,7 @@ class PlanCompletedEvent(SwarmEvent):
     """Artifact containing the results of plan execution."""
 
 
-SwarmEventType = Annotated[
+SwarmEvent = Annotated[
     CompletionResponseChunkEvent
     | AgentResponseChunkEvent
     | ToolCallResultEvent

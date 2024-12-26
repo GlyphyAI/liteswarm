@@ -8,7 +8,7 @@ from collections.abc import AsyncGenerator
 
 from typing_extensions import Protocol, override
 
-from liteswarm.types.events import SwarmEventType
+from liteswarm.types.events import SwarmEvent
 
 
 class SwarmEventHandler(Protocol):
@@ -25,17 +25,16 @@ class SwarmEventHandler(Protocol):
     Example:
         ```python
         class ConsoleEventHandler(SwarmEventHandler):
-            async def on_event(self, event: SwarmEventType) -> None:
-                match event.type:
-                    case "agent_response_chunk":
-                        if event.chunk.completion.delta.content:
-                            print(event.chunk.completion.delta.content, end="", flush=True)
-                    case "agent_switch":
-                        print(f"\nSwitching to {event.current.id}")
-                    case "error":
-                        print(f"\nError: {event.error}")
-                    case "complete":
-                        print("\nComplete!")
+            async def on_event(self, event: SwarmEvent) -> None:
+                if event.type == "agent_response_chunk":
+                    if event.chunk.completion.delta.content:
+                        print(event.chunk.completion.delta.content, end="", flush=True)
+                elif event.type == "agent_switch":
+                    print(f"\nSwitching to {event.current.id}")
+                elif event.type == "error":
+                    print(f"\nError: {event.error}")
+                elif event.type == "complete":
+                    print("\nComplete!")
 
 
         # Use in Swarm
@@ -49,7 +48,7 @@ class SwarmEventHandler(Protocol):
         - Events carry full context
     """
 
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """Handle an event from the swarm.
 
         This method is called by the swarm when an event occurs.
@@ -60,14 +59,13 @@ class SwarmEventHandler(Protocol):
 
         Example:
             ```python
-            async def on_event(self, event: SwarmEventType) -> None:
-                match event.type:
-                    case "agent_response_chunk":
-                        await self.process_response(event.chunk.completion)
-                    case "error":
-                        await self.handle_error(event.error)
-                    case _:
-                        await self.process_other(event)
+            async def on_event(self, event: SwarmEvent) -> None:
+                if event.type == "agent_response_chunk":
+                    await self.process_response(event.chunk.completion)
+                elif event.type == "error":
+                    await self.handle_error(event.error)
+                else:
+                    await self.process_other(event)
             ```
 
         Notes:
@@ -91,12 +89,11 @@ class LiteSwarmEventHandler(SwarmEventHandler):
     Example:
         ```python
         class LoggingEventHandler(LiteSwarmEventHandler):
-            async def on_event(self, event: SwarmEventType) -> None:
-                match event.type:
-                    case "agent_response_chunk":
-                        print(f"Response: {event.chunk.completion.delta.content}")
-                    case "error":
-                        print(f"Error: {event.error}")
+            async def on_event(self, event: SwarmEvent) -> None:
+                if event.type == "agent_response_chunk":
+                    print(f"Response: {event.chunk.completion.delta.content}")
+                elif event.type == "error":
+                    print(f"Error: {event.error}")
         ```
 
     Notes:
@@ -107,7 +104,7 @@ class LiteSwarmEventHandler(SwarmEventHandler):
     """
 
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """No-op implementation of event handling.
 
         Args:
@@ -132,11 +129,10 @@ class SwarmEventGenerator(SwarmEventHandler):
         swarm = Swarm(event_handler=generator)
 
         async for event in generator:
-            match event:
-                case SwarmAgentResponseChunkEvent():
-                    print(event.response.delta.content)
-                case SwarmErrorEvent():
-                    print(f"Error: {event.error}")
+            if event.type == "agent_response_chunk":
+                print(event.chunk.completion.delta.content)
+            elif event.type == "error":
+                print(f"Error: {event.error}")
         ```
 
     Notes:
@@ -154,10 +150,10 @@ class SwarmEventGenerator(SwarmEventHandler):
                 Defaults to 100. Set to 0 for unbounded buffer.
         """
         self._buffer_size = buffer_size
-        self._events: list[SwarmEventType] = []
+        self._events: list[SwarmEvent] = []
         self._closed: bool = False
 
-    def __aiter__(self) -> AsyncGenerator[SwarmEventType, None]:
+    def __aiter__(self) -> AsyncGenerator[SwarmEvent, None]:
         """Get async iterator for events.
 
         Returns:
@@ -166,7 +162,7 @@ class SwarmEventGenerator(SwarmEventHandler):
         return self.stream()
 
     @override
-    async def on_event(self, event: SwarmEventType) -> None:
+    async def on_event(self, event: SwarmEvent) -> None:
         """Handle an event from the swarm.
 
         Args:
@@ -185,7 +181,7 @@ class SwarmEventGenerator(SwarmEventHandler):
 
         self._events.append(event)
 
-    async def stream(self) -> AsyncGenerator[SwarmEventType, None]:
+    async def stream(self) -> AsyncGenerator[SwarmEvent, None]:
         """Stream events from the generator.
 
         Yields:

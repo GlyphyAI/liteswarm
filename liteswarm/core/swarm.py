@@ -29,7 +29,7 @@ from liteswarm.types.events import (
     CompleteEvent,
     CompletionResponseChunkEvent,
     ErrorEvent,
-    SwarmEventType,
+    SwarmEvent,
     ToolCallResultEvent,
 )
 from liteswarm.types.exceptions import (
@@ -131,7 +131,7 @@ class Swarm:
         Event handler:
             ```python
             class ConsoleHandler(SwarmEventHandler):
-                async def on_event(self, event: SwarmEventType) -> None:
+                async def on_event(self, event: SwarmEvent) -> None:
                     if event.type == "agent_response_chunk":
                         print(event.chunk.completion.delta.content)
                     elif event.type == "agent_switch":
@@ -937,7 +937,7 @@ class Swarm:
         agent: Agent,
         agent_messages: list[Message],
         context_variables: ContextVariables,
-    ) -> AsyncStream[SwarmEventType, AgentResponseChunk | None]:
+    ) -> AsyncStream[SwarmEvent, AgentResponseChunk | None]:
         """Process agent response and stream completion events.
 
         Handles the core response processing from the language model. Streams both raw
@@ -1038,7 +1038,7 @@ class Swarm:
         content: str | None,
         context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall],
-    ) -> AsyncStream[SwarmEventType, list[Message]]:
+    ) -> AsyncStream[SwarmEvent, list[Message]]:
         """Process assistant response and stream tool call events.
 
         Handles assistant response processing and tool execution. Creates messages
@@ -1265,7 +1265,7 @@ class Swarm:
         self,
         iteration_count: int = 0,
         agent_switch_count: int = 0,
-    ) -> AsyncStream[SwarmEventType, None]:
+    ) -> AsyncStream[SwarmEvent, None]:
         """Stream events from active agent and handle agent switching.
 
         Core execution loop of the swarm. Manages agent lifecycle, processes responses,
@@ -1376,7 +1376,7 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-    ) -> AsyncStream[SwarmEventType, None]:
+    ) -> AsyncStream[SwarmEvent, None]:
         """Create the base event stream for swarm execution.
 
         Core implementation of swarm's event streaming. Initializes conversation,
@@ -1439,7 +1439,7 @@ class Swarm:
         prompt: str | None = None,
         messages: list[Message] | None = None,
         context_variables: ContextVariables | None = None,
-    ) -> AsyncStream[SwarmEventType, AgentExecutionResult]:
+    ) -> AsyncStream[SwarmEvent, AgentExecutionResult]:
         """Stream swarm events and return final execution result.
 
         Main entry point for swarm execution. Processes user input through the agent,
@@ -1569,7 +1569,7 @@ class Swarm:
             With event handler:
                 ```python
                 class LoggingHandler(SwarmEventHandler):
-                    async def on_event(self, event: SwarmEventType) -> None:
+                    async def on_event(self, event: SwarmEvent) -> None:
                         if event.type == "agent_response_chunk":
                             print(event.chunk.completion.delta.content)
                         elif event.type == "error":
