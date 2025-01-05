@@ -44,8 +44,10 @@ changelog = "https://github.com/GlyphyAI/liteswarm/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 dev = [
-    "mypy>=1.13.0",
+    "mypy>=1.14.1",
     "ruff>=0.7.3",
+    "pytest>=8.3.4",
+    "pytest-asyncio>=0.25.1",
     "typing-extensions>=4.12.2",
     "commitizen>=4.1.0",
 ]
