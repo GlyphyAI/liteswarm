@@ -1,36 +1,29 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import os
 
+from liteswarm import enable_logging
 from liteswarm.core import Swarm
-from liteswarm.experimental import SwarmTeam
-from liteswarm.types import ArtifactStatus
-from liteswarm.utils.logging import enable_logging
+from liteswarm.experimental import LiteTeamChat, LiteTeamChatSession
+from liteswarm.types import ApprovePlan, ArtifactStatus, Plan, PlanFeedback, RejectPlan
+from liteswarm.utils.misc import prompt as prompt_user
 
-from .handlers import InteractivePlanFeedbackHandler, SwarmEventHandler
-from .planning import create_planning_agent
+from .handlers import EventHandler
+from .planning import build_planning_agent_user_prompt, create_planning_agent
 from .tasks import create_task_definitions
 from .team import create_team_members
 from .types import FileContent, Project
 from .utils import create_context_from_project, extract_project_from_artifact, print_artifact
 
-os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
+enable_logging(default_level="DEBUG")
 
 
 def get_project_summary(project: Project) -> str:
-    """Get a brief summary of the current project state.
-
-    Args:
-        project: The current project.
-
-    Returns:
-        A formatted string describing the project state.
-    """
+    """Get a brief summary of the current project state."""
     if not project.tech_stack:
         return "No tech stack configured."
 
@@ -42,24 +35,8 @@ def get_project_summary(project: Project) -> str:
     )
 
 
-def get_user_prompt(default_prompt: str = "Create a simple todo list app") -> str:
-    """Get the user's prompt with a default option.
-
-    Returns:
-        The user's prompt or the default prompt if none provided.
-    """
-    print("\nWhat would you like to build or modify in this project? (Press Enter for a default prompt)")  # fmt: skip
-    print(f"Default: {default_prompt}")
-    user_input = input("\n> ").strip()
-    return user_input or default_prompt
-
-
 def create_project() -> Project:
-    """Create a new project with initial Flutter setup.
-
-    Returns:
-        A new Project instance with default Flutter configuration.
-    """
+    """Create a new project with initial Flutter setup."""
     return Project(
         tech_stack={
             "platform": "mobile",
@@ -76,41 +53,66 @@ def create_project() -> Project:
     )
 
 
-def create_team() -> SwarmTeam:
-    """Create a new software team.
+async def handle_plan_feedback(plan: Plan) -> PlanFeedback:
+    """Handle user feedback on the generated plan."""
+    # Show the plan
+    print("\nProposed Plan:")
+    print("-" * 30)
+    print(f"Plan ID: {plan.id}")
+    for i, task in enumerate(plan.tasks, 1):
+        print(f"{i}. {task.title}")
+        if task.description:
+            print(f"   {task.description}")
+    print("-" * 30)
 
-    Creates fresh instances of Swarm and SwarmTeam to ensure no lingering state or history.
+    while True:
+        choice = await prompt_user("\n1. Approve and execute\n2. Provide feedback\n3. Exit\n\nYour choice (1-3): ")  # fmt: skip
 
-    Returns:
-        A new SwarmTeam instance.
-    """
-    event_handler = SwarmEventHandler()
-    swarm = Swarm(include_usage=True, include_cost=True)
+        match choice:
+            case "1":
+                return ApprovePlan(type="approve")
+            case "2":
+                feedback = await prompt_user("\nEnter your feedback: ")
+                return RejectPlan(type="reject", feedback=feedback)
+            case "3":
+                raise KeyboardInterrupt("User chose to exit")
+            case _:
+                print("Invalid choice. Please try again.")
+                continue
 
+
+async def create_session(chat: LiteTeamChat, swarm: Swarm) -> LiteTeamChatSession:
+    """Create a new session."""
+    members = create_team_members()
     task_definitions = create_task_definitions()
-    team_members = create_team_members()
-    planning_agent = create_planning_agent(swarm, task_definitions, event_handler)
-
-    team = SwarmTeam(
-        swarm=swarm,
-        members=team_members,
+    planning_agent = create_planning_agent(swarm, task_definitions)
+    session = await chat.create_session(
+        user_id="user",
+        members=members,
         task_definitions=task_definitions,
         planning_agent=planning_agent,
-        event_handler=event_handler,
     )
 
-    return team
+    return session
 
 
-async def main() -> None:
+async def main() -> None:  # noqa: PLR0915
     """Run the software team example."""
     print("\nWelcome to the Software Team!")
     print("You are working on a Flutter project. All changes will be accumulated in the current project.")  # fmt: skip
     print("You can start a new project at any time to reset the state and history.\n")
 
-    team = create_team()
+    # Create team chat
+    swarm = Swarm(include_usage=True, include_cost=True)
+    team_chat = LiteTeamChat(swarm=swarm)
+    event_handler = EventHandler()
+
+    # Create initial session
+    session = await create_session(team_chat, swarm)
     project = create_project()
-    context = create_context_from_project(project)
+    context_variables = create_context_from_project(project)
+
+    default_prompt = "Create a simple todo list app"
 
     while True:
         try:
@@ -120,20 +122,31 @@ async def main() -> None:
             print("=" * 50)
 
             # Get the next task from user
-            prompt = get_user_prompt()
+            print("\nWhat would you like to build or modify in this project? (Press Enter for a default prompt)")  # fmt: skip
+            print(f"Default: {default_prompt}")
+            prompt = await prompt_user("\n🗣️  Enter your query: ")
+            prompt = prompt.strip() or default_prompt
+            prompt = build_planning_agent_user_prompt(prompt, context_variables)
 
-            # Execute the task
-            artifact = await team.execute(
-                prompt=prompt,
-                context=context,
-                feedback_handler=InteractivePlanFeedbackHandler(),
+            # Execute with feedback
+            stream = session.send_message(
+                prompt,
+                context_variables=context_variables,
+                feedback_callback=handle_plan_feedback,
             )
+
+            async for event in stream:
+                event_handler.on_event(event)
+
+            print()  # New line after streaming
+            artifact = await stream.get_return_value()
             print_artifact(artifact)
 
             # Update project state if execution was successful
             if artifact.status == ArtifactStatus.COMPLETED:
                 project = extract_project_from_artifact(artifact, project)
-                context = create_context_from_project(project)
+                context_variables = create_context_from_project(project)
+                print(f"Project updated: {project.model_dump_json()}")
 
             # Ask what to do next
             print("\nWhat would you like to do next?")
@@ -141,7 +154,7 @@ async def main() -> None:
             print("2. Start a new project (resets everything)")
             print("3. Exit")
 
-            choice = input("\nYour choice (1-3): ").strip()
+            choice = await prompt_user("\nYour choice (1-3): ")
             match choice:
                 case "1":
                     print("\nContinuing with the current project...")
@@ -149,9 +162,9 @@ async def main() -> None:
                     continue
                 case "2":
                     print("This will create a completely new project and reset all history.")
-                    team = create_team()
+                    session = await create_session(team_chat, swarm)
                     project = create_project()
-                    context = create_context_from_project(project)
+                    context_variables = create_context_from_project(project)
                     continue
                 case "3":
                     print("\nExiting. Thanks for using the software team!")
@@ -172,5 +185,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    enable_logging()
     asyncio.run(main())

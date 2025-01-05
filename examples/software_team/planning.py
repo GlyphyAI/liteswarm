@@ -1,10 +1,10 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from liteswarm.core import Swarm, SwarmEventHandler
+from liteswarm.core import Swarm
 from liteswarm.experimental import LitePlanningAgent, PlanningAgent
 from liteswarm.types import JSON, LLM, Agent, ContextVariables, TaskDefinition, TaskStatus
 
@@ -102,11 +102,11 @@ Now proceed to create a development plan for the user's request.
 """.strip()
 
 
-def build_planning_agent_system_prompt(context: ContextVariables) -> str:
+def build_planning_agent_system_prompt(context_variables: ContextVariables) -> str:
     """Build system prompt for the planning agent."""
-    project_directories: JSON = context.get("directories", [])
-    project_files: JSON = context.get("files", [])
-    tech_stack: JSON = context.get("tech_stack", {})
+    project_directories: JSON = context_variables.get("directories", [])
+    project_files: JSON = context_variables.get("files", [])
+    tech_stack: JSON = context_variables.get("tech_stack", {})
 
     response_format = SoftwarePlan
     response_example = SoftwarePlan(
@@ -137,9 +137,12 @@ def build_planning_agent_system_prompt(context: ContextVariables) -> str:
     )
 
 
-def build_planning_agent_user_prompt(prompt: str, context: ContextVariables) -> str:
+def build_planning_agent_user_prompt(
+    prompt: str,
+    context_variables: ContextVariables,
+) -> str:
     """Build user prompt for the planning agent."""
-    project_context: JSON = context.get("project", {})
+    project_context: JSON = context_variables.get("project", {})
 
     return PLANNING_AGENT_USER_PROMPT.format(
         USER_PROMPT=prompt,
@@ -147,7 +150,10 @@ def build_planning_agent_user_prompt(prompt: str, context: ContextVariables) -> 
     )
 
 
-def parse_planning_agent_response(response: str, context: ContextVariables) -> SoftwarePlan:
+def parse_planning_agent_response(
+    response: str,
+    context_variables: ContextVariables,
+) -> SoftwarePlan:
     """Parse the response from the planning agent."""
     json_response = find_json_tag(response, "json_response")
     if not json_response:
@@ -159,7 +165,6 @@ def parse_planning_agent_response(response: str, context: ContextVariables) -> S
 def create_planning_agent(
     swarm: Swarm,
     task_definitions: list[TaskDefinition],
-    event_handler: SwarmEventHandler | None = None,
 ) -> PlanningAgent:
     """Create a software planning agent."""
     agent = Agent(
@@ -171,8 +176,6 @@ def create_planning_agent(
     return LitePlanningAgent(
         swarm=swarm,
         agent=agent,
-        prompt_template=build_planning_agent_user_prompt,
         response_format=parse_planning_agent_response,
         task_definitions=task_definitions,
-        event_handler=event_handler,
     )
