@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -7,21 +7,27 @@
 from typing import Protocol
 
 import json_repair
-import orjson
 from pydantic import ValidationError
 from typing_extensions import override
 
-from liteswarm.core.event_handler import SwarmEventHandler
 from liteswarm.core.swarm import Swarm
 from liteswarm.experimental.swarm_team.registry import TaskRegistry
 from liteswarm.experimental.swarm_team.response_repair import (
     LiteResponseRepairAgent,
     ResponseRepairAgent,
 )
-from liteswarm.types.exceptions import PlanValidationError, ResponseParsingError
+from liteswarm.types.collections import (
+    AsyncStream,
+    ReturnableAsyncGenerator,
+    ReturnItem,
+    YieldItem,
+    returnable,
+)
+from liteswarm.types.events import SwarmEvent
+from liteswarm.types.exceptions import PlanValidationError, ResponseParsingError, SwarmTeamError
 from liteswarm.types.llm import LLM
-from liteswarm.types.swarm import Agent, ContextVariables
-from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PromptTemplate, TaskDefinition
+from liteswarm.types.swarm import Agent, ContextVariables, Message
+from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PlanResult, TaskDefinition
 from liteswarm.utils.tasks import create_plan_with_tasks
 from liteswarm.utils.typing import is_callable, is_subtype
 
@@ -96,26 +102,26 @@ Now proceed to create the plan.
 
 
 class PlanningAgent(Protocol):
-    """Protocol for agents that create task plans.
+    """Protocol for task planning agents built on top of Swarm.
 
-    Defines the interface for planning agents that can analyze prompts and create
-    structured plans with tasks and dependencies. The plans must be OpenAI-compatible
-    for structured outputs.
+    Defines an interface for planning agents that analyze conversation messages
+    and create structured plans with tasks and dependencies. Following Swarm's
+    stateless design, planning agents maintain no internal state between operations.
 
     Examples:
         Create a custom planner:
             ```python
             class CustomPlanningAgent(PlanningAgent):
+                @returnable
                 async def create_plan(
                     self,
-                    prompt: str,
-                    context: ContextVariables | None = None,
-                ) -> Plan:
-                    # Analyze prompt and create tasks
+                    messages: list[Message],
+                    context_variables: ContextVariables | None = None,
+                ) -> AsyncStream[SwarmEvent, PlanResult]:
+                    # Create tasks based on messages
                     tasks = [
                         Task(
-                            # Base Task required fields
-                            type="review",  # Must match Literal in task definition
+                            type="review",  # Must match task definition
                             id="task-1",
                             title="First step",
                             description="Review code changes",
@@ -125,7 +131,6 @@ class PlanningAgent(Protocol):
                             metadata=None,
                         ),
                         Task(
-                            # Base Task required fields
                             type="test",
                             id="task-2",
                             title="Second step",
@@ -136,38 +141,47 @@ class PlanningAgent(Protocol):
                             metadata=None,
                         ),
                     ]
-                    # Create plan with all required fields
-                    return Plan(id="plan-1", tasks=tasks, metadata=None)
+
+                    # Create and validate plan
+                    plan = Plan(id="plan-1", tasks=tasks, metadata=None)
+                    yield ReturnItem(PlanResult(plan=plan))
             ```
+
+    Notes:
+        - Each method returns an event stream for progress tracking
+        - Plans must be validated before being returned
+        - Task types must match registered definitions
     """
 
-    async def create_plan(
+    def create_plan(
         self,
-        prompt: str,
-        context: ContextVariables | None = None,
-    ) -> Plan:
-        """Create a plan from the given prompt and context.
+        messages: list[Message],
+        context_variables: ContextVariables | None = None,
+    ) -> ReturnableAsyncGenerator[SwarmEvent, PlanResult]:
+        """Create a plan from conversation messages.
 
         Args:
-            prompt: Description of work to be done.
-            context: Optional additional context variables.
+            messages: List of conversation messages for planning.
+            context_variables: Optional variables for dynamic resolution.
 
         Returns:
-            A valid Plan object.
+            ReturnableAsyncGenerator yielding events and returning plan result.
 
         Raises:
-            PlanValidationError: If the plan fails validation or has invalid dependencies.
-            ResponseParsingError: If the response cannot be parsed into a valid plan.
+            PlanValidationError: If plan fails validation or has invalid dependencies.
+            ResponseParsingError: If response cannot be parsed into a valid plan.
         """
         ...
 
 
 class LitePlanningAgent(PlanningAgent):
-    """LLM-based implementation of the planning protocol.
+    """LLM-based planning agent built on top of Swarm.
 
-    Uses an LLM agent to analyze requirements and generate structured plans,
-    validating them against task definitions. The framework supports two approaches
-    to structured outputs that can be used independently or together:
+    Uses an LLM agent to analyze conversation messages and generate structured plans,
+    validating them against task definitions. Following Swarm's stateless design,
+    the agent maintains no internal state between operations.
+
+    The agent supports two approaches to structured outputs:
 
     1. Framework-level Parsing:
        - Response is parsed using response_format (Pydantic model or parser function)
@@ -188,13 +202,13 @@ class LitePlanningAgent(PlanningAgent):
            ```
 
     2. LLM-level Schema:
-       - Uses provider's native structured output support (e.g., OpenAI)
-       - Requires OpenAI-compatible schemas (no defaults, simple types)
+       - Uses provider's native structured output support
+       - Response format must follow provider-specific rules
        - Can be combined with framework-level parsing for additional validation
 
     Example:
            ```python
-           class ReviewPlan(Plan):  # OpenAI-compatible
+           class ReviewPlan(Plan):
                tasks: list[ReviewTask]
                metadata: dict[str, Any] | None
 
@@ -204,44 +218,35 @@ class LitePlanningAgent(PlanningAgent):
                agent=Agent(
                    llm=LLM(
                        model="gpt-4o",
-                       response_format=ReviewPlan,  # LLM enforces schema
+                       response_format=ReviewPlan,
                    ),
                ),
-               response_format=ReviewPlan,  # Framework validates result
+               response_format=ReviewPlan,
            )
            ```
 
-    Note:
-        The two approaches can be used together for robust schema handling:
-        - LLM-level ensures valid JSON output format
-        - Framework-level provides additional validation and parsing
-        - Base Task and Plan classes support both approaches
-        - Custom schemas must maintain OpenAI compatibility if using both:
-          - No default values
-          - Simple JSON-serializable types
-          - Discriminated unions (no oneOf)
+    Notes:
+        - Each method returns an event stream for progress tracking
+        - Plans are validated before being returned
+        - Response format must follow LLM provider's schema requirements
     """
 
-    def __init__(  # noqa: PLR0913
+    def __init__(
         self,
         swarm: Swarm,
         agent: Agent | None = None,
-        prompt_template: PromptTemplate | None = None,
         task_definitions: list[TaskDefinition] | None = None,
         response_format: PlanResponseFormat | None = None,
         response_repair_agent: ResponseRepairAgent | None = None,
-        event_handler: SwarmEventHandler | None = None,
     ) -> None:
         """Initialize a new planner instance.
 
         Args:
             swarm: Swarm client for agent interactions.
             agent: Optional custom planning agent.
-            prompt_template: Optional custom prompt template.
             task_definitions: Available task types.
             response_format: Optional plan response format.
             response_repair_agent: Optional custom response repair agent.
-            event_handler: Optional event handler for team events.
         """
         # Internal state (private)
         self._task_registry = TaskRegistry(task_definitions)
@@ -249,69 +254,18 @@ class LitePlanningAgent(PlanningAgent):
         # Public properties
         self.swarm = swarm
         self.agent = agent or self._default_planning_agent()
-        self.prompt_template = prompt_template or self._default_planning_prompt_template()
         self.response_format = response_format or self._default_planning_response_format()
         self.response_repair_agent = response_repair_agent or self._default_response_repair_agent()
-        self.event_handler = event_handler
-
-    def _default_response_repair_agent(self) -> ResponseRepairAgent:
-        """Create the default response repair agent for handling invalid planning responses.
-
-        Creates and configures a LiteResponseRepairAgent instance using the current swarm.
-        The repair agent helps recover from validation errors in planning responses by
-        attempting to fix common issues like JSON formatting and schema violations.
-
-        Returns:
-            A configured repair agent instance using LiteResponseRepairAgent
-                implementation with the current swarm.
-
-        Examples:
-            Basic usage:
-                ```python
-                planning_agent = LitePlanningAgent(swarm=swarm)
-                repair_agent = planning_agent._default_response_repair_agent()
-                assert isinstance(repair_agent, LiteResponseRepairAgent)
-                ```
-
-            Custom repair agent:
-                ```python
-                class CustomRepairAgent(ResponseRepairAgent):
-                    async def repair_response(self, ...) -> Plan:
-                        # Custom repair logic
-                        pass
-
-                planning_agent = LitePlanningAgent(
-                    swarm=swarm,
-                    response_repair_agent=CustomRepairAgent(),
-                )
-                # Will use custom agent instead of default
-                ```
-        """
-        return LiteResponseRepairAgent(swarm=self.swarm)
 
     def _default_planning_agent(self) -> Agent:
-        """Create the default planning agent.
+        """Create a default planning agent.
+
+        Creates and configures an agent with GPT-4o and specialized planning
+        instructions. The agent is designed to break down complex tasks into
+        minimal, efficient workflows.
 
         Returns:
-            Agent configured with GPT-4o and planning instructions.
-
-        Examples:
-            Create default agent:
-                ```python
-                agent = planning_agent._default_planning_agent()
-                # Returns Agent with:
-                # - id: "agent-planner"
-                # - model: "gpt-4o"
-                # - planning-specific instructions
-                ```
-
-            Use in planner:
-                ```python
-                planning_agent = LitePlanningAgent(swarm=swarm)
-                # Automatically creates default agent if none provided
-                assert planning_agent.agent.id == "agent-planner"
-                assert planning_agent.agent.llm.model == "gpt-4o"
-                ```
+            Agent configured with planning instructions and GPT-4o model.
         """
         return Agent(
             id="agent-planner",
@@ -319,67 +273,27 @@ class LitePlanningAgent(PlanningAgent):
             llm=LLM(model="gpt-4o"),
         )
 
-    def _default_planning_prompt_template(self) -> PromptTemplate:
-        """Create the default prompt template.
+    def _default_response_repair_agent(self) -> ResponseRepairAgent:
+        """Create a default response repair agent.
 
-        Creates a template that guides the agent to create efficient plans with
-        comprehensive tasks. The template includes the request, context, and
-        response format requirements.
+        Creates and configures a LiteResponseRepairAgent instance using the current
+        swarm. The repair agent helps recover from validation errors in planning
+        responses by fixing common issues like JSON formatting and schema violations.
 
         Returns:
-            Template function that formats prompts with context.
-
-        Example:
-            ```python
-            template = planning_agent._default_planning_prompt_template()
-            prompt = template(
-                "Review and deploy changes",
-                context=ContextVariables(pr_url="github.com/org/repo/123"),
-            )
-            ```
+            LiteResponseRepairAgent configured with the current swarm.
         """
-
-        def default_template_builder(prompt: str, context: ContextVariables) -> str:
-            if is_subtype(self.response_format, Plan):
-                response_format = orjson.dumps(self.response_format.model_json_schema()).decode()
-            else:
-                response_format = None
-
-            return PLANNING_AGENT_USER_PROMPT.format(
-                PROMPT=prompt,
-                CONTEXT=context,
-                RESPONSE_FORMAT=response_format,
-            )
-
-        return default_template_builder
+        return LiteResponseRepairAgent(swarm=self.swarm)
 
     def _default_planning_response_format(self) -> PlanResponseFormat:
-        """Create the default plan response format.
+        """Create a default plan response format.
+
+        Creates a plan schema that includes all registered task types. The schema
+        is used for both framework-level parsing and LLM-level validation when
+        supported.
 
         Returns:
-            Plan schema with task types from registered task definitions.
-
-        Examples:
-            Default format:
-                ```python
-                # With review and test task types
-                planning_agent = LitePlanningAgent(swarm=swarm, task_definitions=[review_def, test_def])
-                format = planning_agent._default_planning_response_format()
-                # Returns Plan schema that accepts:
-                # - ReviewTask
-                # - TestTask
-                ```
-
-            Custom format:
-                ```python
-                def parse_plan(content: str, context: ContextVariables) -> Plan:
-                    # Custom parsing logic
-                    return Plan(id="plan-1", tasks=[...])
-
-
-                planning_agent = LitePlanningAgent(swarm=swarm, response_format=parse_plan)
-                # Will use custom parser instead of schema
-                ```
+            Plan schema configured with registered task types.
         """
         task_definitions = self._task_registry.get_task_definitions()
         task_types = [td.task_type for td in task_definitions]
@@ -388,106 +302,19 @@ class LitePlanningAgent(PlanningAgent):
     def _validate_plan(self, plan: Plan) -> Plan:
         """Validate a plan against task registry and dependency rules.
 
-        Checks that all tasks are registered and that the dependency graph is
-        a valid DAG without cycles.
+        Performs two-phase validation:
+        1. Verifies all task types are registered and valid
+        2. Checks that dependencies form a valid DAG without cycles
 
         Args:
             plan: Plan to validate.
 
         Returns:
-            The validated Plan if all checks pass.
+            The validated plan if all checks pass.
 
         Raises:
-            PlanValidationError: If the plan contains unknown task types or has invalid
+            PlanValidationError: If plan contains unknown task types or has invalid
                 dependencies.
-
-        Examples:
-            Valid plan:
-                ```python
-                plan = Plan(
-                    id="plan-1",
-                    tasks=[
-                        Task(
-                            # Base Task required fields
-                            type="review",
-                            id="1",
-                            title="Review code",
-                            description="Review PR changes",
-                            status=TaskStatus.PENDING,
-                            assignee=None,
-                            dependencies=[],
-                            metadata=None,
-                        ),
-                        Task(
-                            # Base Task required fields
-                            type="test",
-                            id="2",
-                            title="Run tests",
-                            description="Run test suite",
-                            status=TaskStatus.PENDING,
-                            assignee=None,
-                            dependencies=["1"],
-                            metadata=None,
-                        ),
-                    ],
-                    metadata=None,
-                )
-                validated_plan = planner._validate_plan(plan)  # Returns plan if valid
-                ```
-
-            Unknown task type:
-                ```python
-                plan = Plan(
-                    id="plan-1",
-                    tasks=[
-                        Task(
-                            type="unknown",  # Unknown type
-                            id="1",
-                            title="Invalid task",
-                            description="This will fail",
-                            status=TaskStatus.PENDING,
-                            assignee=None,
-                            dependencies=[],
-                            metadata=None,
-                        )
-                    ],
-                    metadata=None,
-                )
-                planning_agent._validate_plan(plan)
-                # Raises PlanValidationError: Unknown task type
-                ```
-
-            Invalid dependencies:
-                ```python
-                plan = Plan(
-                    id="plan-1",
-                    tasks=[
-                        Task(
-                            type="review",
-                            id="1",
-                            title="Task 1",
-                            description="First task",
-                            status=TaskStatus.PENDING,
-                            assignee=None,
-                            dependencies=["2"],  # Circular dependency
-                            metadata=None,
-                        ),
-                        Task(
-                            type="test",
-                            id="2",
-                            title="Task 2",
-                            description="Second task",
-                            status=TaskStatus.PENDING,
-                            assignee=None,
-                            dependencies=["1"],  # Circular dependency
-                            metadata=None,
-                        ),
-                    ],
-                    metadata=None,
-                )
-                planning_agent._validate_plan(plan)
-                # Raises PlanValidationError: Invalid task dependencies
-                ```
         """
         for task in plan.tasks:
             if not self._task_registry.contains_task_type(task.type):
@@ -502,98 +329,34 @@ class LitePlanningAgent(PlanningAgent):
         self,
         response: str,
         response_format: PlanResponseFormat,
-        context: ContextVariables,
+        context_variables: ContextVariables | None = None,
     ) -> Plan:
-        """Parse agent response into a Plan object.
+        """Parse agent response into a plan object.
 
-        Handles both direct Plan schemas and callable parsers.
-        Uses json_repair to attempt basic JSON repair before validation.
+        Converts raw agent responses into structured plan objects using either
+        direct schema validation or custom parser functions. Uses json_repair for
+        basic error recovery before validation.
 
         Args:
             response: Raw response string from agent.
-            response_format: Schema or parser function.
-            context: Context for parsing.
+            response_format: Schema or parser function for validation.
+            context_variables: Optional context for parsing.
 
         Returns:
-            Parsed Plan object.
+            Validated plan object matching the response format.
 
         Raises:
             ValueError: If response format is invalid.
-            ValidationError: If response cannot be parsed into Plan.
+            ValidationError: If response cannot be parsed into plan.
             ResponseParsingError: If there are other errors during parsing.
-
-        Examples:
-            Parse with schema:
-                ```python
-                response = '''
-                {
-                    "tasks": [
-                        {
-                            "type": "review",
-                            "id": "1",
-                            "title": "Review PR",
-                            "description": "Review code changes",
-                            "status": "pending",
-                            "assignee": null,
-                            "dependencies": [],
-                            "metadata": null
-                        }
-                    ],
-                    "metadata": null
-                }
-                '''
-                plan = await planner._parse_response(
-                    response=response,
-                    response_format=Plan,
-                    context=context,
-                )
-                # Returns Plan instance
-                ```
-
-            Parse with custom function:
-                ```python
-                def parse_plan(content: str, context: ContextVariables) -> Plan:
-                    # Custom parsing logic
-                    data = json.loads(content)
-                    return Plan(tasks=[...])
-
-
-                plan = await planner._parse_response(
-                    response=response,
-                    response_format=parse_plan,
-                    context=context,
-                )
-                # Returns Plan via custom parser
-                ```
-
-            With json_repair:
-                ```python
-                response = '''
-                {
-                    'tasks': [  # Single quotes
-                        {
-                            id: "1",  # Missing quotes
-                            type: "review",
-                            title: "Review PR",
-                            dependencies: []
-                        }
-                    ]
-                }
-                '''
-                plan = await planning_agent._parse_response(
-                    response=response,
-                    response_format=Plan,
-                    context=context,
-                )
-                # Still returns valid Plan
-                ```
         """
         if is_callable(response_format):
-            return response_format(response, context)
+            return response_format(response, context_variables)
 
         if not is_subtype(response_format, Plan):
             raise ValueError("Invalid response format")
 
+        # TODO: Use RepairAgent to fix JSON errors
         decoded_object = json_repair.repair_json(response, return_objects=True)
         if isinstance(decoded_object, tuple):
             decoded_object = decoded_object[0]
@@ -604,101 +367,31 @@ class LitePlanningAgent(PlanningAgent):
         self,
         agent: Agent,
         response: str,
-        context: ContextVariables,
+        context_variables: ContextVariables | None = None,
     ) -> Plan:
         """Process and validate a planning response.
 
-        Attempts to parse and validate the response according to the response
-        format. If validation fails, tries to recover using the response repair
-        agent.
+        Manages the complete lifecycle of response processing by parsing the raw
+        response, attempting repair for invalid responses, and validating the
+        resulting plan against task registry and dependency rules.
 
         Args:
             agent: Agent that produced the response.
-            response: Raw response string.
-            context: Context for parsing and repair.
+            response: Raw response string from agent.
+            context_variables: Optional context for processing.
 
         Returns:
-            A valid Plan object.
+            Complete validated plan object.
 
         Raises:
-            PlanValidationError: If the plan fails validation even after repair.
-            ResponseParsingError: If the response cannot be parsed into a valid plan.
-
-        Examples:
-            Successful processing:
-                ```python
-                response = '''
-                {
-                    "tasks": [
-                        {
-                            "type": "review",
-                            "id": "1",
-                            "title": "Review PR",
-                            "description": "Review code changes",
-                            "status": "pending",
-                            "assignee": null,
-                            "dependencies": [],
-                            "metadata": null
-                        }
-                    ],
-                    "metadata": null
-                }
-                '''
-                plan = await planner._process_planning_result(
-                    agent=agent,
-                    response=response,
-                    context=context,
-                )
-                # Returns valid Plan
-                ```
-
-            With response repair:
-                ```python
-                response = '''
-                {
-                    tasks: [  # Invalid JSON
-                        {
-                            id: "1",
-                            type: "review",
-                            title: "Review PR"
-                        }
-                    ]
-                }
-                '''
-                plan = await planner._process_planning_result(
-                    agent=agent,
-                    response=response,
-                    context=context,
-                )
-                # Returns repaired and validated Plan
-                ```
-
-            Invalid task type:
-                ```python
-                response = '''
-                {
-                    "tasks": [
-                        {
-                            "id": "1",
-                            "type": "unknown",  # Unknown type
-                            "title": "Invalid task"
-                        }
-                    ]
-                }
-                '''
-                # Raises PlanValidationError: Unknown task type
-                plan = await planning_agent._process_planning_result(
-                    agent=agent,
-                    response=response,
-                    context=context,
-                )
-                ```
+            PlanValidationError: If plan fails validation even after repair.
+            ResponseParsingError: If response cannot be parsed into valid plan.
         """
         try:
             plan = await self._parse_response(
                 response=response,
                 response_format=self.response_format,
-                context=context,
+                context_variables=context_variables,
             )
 
             return self._validate_plan(plan)
@@ -709,7 +402,7 @@ class LitePlanningAgent(PlanningAgent):
                 response=response,
                 response_format=self.response_format,
                 validation_error=validation_error,
-                context=context,
+                context_variables=context_variables,
             )
 
             return self._validate_plan(repaired_response)
@@ -722,67 +415,97 @@ class LitePlanningAgent(PlanningAgent):
             ) from e
 
     @override
+    @returnable
     async def create_plan(
         self,
-        prompt: str,
-        context: ContextVariables | None = None,
-    ) -> Plan:
-        """Create a plan from the given prompt and context.
+        messages: list[Message],
+        context_variables: ContextVariables | None = None,
+    ) -> AsyncStream[SwarmEvent, PlanResult]:
+        """Create a plan from conversation messages.
+
+        Uses an LLM agent to analyze messages and generate a structured plan with
+        ordered tasks. The plan is validated to ensure task types are registered
+        and dependencies form a valid DAG. Following Swarm's stateless design,
+        the method maintains no internal state between operations.
 
         Args:
-            prompt: Description of work to be done.
-            context: Optional additional context variables.
+            messages: List of conversation messages for planning.
+            context_variables: Optional variables for dynamic resolution.
 
         Returns:
-            A valid Plan object.
+            ReturnableAsyncGenerator yielding events and returning plan result.
 
         Raises:
-            PlanValidationError: If the generated plan fails validation or has invalid
-                dependencies.
-            ResponseParsingError: If the agent response cannot be parsed into a valid plan.
+            PlanValidationError: If plan fails validation or has invalid dependencies.
+            ResponseParsingError: If response cannot be parsed into valid plan.
+            SwarmTeamError: If planning agent fails to return content.
 
         Examples:
             Basic planning:
                 ```python
-                plan = await planning_agent.create_plan(
-                    prompt="Review and test the authentication changes in PR #123"
+                stream = planning_agent.create_plan(
+                    messages=[
+                        Message(
+                            role="user",
+                            content="Review and test the authentication changes in PR #123",
+                        ),
+                    ],
                 )
-                print(f"Created plan with {len(plan.tasks)} tasks")
-                for task in plan.tasks:
+
+                # Process events during planning
+                async for event in stream:
+                    if event.type == "plan_created":
+                        print(f"Created plan with {len(event.plan.tasks)} tasks")
+
+                # Get final result after completion
+                plan_result = await stream.get_return_value()
+                for task in plan_result.plan.tasks:
                     print(f"- {task.title} ({task.type})")
                 ```
 
             With context:
                 ```python
-                plan = await planning_agent.create_plan(
-                    prompt="Review the security changes",
-                    context=ContextVariables(
+                stream = planning_agent.create_plan(
+                    messages=[
+                        Message(
+                            role="user",
+                            content="Review the security changes",
+                        ),
+                    ],
+                    context_variables=ContextVariables(
                         pr_url="github.com/org/repo/123",
                         focus_areas=["authentication", "authorization"],
                         security_checklist=["SQL injection", "XSS", "CSRF"],
                     ),
                 )
+                plan_result = await stream.get_return_value()
                 # Plan tasks will incorporate context information
                 ```
 
             Complex workflow:
                 ```python
-                plan = await planning_agent.create_plan(
-                    prompt=\"\"\"
-                    Review and deploy the new payment integration:
-                    1. Review code changes
-                    2. Run security tests
-                    3. Test payment flows
-                    4. Deploy to staging
-                    5. Monitor for issues
-                    \"\"\",
-                    context=ContextVariables(
+                stream = planning_agent.create_plan(
+                    messages=[
+                        Message(
+                            role="user",
+                            content=\"\"\"
+                            Review and deploy the new payment integration:
+                            1. Review code changes
+                            2. Run security tests
+                            3. Test payment flows
+                            4. Deploy to staging
+                            5. Monitor for issues
+                            \"\"\",
+                        ),
+                    ],
+                    context_variables=ContextVariables(
                         pr_url="github.com/org/repo/456",
                         deployment_env="staging",
                         test_cases=["visa", "mastercard", "paypal"],
-                        monitoring_metrics=["latency", "error_rate"]
-                    )
+                        monitoring_metrics=["latency", "error_rate"],
+                    ),
                 )
+                plan_result = await stream.get_return_value()
                 # Plan will have tasks for each step with proper dependencies
                 # - Code review task
                 # - Security testing task (depends on review)
@@ -794,7 +517,12 @@ class LitePlanningAgent(PlanningAgent):
             Error handling:
                 ```python
                 try:
-                    plan = await planning_agent.create_plan(prompt="Review the changes")
+                    stream = planning_agent.create_plan(
+                        messages=[
+                            Message(role="user", content="Review the changes"),
+                        ],
+                    )
+                    plan_result = await stream.get_return_value()
                 except PlanValidationError as e:
                     if "Unknown task type" in str(e):
                         print("Plan contains unsupported task types")
@@ -804,40 +532,41 @@ class LitePlanningAgent(PlanningAgent):
                         print(f"Plan validation failed: {e}")
                 except ResponseParsingError as e:
                     print(f"Failed to parse planning response: {e}")
-                else:
-                    # Use the plan
-                    pass
+                except SwarmTeamError as e:
+                    print(f"Planning failed: {e}")
                 ```
 
-            Custom template:
-                ```python
-                # With custom prompt template
-                planning_agent = LitePlanningAgent(
-                    swarm=swarm,
-                    prompt_template=lambda p, c: f"{p} for {c.get('project')}",
-                    task_definitions=[review_def, test_def],
-                )
-                plan = await planning_agent.create_plan(
-                    prompt="Review the changes",
-                    context=ContextVariables(project="Payment API"),
-                )
-                # Template will format prompt as "Review the changes for Payment API"
-                ```
+        Notes:
+            - Each call returns an event stream for progress tracking
+            - Plans are validated before being returned
+            - Task types must match registered definitions
+            - Dependencies must form a valid DAG
         """
-        context = ContextVariables(context or {})
-
-        if is_callable(self.prompt_template):
-            prompt = self.prompt_template(prompt, context)
-
-        result = await self.swarm.execute(
+        stream = self.swarm.stream(
             agent=self.agent,
-            prompt=prompt,
-            context_variables=context,
-            event_handler=self.event_handler,
+            messages=messages,
+            context_variables=context_variables,
         )
 
-        return await self._process_planning_result(
+        async for event in stream:
+            yield YieldItem(event)
+
+        result = await stream.get_return_value()
+        response = result.agent_responses[-1] if result.agent_responses else None
+        content = response.content if response else None
+        if not content:
+            raise SwarmTeamError("The planning agent did not return any content")
+
+        plan = await self._process_planning_result(
             agent=self.agent,
-            response=result.content or "",
-            context=context,
+            response=content,
+            context_variables=context_variables,
+        )
+
+        yield ReturnItem(
+            PlanResult(
+                plan=plan,
+                new_messages=result.new_messages,
+                all_messages=result.all_messages,
+            )
         )
