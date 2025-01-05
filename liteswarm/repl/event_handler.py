@@ -1,14 +1,23 @@
+# Copyright 2025 GlyphyAI
+#
+# Use of this source code is governed by an MIT-style
+# license that can be found in the LICENSE file or at
+# https://opensource.org/licenses/MIT.
+
 import sys
 from typing import TYPE_CHECKING
 
-from typing_extensions import override
-
-from liteswarm.core.console_handler import ConsoleEventHandler
 from liteswarm.types.events import (
+    AgentCompleteEvent,
     AgentResponseChunkEvent,
     AgentSwitchEvent,
     CompleteEvent,
     ErrorEvent,
+    PlanCompletedEvent,
+    PlanCreatedEvent,
+    SwarmEvent,
+    TaskCompletedEvent,
+    TaskStartedEvent,
     ToolCallResultEvent,
 )
 
@@ -16,27 +25,23 @@ if TYPE_CHECKING:
     from liteswarm.types.swarm import Agent
 
 
-class ReplEventHandler(ConsoleEventHandler):
-    """REPL event handler with formatted output.
+class ConsoleEventHandler:
+    """Console event handler providing formatted output for REPL interactions.
 
-    Implements an event handler for the REPL environment that provides:
-    - Formatted output with agent identification
-    - Visual indicators for different event types
-    - Real-time status updates
-    - Error handling with clear feedback
-    - Tool usage tracking and reporting
+    Processes and displays Swarm events with distinct visual indicators for
+    different event types. Maintains message continuity and provides clear
+    feedback for each event type:
 
-    The handler uses various emoji indicators to make different types of events
-    visually distinct and easy to follow:
-    - 🔄 Agent switches
-    - 🔧 Tool calls
-    - 📎 Tool results
-    - ❌ Errors
-    - ✅ Completion
+    Event Types:
+        - Agent responses with message continuity
+        - Agent switches with transition indicators
+        - Tool calls with function details
+        - Task and plan status updates
+        - Error messages and completion states
 
     Example:
         ```python
-        handler = ReplEventHandler()
+        handler = ConsoleEventHandler()
         result = await swarm.execute(
             agent=agent,
             prompt="Hello!",
@@ -49,40 +54,66 @@ class ReplEventHandler(ConsoleEventHandler):
         # 📎 [agent_id] Got result: tool result
         # ✅ [agent_id] Completed
         ```
-
-    Notes:
-        - Maintains agent context between messages
-        - Handles continuation indicators for long responses
-        - Provides clear error feedback
-        - Ensures consistent formatting across all events
     """
 
     def __init__(self) -> None:
-        """Initialize the event handler with usage tracking.
-
-        Sets up the handler with initial state for tracking the last active
-        agent to manage message continuity and formatting.
-        """
+        """Initialize event handler with message continuity tracking."""
         super().__init__()
         self._last_agent: Agent | None = None
 
-    @override
-    async def _handle_response(self, event: AgentResponseChunkEvent) -> None:
-        """Handle agent response events.
+    def on_event(self, event: SwarmEvent) -> None:
+        """Process and display Swarm events with appropriate formatting.
+
+        Formats each event type with distinct visual indicators and context:
+        - Agent responses include agent ID and content
+        - Tool calls show function name and arguments
+        - Error messages provide clear feedback
+        - Status updates show progress indicators
 
         Args:
-            event: Response event to handle.
+            event: Swarm event to process and display.
         """
-        completion = event.chunk.completion
+        match event:
+            # Swarm Events
+            case AgentResponseChunkEvent():
+                self._handle_response_chunk(event)
+            case ToolCallResultEvent():
+                self._handle_tool_call_result(event)
+            case AgentSwitchEvent():
+                self._handle_agent_switch(event)
+            case AgentCompleteEvent():
+                self._handle_agent_complete(event)
+            case ErrorEvent():
+                self._handle_error(event)
+            case CompleteEvent():
+                self._handle_complete(event)
+
+            # Swarm Team Events
+            case PlanCreatedEvent():
+                self._handle_team_plan_created(event)
+            case TaskStartedEvent():
+                self._handle_team_task_started(event)
+            case TaskCompletedEvent():
+                self._handle_team_task_completed(event)
+            case PlanCompletedEvent():
+                self._handle_team_plan_completed(event)
+
+    def _handle_response_chunk(self, event: AgentResponseChunkEvent) -> None:
+        """Process response chunk from agent.
+
+        Args:
+            event: Response chunk event.
+        """
+        completion = event.response_chunk.completion
         if completion.finish_reason == "length":
             print("\n[...continuing...]", end="", flush=True)
 
         if content := completion.delta.content:
             # Only print agent ID prefix for the first character of a new message
-            if self._last_agent != event.chunk.agent:
-                agent_id = event.chunk.agent.id
+            if self._last_agent != event.agent:
+                agent_id = event.agent.id
                 print(f"\n[{agent_id}] ", end="", flush=True)
-                self._last_agent = event.chunk.agent
+                self._last_agent = event.agent
 
             print(content, end="", flush=True)
 
@@ -90,34 +121,11 @@ class ReplEventHandler(ConsoleEventHandler):
         if completion.finish_reason:
             print("", flush=True)
 
-    @override
-    async def _handle_error(self, event: ErrorEvent) -> None:
-        """Handle error events.
+    def _handle_tool_call_result(self, event: ToolCallResultEvent) -> None:
+        """Process tool call result.
 
         Args:
-            event: Error event to handle.
-        """
-        agent_id = event.agent.id if event.agent else "unknown"
-        print(f"\n❌ [{agent_id}] Error: {str(event.error)}", file=sys.stderr)
-        self._last_agent = None
-
-    @override
-    async def _handle_agent_switch(self, event: AgentSwitchEvent) -> None:
-        """Handle agent switch events.
-
-        Args:
-            event: Agent switch event to handle.
-        """
-        prev_id = event.previous.id if event.previous else "none"
-        curr_id = event.current.id
-        print(f"\n🔄 Switching from {prev_id} to {curr_id}...")
-
-    @override
-    async def _handle_tool_call_result(self, event: ToolCallResultEvent) -> None:
-        """Handle tool result events.
-
-        Args:
-            event: Tool result event to handle.
+            event: Tool call result event.
         """
         agent_id = event.agent.id
         tool_call = event.tool_call_result.tool_call
@@ -125,13 +133,85 @@ class ReplEventHandler(ConsoleEventHandler):
         tool_id = tool_call.id
         print(f"\n📎 [{agent_id}] Tool '{tool_name}' [{tool_id}] called")
 
-    @override
-    async def _handle_complete(self, event: CompleteEvent) -> None:
-        """Handle completion events.
+    def _handle_agent_switch(self, event: AgentSwitchEvent) -> None:
+        """Process agent switch.
 
         Args:
-            event: Completion event to handle.
+            event: Agent switch event.
         """
-        agent_id = event.agent.id if event.agent else "unknown"
+        prev_id = event.prev_agent.id if event.prev_agent else "none"
+        curr_id = event.next_agent.id
+        print(f"\n🔄 Switching from {prev_id} to {curr_id}...")
+
+    def _handle_agent_complete(self, event: AgentCompleteEvent) -> None:
+        """Process agent completion.
+
+        Args:
+            event: Agent completion event.
+        """
+        agent_id = event.agent.id
         print(f"\n✅ [{agent_id}] Completed", flush=True)
         self._last_agent = None
+
+    def _handle_error(self, event: ErrorEvent) -> None:
+        """Process error.
+
+        Args:
+            event: Error event.
+        """
+        agent_id = event.agent.id if event.agent else "unknown"
+        print(f"\n❌ [{agent_id}] Error: {str(event.error)}", file=sys.stderr)
+        self._last_agent = None
+
+    def _handle_complete(self, event: CompleteEvent) -> None:
+        """Process completion.
+
+        Args:
+            event: Completion event.
+        """
+        self._last_agent_id = None
+        print("\n\n✅ Completed\n", flush=True)
+
+    def _handle_team_plan_created(self, event: PlanCreatedEvent) -> None:
+        """Process team plan creation.
+
+        Args:
+            event: Plan creation event.
+        """
+        plan_id = event.plan.id
+        task_count = len(event.plan.tasks)
+        print(f"\n\n🔧 Plan created (task count: {task_count}): {plan_id}\n", flush=True)
+
+    def _handle_team_task_started(self, event: TaskStartedEvent) -> None:
+        """Process team task start.
+
+        Args:
+            event: Task start event.
+        """
+        task_id = event.task.id
+        assignee_id = event.task.assignee if event.task.assignee else "unknown"
+        print(f"\n\n🔧 Task started: {task_id} by {assignee_id}\n", flush=True)
+
+    def _handle_team_task_completed(self, event: TaskCompletedEvent) -> None:
+        """Process team task completion.
+
+        Args:
+            event: Task completion event.
+        """
+        task_id = event.task.id
+        assignee_id = event.task.assignee if event.task.assignee else "unknown"
+        task_status = event.task.status
+        print(
+            f"\n\n✅ Task completed: {task_id} by {assignee_id} (status: {task_status})\n",
+            flush=True,
+        )
+
+    def _handle_team_plan_completed(self, event: PlanCompletedEvent) -> None:
+        """Process team plan completion.
+
+        Args:
+            event: Plan completion event.
+        """
+        plan_id = event.plan.id
+        task_count = len(event.plan.tasks)
+        print(f"\n\n✅ Plan completed (task count: {task_count}): {plan_id}\n", flush=True)
