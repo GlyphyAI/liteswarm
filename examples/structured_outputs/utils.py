@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -10,10 +10,8 @@ from typing import TypeAlias, TypeVar
 from pydantic import BaseModel
 
 from liteswarm.core import Swarm
-from liteswarm.types import Agent, ContextVariables
+from liteswarm.types import Agent, ContextVariables, Message
 from liteswarm.utils.typing import is_callable
-
-from .handlers import EventHandler
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -64,13 +62,23 @@ async def generate_structured_response_typed(
         ValidationError: If response doesn't match expected format.
     """
     swarm = Swarm()
-    result = await swarm.execute(
+    stream = swarm.stream(
         agent=agent,
-        prompt=user_prompt,
-        event_handler=EventHandler(),
+        messages=[Message(role="user", content=user_prompt)],
     )
 
-    if not result.content:
+    async for event in stream:
+        if event.type == "agent_response_chunk":
+            completion = event.response_chunk.completion
+            if content := completion.delta.content:
+                print(f"{content}", end="", flush=True)
+
+        if event.type == "agent_complete":
+            print()
+
+    result = await stream.get_return_value()
+    response = result.last_agent_response
+    if not response.content:
         raise ValueError("No response content")
 
-    return parse_response(result.content, response_format)
+    return parse_response(response.content, response_format)
