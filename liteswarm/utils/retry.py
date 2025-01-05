@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -378,8 +378,10 @@ def _sync_gen_wrapper(
     )
 
 
-def retry_with_backoff(
+def retry_wrapper(
     func: Callable[P, T],
+    /,
+    *,
     exception: type[Exception] | tuple[type[Exception], ...] = Exception,
     max_retries: int = 3,
     initial_delay: float = 1.0,
@@ -525,3 +527,87 @@ def retry_with_backoff(
         "  - Async generator functions (async def func with yield)\n"
         "Did you pass a function instead of calling it?"
     )
+
+
+def retry(
+    *,
+    exception: type[Exception] | tuple[type[Exception], ...] = Exception,
+    max_retries: int = 3,
+    initial_delay: float = 1.0,
+    max_delay: float = 60.0,
+    backoff_factor: float = 2.0,
+) -> Callable[[Callable[P, T]], Callable[P, T]]:
+    """Decorator that applies exponential backoff retry logic to functions.
+
+    Provides a more concise way to add retry behavior to functions compared to
+    using retry_wrapper directly. Supports all function types including sync,
+    async, generators, and async generators.
+
+    Args:
+        exception: Exception type(s) that trigger retries. Defaults to all exceptions.
+        max_retries: Maximum number of retry attempts. Defaults to 3.
+        initial_delay: Initial delay between retries in seconds. Defaults to 1.0.
+        max_delay: Maximum possible delay between retries in seconds. Defaults to 60.0.
+        backoff_factor: Exponential backoff multiplier. Defaults to 2.0.
+
+    Returns:
+        Decorator function that wraps the target with retry logic.
+
+    Examples:
+        Basic retry on any error:
+            ```python
+            @retry()
+            async def fetch_data() -> dict:
+                return await api.get_data()
+            ```
+
+        Custom error handling:
+            ```python
+            @retry(
+                exception=(ConnectionError, TimeoutError),
+                max_retries=5,
+                initial_delay=0.1,
+            )
+            def connect_db() -> Connection:
+                return db.connect()
+            ```
+
+        Generator retry:
+            ```python
+            @retry(exception=IOError)
+            def read_chunks() -> Generator[bytes, None, None]:
+                with open("large_file.dat", "rb") as f:
+                    while chunk := f.read(8192):
+                        yield chunk
+            ```
+
+        Async generator retry:
+            ```python
+            @retry(
+                exception=Exception,
+                max_retries=3,
+                backoff_factor=1.5,
+            )
+            async def stream_events() -> AsyncGenerator[Event, None]:
+                async for event in api.get_event_stream():
+                    yield event
+            ```
+
+    Notes:
+        - For generators, retries the entire generation from start
+        - Delays increase exponentially up to max_delay
+        - Logs retry attempts and errors for debugging
+        - Preserves function signatures and type hints
+    """
+
+    def decorator(func: Callable[P, T]) -> Callable[P, T]:
+        return retry_wrapper(
+            func,
+            exception=exception,
+            max_retries=max_retries,
+            initial_delay=initial_delay,
+            max_delay=max_delay,
+            backoff_factor=backoff_factor,
+        )
+
+    return decorator
