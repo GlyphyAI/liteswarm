@@ -28,10 +28,11 @@ requires-python = ">=3.11"
 dependencies = [
     "griffe>=1.5.1",
     "json-repair>=0.30.2",
-    "litellm>=1.55.7",
+    "litellm>=1.56.5",
     "numpy>=2.2.0",
     "orjson>=3.10.11",
     "pydantic>=2.9.2",
+    "prompt_toolkit>=3.0.48",
 ]
 
 [project.urls]
