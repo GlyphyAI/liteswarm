@@ -110,6 +110,7 @@ select = [
 [tool.ruff.lint.pylint]
 max-args = 20
 max-branches = 20
+max-statements = 100
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -120,6 +121,13 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
 docstring-code-format = true
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore::pydantic.PydanticDeprecatedSince20",
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
 
 [tool.mypy]
 python_version = "3.11"
