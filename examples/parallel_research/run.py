@@ -1,20 +1,20 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import os
+import json
 import random
 from time import sleep
 from typing import Any
 
-from liteswarm.core import ConsoleEventHandler, Swarm
-from liteswarm.types import LLM, Agent
-from liteswarm.utils.logging import enable_logging
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent, Message
+from liteswarm.utils import dump_messages, enable_logging
 
-os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
+enable_logging(default_level="DEBUG")
 
 RESEARCH_AGENT_INSTRUCTIONS = """
 You are a city research analyst. Your task is to gather and analyze data about cities using the available tools.
@@ -100,16 +100,36 @@ async def run() -> None:
     )
 
     client = Swarm()
-    result = await client.execute(
+    stream = client.stream(
         agent=research_agent,
-        prompt="Please analyze the city of Seattle and provide insights about its weather, population, tourism, and economy.",
-        event_handler=ConsoleEventHandler(),
+        messages=[
+            Message(
+                role="user",
+                content="Please analyze the city of Seattle and provide insights about its weather, population, tourism, and economy.",
+            )
+        ],
     )
 
+    async for event in stream:
+        if event.type == "agent_response_chunk":
+            completion = event.response_chunk.completion
+            if content := completion.delta.content:
+                print(f"{content}", end="", flush=True)
+
+            if completion.finish_reason:
+                print()
+
+        if event.type == "agent_complete":
+            print()
+
     print("\nFinal Analysis Complete!")
-    print(f"\n\nResult: {result.content}\n\n")
+
+    # Get the conversation history
+    result = await stream.get_return_value()
+    messages = dump_messages(result.all_messages)
+    print("\nConversation History:")
+    print(json.dumps(messages, indent=2))
 
 
 if __name__ == "__main__":
-    enable_logging()
     asyncio.run(run())
