@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -61,7 +61,7 @@ class TaskRegistry:
         if task_definitions:
             self.register_tasks(task_definitions)
 
-    def register_task(self, task_definition: TaskDefinition) -> None:
+    def register_task_definition(self, task_definition: TaskDefinition) -> None:
         """Register a single task definition.
 
         Args:
@@ -105,7 +105,7 @@ class TaskRegistry:
                 ```
         """
         for task_definition in task_definitions:
-            self.register_task(task_definition)
+            self.register_task_definition(task_definition)
 
     def get_task_definition(self, task_type: str) -> TaskDefinition:
         """Get a task definition by type.
@@ -137,6 +137,14 @@ class TaskRegistry:
 
         Returns:
             List of all registered task definitions.
+
+        Examples:
+            Get all registered task definitions:
+                ```python
+                definitions = registry.get_task_definitions()
+                for definition in definitions:
+                    print(f"Task type: {definition.task_type}")
+                ```
         """
         return list(self._registry.values())
 
