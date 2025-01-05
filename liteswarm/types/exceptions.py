@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -157,19 +157,24 @@ class ContextLengthError(SwarmError):
     def __init__(
         self,
         message: str,
-        current_length: int,
+        model: str | None = None,
+        current_length: int | None = None,
+        max_length: int | None = None,
         original_error: Exception | None = None,
     ) -> None:
         """Initialize a new ContextLengthError.
 
         Args:
             message: Human-readable error description.
+            model: Model that exceeded the context limit.
             current_length: Current context length that exceeded the limit.
+            max_length: Maximum allowed context length.
             original_error: Optional underlying exception that caused the failure.
         """
         super().__init__(message)
-
+        self.model = model
         self.current_length = current_length
+        self.max_length = max_length
         self.original_error = original_error
 
 
