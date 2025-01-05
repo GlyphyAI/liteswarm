@@ -11,7 +11,9 @@ from .llm import LLM, AgentTool
 from .misc import JSON
 from .swarm import (
     Agent,
+    AgentExecutionResult,
     AgentInstructions,
+    AgentResponse,
     AgentResponseChunk,
     CompletionResponseChunk,
     Delta,
@@ -40,7 +42,9 @@ __all__ = [
     "JSON",
     "LLM",
     "Agent",
+    "AgentExecutionResult",
     "AgentInstructions",
+    "AgentResponse",
     "AgentResponseChunk",
     "AgentTool",
     "ApprovePlan",
