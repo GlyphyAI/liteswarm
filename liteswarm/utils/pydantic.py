@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -728,7 +728,7 @@ def replace_default_values(
     return target_model_with_placeholders
 
 
-def change_field_type(  # noqa: PLR0913
+def change_field_type(
     model_type: type[T],
     field_name: str,
     new_type: Any,
