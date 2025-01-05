@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -332,7 +332,7 @@ class ReturnableAsyncGenerator(Generic[YieldType, ReturnType]):
 
     This class wraps an async generator that yields StreamItem instances and provides
     a way to access both the yielded values and the final return value. It implements
-    the async generator protocol and adds a get_result() method to retrieve the
+    the async generator protocol and adds a get_return_value() method to retrieve the
     return value.
 
     Type Parameters:
@@ -350,7 +350,7 @@ class ReturnableAsyncGenerator(Generic[YieldType, ReturnType]):
         gen = ReturnableAsyncGenerator(numbers())
         async for num in gen:
             print(num)  # Prints: 1, 2
-        result = await gen.get_result()  # Gets: "done"
+        result = await gen.get_return_value()  # Gets: "done"
         ```
     """
 
@@ -495,7 +495,7 @@ class ReturnableAsyncGenerator(Generic[YieldType, ReturnType]):
     # MARK: Public API
     # ================================================
 
-    async def get_result(self) -> ReturnType:
+    async def get_return_value(self) -> ReturnType:
         """Retrieve the generator's return value.
 
         If iteration is not complete, this method will consume the remaining
@@ -543,7 +543,7 @@ def returnable(
 
     This decorator transforms an async generator that yields StreamItem instances into
     a ReturnableAsyncGenerator, making it easy to access both yielded values through
-    iteration and the final return value through get_result().
+    iteration and the final return value through get_return_value().
 
     Type Parameters:
         P: The parameters of the decorated function.
@@ -569,7 +569,7 @@ def returnable(
         counter = count_to(3)
         async for num in counter:
             print(num)  # Prints: 0, 1, 2
-        result = await counter.get_result()  # Gets: "done"
+        result = await counter.get_return_value()  # Gets: "done"
         ```
     """
 
