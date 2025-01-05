@@ -13,8 +13,7 @@ from litellm.types.utils import FunctionCall, Usage
 from pydantic import BaseModel, ConfigDict, Discriminator, field_serializer
 
 from liteswarm.types.context import ContextVariables
-from liteswarm.types.llm import LLM, FinishReason
-from liteswarm.types.messages import AudioResponse, Message, MessageRole, ToolCall
+from liteswarm.types.llm import LLM, AudioResponse, FinishReason, MessageRole, ToolCall
 from liteswarm.types.misc import JSON
 
 AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
@@ -47,6 +46,70 @@ Examples:
 
 DYNAMIC_INSTRUCTIONS = "<dynamic_instructions>"
 """Constant indicating that agent instructions are dynamic (callable)."""
+
+
+class Message(BaseModel):
+    """Message in a conversation between user, assistant, and tools.
+
+    Represents a message in a conversation between participants
+    with content and optional tool interactions. Each message has
+    a specific role and may include tool calls or responses.
+
+    Examples:
+        System message:
+            ```python
+            system_msg = Message(
+                role="system",
+                content="You are a helpful assistant.",
+            )
+            ```
+
+        Assistant with tool:
+            ```python
+            assistant_msg = Message(
+                role="assistant",
+                content="Let me calculate that.",
+                tool_calls=[
+                    ToolCall(
+                        id="calc_1",
+                        function={"name": "add", "arguments": '{"a": 2, "b": 2}'},
+                        type="function",
+                        index=0,
+                    )
+                ],
+            )
+            ```
+
+        Tool response:
+            ```python
+            tool_msg = Message(
+                role="tool",
+                content="4",
+                tool_call_id="calc_1",
+            )
+            ```
+    """
+
+    role: MessageRole
+    """Role of the message author."""
+
+    content: str | None = None
+    """Text content of the message."""
+
+    tool_calls: list[ToolCall] | None = None
+    """Tool calls made in this message."""
+
+    tool_call_id: str | None = None
+    """ID of the tool call this message responds to."""
+
+    audio: AudioResponse | None = None
+    """Audio response data if available."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+        extra="forbid",
+    )
 
 
 class AgentState(str, Enum):

@@ -4,9 +4,97 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from pydantic import BaseModel
+import uuid
+from datetime import datetime
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
 
 from liteswarm.types.swarm import Agent, AgentResponse, Message
+
+
+class ChatMessage(Message):
+    """Message for multi-user chat applications.
+
+    Extends the base Message with unique identification, session support,
+    and application-specific metadata. Used to build chat applications.
+
+    Examples:
+        Basic usage:
+            ```python
+            message = ChatMessage(
+                id="msg_123",
+                role="user",
+                content="Hello",
+                session_id="session_1",
+            )
+            ```
+
+        With metadata:
+            ```python
+            chat_msg = ChatMessage.from_message(
+                Message(role="user", content="Hello"),
+                session_id="session_1",
+                metadata={"user_id": "user_123"},
+            )
+            ```
+    """
+
+    id: str
+    """Unique message identifier."""
+
+    session_id: str | None = None
+    """Identifier of session the message belongs to."""
+
+    created_at: datetime = datetime.now()
+    """Message creation timestamp."""
+
+    metadata: dict[str, Any] | None = None
+    """Application-specific message data."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+        extra="forbid",
+    )
+
+    @classmethod
+    def from_message(
+        cls,
+        message: Message,
+        session_id: str | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> "ChatMessage":
+        """Create a ChatMessage from a base Message.
+
+        Converts a base Message to a ChatMessage by copying all fields
+        and adding identification information. If the input is already a
+        ChatMessage, returns a copy.
+
+        Args:
+            message: Base Message to convert.
+            session_id: Optional session identifier.
+            metadata: Optional message metadata.
+
+        Returns:
+            New ChatMessage with identification fields.
+        """
+        if isinstance(message, ChatMessage):
+            return message.model_copy()
+
+        return cls(
+            # Copy Message fields
+            role=message.role,
+            content=message.content,
+            tool_calls=message.tool_calls,
+            tool_call_id=message.tool_call_id,
+            audio=message.audio,
+            # Add identification fields
+            id=str(uuid.uuid4()),
+            session_id=session_id,
+            created_at=datetime.now(),
+            metadata=metadata,
+        )
 
 
 class ChatResponse(BaseModel):
