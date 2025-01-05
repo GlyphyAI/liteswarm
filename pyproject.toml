@@ -52,6 +52,11 @@ dev = [
     "commitizen>=4.1.0",
 ]
 
+examples = [
+    "fastapi>=0.115.6",
+    "uvicorn>=0.34.0",
+]
+
 [tool.setuptools.package-data]
 "liteswarm" = ["py.typed"]
 
