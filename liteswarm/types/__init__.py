@@ -8,14 +8,14 @@ from .chat import ChatResponse
 from .context import ContextVariables
 from .events import SwarmEvent
 from .llm import LLM, AgentTool
-from .messages import ChatMessage, Message
-from .misc import JSON, Number
+from .misc import JSON
 from .swarm import (
     Agent,
     AgentInstructions,
     AgentResponseChunk,
     CompletionResponseChunk,
     Delta,
+    Message,
     ResponseCost,
     ToolResult,
     Usage,
