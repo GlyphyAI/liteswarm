@@ -4,7 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from .chat import ChatResponse
+from .chat import ChatMessage, ChatResponse
 from .context import ContextVariables
 from .events import SwarmEvent
 from .llm import LLM, AgentTool
