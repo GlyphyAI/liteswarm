@@ -11,7 +11,7 @@ from typing import Any, Literal, get_type_hints
 
 from griffe import Docstring, DocstringSectionKind
 
-from liteswarm.types.misc import FunctionDocstring
+from liteswarm.types.utils import FunctionDocstring
 from liteswarm.utils.logging import disable_logging, log_verbose
 
 TYPE_MAP = {
@@ -339,6 +339,7 @@ def function_has_parameter(func: Callable[..., Any], param: str) -> bool:
             def greet(name: str) -> str:
                 return f"Hello {name}"
 
+
             assert function_has_parameter(greet, "name")
             assert not function_has_parameter(greet, "age")
             ```
@@ -347,6 +348,7 @@ def function_has_parameter(func: Callable[..., Any], param: str) -> bool:
             ```python
             def greet(name):  # No type hint
                 return f"Hello {name}"
+
 
             # Returns False (no type hints)
             result = function_has_parameter(greet, "name")

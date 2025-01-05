@@ -10,8 +10,8 @@ from typing import Any
 import litellm
 from litellm.utils import token_counter
 
-from liteswarm.types.messages import MessageAdapter, MessageT, TrimMessagesResult
 from liteswarm.types.swarm import Message
+from liteswarm.types.utils import MessageAdapter, MessageT, TrimMessagesResult
 from liteswarm.utils.logging import log_verbose
 
 
