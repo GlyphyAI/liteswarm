@@ -1,18 +1,18 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import Any, Literal, Protocol, TypeAlias, TypeVar, get_args, get_origin
+from typing import Annotated, Any, Literal, TypeAlias, TypeVar, get_args, get_origin
 
-from pydantic import BaseModel, ConfigDict, Field, field_serializer
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, field_serializer
 
 from liteswarm.types.context import ContextVariables
-from liteswarm.types.swarm import Agent
+from liteswarm.types.swarm import Agent, Message
 
 PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 """Type variable representing a Pydantic model or its subclass."""
@@ -26,21 +26,16 @@ dynamically based on task and context.
 Examples:
     Static template:
         ```python
-        instructions: TaskInstructions = '''
-            Process data in {task.input_file}.
-            Use batch size of {task.batch_size}.
-            Output format: {context.get('output_format')}.
-        '''
+        instructions: TaskInstructions = f"Process {task.title} using {tools}"
         ```
 
     Dynamic generator:
         ```python
         def generate_instructions(task: Task, context: ContextVariables) -> str:
             tools = context.get('available_tools', [])
-            return f'''
-                Process {task.title} using these tools: {', '.join(tools)}.
-                Priority: {context.get('priority', 'normal')}.
-            '''
+            return f"Process {task.title} using these tools: {tools}"
+
+        instructions: TaskInstructions = generate_instructions
         ```
 """
 
@@ -67,7 +62,7 @@ Examples:
         ```python
         def parse_review(content: str, context: ContextVariables) -> ReviewOutput:
             data = json.loads(content)
-            return ReviewOutput(**data)
+            return ReviewOutput.model_validate(data)
 
         response_format: PydanticResponseFormat = parse_review
         ```
@@ -94,11 +89,9 @@ Examples:
         ```python
         def parse_output(content: str, context: ContextVariables) -> BaseModel:
             data = json.loads(content)
-            return ProcessingOutput(
-                items_processed=data['processed'],
-                success_rate=data['success'] * 100,
-                errors=data.get('errors', [])
-            )
+            return ProcessingOutput.model_validate(data)
+
+        response_format: TaskResponseFormat = parse_output
         ```
 """
 
@@ -111,14 +104,16 @@ dynamically based on context.
 Examples:
     Static template:
         ```python
-        template: PromptTemplate = "Process {prompt} using {context.get('tools')}"
+        template: PromptTemplate = "Process {prompt} using {tools}"
         ```
 
     Dynamic template:
         ```python
         def generate_prompt(prompt: str, context: ContextVariables) -> str:
             tools = context.get("tools", [])
-            return f"Process {prompt} using available tools: {', '.join(tools)}"
+            return f"Process {prompt} using available tools: {tools}"
+
+        template: PromptTemplate = generate_prompt
         ```
 """
 
@@ -153,7 +148,8 @@ class TaskStatus(str, Enum):
     """Status of a task in its execution lifecycle.
 
     Tracks the progression of a task from creation through execution
-    to completion or failure.
+    to completion or failure. Status transitions occur automatically
+    during task processing.
     """
 
     PENDING = "pending"
@@ -170,92 +166,52 @@ class TaskStatus(str, Enum):
 
 
 class Task(BaseModel):
-    """Base class for defining task schemas for structured LLM responses.
+    """Base schema for structured task execution.
 
-    Tasks are the fundamental units of work in a SwarmTeam. Each task has a type
-    that determines its schema and execution requirements. The schema is designed
-    to be OpenAI-compatible for direct structured outputs, so it avoids features
-    like default values.
-
-    Examples:
-        Define an OpenAI-compatible task type:
-            ```python
-            class DataProcessingTask(Task):
-                # Discriminator field for OpenAI schema
-                type: Literal["data_processing"]
-                # Required fields without defaults
-                input_file: str
-                batch_size: int
-                output_format: str
-            ```
-
-        Create a task instance (in code):
-            ```python
-            task = DataProcessingTask(
-                # Base Task required fields - all must be provided
-                type="data_processing",  # Must match Literal
-                id="process-1",
-                title="Process customer data",
-                description="Process Q1 customer data",
-                status=TaskStatus.PENDING,
-                assignee=None,
-                dependencies=[],
-                metadata=None,
-                # DataProcessingTask required fields
-                input_file="data/customers_q1.csv",
-                batch_size=100,
-                output_format="json",
-            )
-            ```
-
-        LLM response format:
-            ```json
-            {
-                "type": "data_processing",
-                "id": "process-1",
-                "title": "Process customer data",
-                "description": "Process Q1 customer data",
-                "status": "pending",
-                "assignee": null,
-                "dependencies": [],
-                "metadata": null,
-                "input_file": "data/customers_q1.csv",
-                "batch_size": 100,
-                "output_format": "json"
-            }
-            ```
+    Defines the core structure for tasks in a SwarmTeam workflow.
+    Each task represents a unit of work with specific requirements,
+    dependencies, and execution tracking.
 
     Note:
-        When subclassing Task, ensure OpenAI compatibility by:
-        - Using only required fields without defaults
-        - Using Literal types for discriminators
-        - Avoiding complex Pydantic features
-        - Using simple types that serialize to JSON
+        When subclassing, ensure OpenAI compatibility:
+        - Use required fields without defaults
+        - Use Literal types for discriminators
+        - Use simple JSON-serializable types
+        - Avoid complex Pydantic features
+
+    Examples:
+        Code review task:
+            ```python
+            class ReviewTask(Task):
+                type: Literal["code_review"] = "code_review"
+                diff: str
+                focus_areas: list[str]
+            ```
     """
 
     type: str
-    """Type identifier for matching with team members."""
+    """Type identifier for task matching."""
 
     id: str
-    """Unique identifier for the task."""
+    """Unique task identifier."""
 
     title: str
-    """Short descriptive title of the task."""
+    """Short descriptive title."""
 
     description: str | None
     """Optional detailed description."""
 
     status: TaskStatus
-    """Current execution status. New tasks start as pending."""
+    """Current execution status."""
 
     assignee: str | None
-    """ID of the team member assigned to the task. New tasks are not assigned."""
+    """ID of assigned team member."""
 
     dependencies: list[str]
-    """IDs of tasks that must complete first."""
+    """IDs of prerequisite tasks."""
 
     metadata: dict[str, Any] | None
-    """Optional task-specific metadata."""
+    """Optional task metadata."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -272,16 +228,6 @@ class Task(BaseModel):
 
         Raises:
             ValueError: If task type is not defined as a Literal.
-
-        Examples:
-            Get task type:
-                ```python
-                class ReviewTask(Task):
-                    type: Literal["code_review"]
-
-
-                task_type = ReviewTask.get_task_type()  # Returns "code_review"
-                ```
         """
         type_field = cls.model_fields["type"]
         type_field_annotation = type_field.annotation
@@ -293,52 +239,44 @@ class Task(BaseModel):
 
 
 class TaskDefinition(BaseModel):
-    """Definition of a task type and its execution requirements.
+    """Blueprint for task creation and execution.
 
-    Provides the blueprint for creating and executing tasks, including their
-    schema, instructions, and output format.
+    Defines how a specific type of task should be created, executed,
+    and validated. Supports both static and dynamic instruction
+    generation and response parsing.
 
     Examples:
-        Simple task definition:
+        Static definition:
             ```python
             task_def = TaskDefinition(
                 task_type=ReviewTask,
-                instructions="Review code at {task.pr_url}",
+                instructions="Review the provided diff",
                 response_format=ReviewOutput,
             )
             ```
 
-        Dynamic task definition:
+        Dynamic definition:
             ```python
-            def generate_instructions(task: Task, context: ContextVariables) -> str:
-                return f"Review {task.pr_url} focusing on {context.get('focus_areas')}"
-
-
-            def parse_output(content: str, context: ContextVariables) -> BaseModel:
-                data = json.loads(content)
-                return ReviewOutput(
-                    approved=data["approved"],
-                    comments=data["comments"],
-                    suggestions=data["suggestions"],
-                )
+            def get_instructions(task: ReviewTask, context: ContextVariables) -> str:
+                return f"Review {task.diff} focusing on {task.focus_areas}"
 
 
             task_def = TaskDefinition(
                 task_type=ReviewTask,
-                instructions=generate_instructions,
-                response_format=parse_output,
+                instructions=get_instructions,
+                response_format=ReviewOutput,
             )
             ```
     """
 
     task_type: type[Task]
-    """Task schema class for validation and type identification."""
+    """Task schema for validation."""
 
     instructions: TaskInstructions
-    """Template or function for generating task instructions."""
+    """Static template or dynamic builder."""
 
     response_format: TaskResponseFormat | None = None
-    """Optional format specification for task responses."""
+    """Optional output format specification."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -348,83 +286,31 @@ class TaskDefinition(BaseModel):
 
 
 class Plan(BaseModel):
-    """Schema for LLM-generated execution plans with ordered tasks.
+    """Execution plan with ordered tasks.
 
-    Organizes tasks into a workflow, managing their dependencies and
-    tracking execution status. The schema is designed to be OpenAI-compatible
-    for direct structured outputs, supporting both framework-level and LLM-level
-    response parsing.
-
-    Examples:
-        Define an OpenAI-compatible plan type:
-            ```python
-            class ReviewPlan(Plan):
-                # All fields are required without defaults
-                id: str  # From base Plan
-                tasks: list[ReviewTask]  # Specific task type
-                metadata: dict[str, Any] | None  # From base Plan
-            ```
-
-        Create a plan instance (in code):
-            ```python
-            plan = ReviewPlan(
-                # Base Plan required fields
-                id="plan-123",  # Unique identifier
-                tasks=[
-                    ReviewTask(
-                        # Base Task required fields - all must be provided
-                        type="code_review",  # Must match Literal
-                        id="review-1",
-                        title="Review PR #123",
-                        description="Security review of auth changes",
-                        status=TaskStatus.PENDING,
-                        assignee=None,
-                        dependencies=[],
-                        metadata=None,
-                        # ReviewTask specific fields
-                        pr_url="github.com/org/repo/123",
-                        review_type="security",
-                    ),
-                ],
-                metadata=None,  # Required field from base Plan
-            )
-            ```
-
-        LLM response format:
-            ```json
-            {
-                "id": "plan-123",
-                "tasks": [
-                    {
-                        "type": "code_review",
-                        "id": "review-1",
-                        "title": "Review PR #123",
-                        "description": "Security review of auth changes",
-                        "status": "pending",
-                        "assignee": null,
-                        "dependencies": [],
-                        "metadata": null,
-                        "pr_url": "github.com/org/repo/123",
-                        "review_type": "security"
-                    }
-                ],
-                "metadata": null
-            }
-            ```
+    Represents a structured workflow of dependent tasks. Manages task
+    ordering, dependencies, and execution tracking. Designed for
+    direct LLM output parsing.
 
     Note:
-        When subclassing Plan, ensure OpenAI compatibility by:
-        - Using only required fields without defaults
-        - Using Literal types for discriminators
-        - Avoiding complex Pydantic features
-        - Using simple types that serialize to JSON
+        When subclassing, ensure OpenAI compatibility:
+        - Use required fields without defaults
+        - Use Literal types for discriminators
+        - Use simple JSON-serializable types
+        - Avoid complex Pydantic features
+
+    Example:
+        ```python
+        class CustomPlan(Plan):
+            tasks: list[ReviewTask | TestTask]
+        ```
     """
 
     id: str
-    """Unique identifier for the plan."""
+    """Unique plan identifier."""
 
     tasks: Sequence[Task]
-    """Tasks in this plan."""
+    """Tasks in execution order."""
 
     metadata: dict[str, Any] | None
     """Optional plan metadata."""
@@ -440,16 +326,6 @@ class Plan(BaseModel):
 
         Returns:
             List of error messages for invalid dependencies.
-
-        Examples:
-            Check dependencies:
-                ```python
-                errors = plan.validate_dependencies()
-                if errors:
-                    print("Invalid dependencies found:")
-                    for error in errors:
-                        print(f"- {error}")
-                ```
         """
         task_ids = {task.id for task in self.tasks}
         errors: list[str] = []
@@ -468,15 +344,6 @@ class Plan(BaseModel):
 
         Returns:
             List of tasks ready for execution.
-
-        Examples:
-            Process ready tasks:
-                ```python
-                while next_tasks := plan.get_next_tasks():
-                    for task in next_tasks:
-                        print(f"Executing: {task.title}")
-                        # Execute task
-                ```
         """
         completed_tasks = {task.id for task in self.tasks if task.status == TaskStatus.COMPLETED}
         return [
@@ -487,84 +354,42 @@ class Plan(BaseModel):
         ]
 
 
-class PlanFeedbackHandler(Protocol):
-    r"""Protocol for handling plan feedback in the execution loop.
+class PlanResult(BaseModel):
+    """Result of plan creation.
 
-    Defines the interface for handlers that can review plans and provide
-    feedback for refinement before execution.
-
-    Examples:
-        Interactive feedback:
-            ```python
-            class InteractiveFeedback(PlanFeedbackHandler):
-                async def handle(
-                    self,
-                    plan: Plan,
-                    prompt: str,
-                    context: ContextVariables | None,
-                ) -> tuple[str, ContextVariables | None] | None:
-                    print("\nProposed plan:")
-                    for task in plan.tasks:
-                        print(f"- {task.title}")
-
-                    if input("Approve? [y/N]: ").lower() == "y":
-                        return None
-
-                    feedback = input("Enter feedback: ")
-                    new_prompt = f"Previous plan needs adjustments: {feedback}"
-                    return new_prompt, context
-            ```
-
-        Automated validation:
-            ```python
-            class TaskLimitValidator(PlanFeedbackHandler):
-                def __init__(self, max_tasks: int = 5) -> None:
-                    self.max_tasks = max_tasks
-
-                async def handle(
-                    self,
-                    plan: Plan,
-                    prompt: str,
-                    context: ContextVariables | None,
-                ) -> tuple[str, ContextVariables | None] | None:
-                    if len(plan.tasks) > self.max_tasks:
-                        new_context = ContextVariables(context or {})
-                        new_context.update({"max_tasks": self.max_tasks})
-                        return "Please create a more focused plan", new_context
-                    return None
-            ```
+    Contains the generated plan along with new messages,
+    complete message history, and final context state.
     """
 
-    async def handle(
-        self,
-        plan: Plan,
-        prompt: str,
-        context: ContextVariables | None,
-    ) -> tuple[str, ContextVariables | None] | None:
-        """Handle plan feedback.
+    plan: Plan
+    """Generated execution plan."""
 
-        Args:
-            plan: The current plan to review.
-            prompt: The current prompt used to generate the plan.
-            context: The current context variables.
+    new_messages: list[Message]
+    """Output messages generated during planning."""
 
-        Returns:
-            None if the plan is approved, or a tuple of (new_prompt, new_context)
-            to create a new plan with the updated inputs.
-        """
-        ...
+    all_messages: list[Message]
+    """Complete conversation history of planning."""
+
+    context_variables: ContextVariables | None = None
+    """Final context variables of planning."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+        extra="forbid",
+    )
 
 
 class TeamMember(BaseModel):
-    """Team member that can execute specific types of tasks.
+    """Specialized agent for executing particular task types.
 
-    Represents an agent with specialized capabilities and configuration
-    for handling particular task types.
+    Represents a team participant with specific capabilities for
+    handling particular task types. Each member has an agent
+    configuration and a list of supported task types.
 
     Examples:
-        Create specialized team members:
+        Code reviewer:
             ```python
-            # Code review specialist
             reviewer = TeamMember(
                 id="code-reviewer",
                 agent=Agent(
@@ -573,31 +398,31 @@ class TeamMember(BaseModel):
                     llm=LLM(model="gpt-4o"),
                 ),
                 task_types=[ReviewTask],
-                metadata={"specialty": "security"},
             )
+            ```
 
-            # Testing specialist
+        Test writer:
+            ```python
             tester = TeamMember(
-                id="tester",
+                id="test-writer",
                 agent=Agent(
                     id="test-gpt",
-                    instructions="You are a testing expert.",
+                    instructions="You write comprehensive tests.",
                     llm=LLM(model="gpt-4o"),
                 ),
                 task_types=[TestTask],
-                metadata={"coverage_target": 0.9},
             )
             ```
     """
 
     id: str
-    """Unique identifier for the member."""
+    """Unique member identifier."""
 
     agent: Agent
-    """Agent configuration for task execution."""
+    """Agent configuration."""
 
     task_types: list[type[Task]]
-    """Task types this member can handle."""
+    """Supported task types."""
 
     metadata: dict[str, Any] | None = None
     """Optional member metadata."""
@@ -612,71 +437,25 @@ class TeamMember(BaseModel):
     def serialize_task_types(self, task_types: list[type[Task]]) -> list[str]:
         """Serialize task type classes to their string identifiers.
 
-        This serializer is crucial for proper JSON serialization of TeamMember objects
-        since task_types contains Pydantic model classes which cannot be directly serialized.
-        Instead, we extract each task type's string identifier (e.g., "code_review" for
-        ReviewTask) using the get_task_type() class method.
+        Converts task type classes to their string identifiers for JSON
+        serialization. Uses each task type's get_task_type() method to
+        extract the identifier.
 
         Args:
-            task_types: List of Task subclass types that this member can handle.
+            task_types: List of Task subclass types.
 
         Returns:
-            List of task type string identifiers (e.g., ["code_review", "test"]).
-
-        Examples:
-            Serialization process:
-                ```python
-                class ReviewTask(Task):
-                    type: Literal["code_review"]
-                    # ...
-
-
-                class TestTask(Task):
-                    type: Literal["test"]
-                    # ...
-
-
-                member = TeamMember(
-                    id="reviewer",
-                    agent=review_agent,
-                    task_types=[ReviewTask, TestTask],
-                )
-
-                # When serializing TeamMember:
-                serialized = member.model_dump_json()
-                # task_types will be serialized as: ["code_review", "test"]
-                ```
+            List of task type string identifiers.
         """
         return [task_type.get_task_type() for task_type in task_types]
 
 
 class TaskResult(BaseModel):
-    """Result of executing a task.
+    """Result of task execution.
 
-    Captures all outputs and metadata from a task execution, including
-    raw content, structured output, and execution details.
-
-    Examples:
-        Process task result:
-            ```python
-            result = TaskResult(
-                task=review_task,
-                content="Code review completed.",
-                output=ReviewOutput(
-                    approved=True,
-                    comments=["Good error handling", "Well documented"],
-                    suggestions=[],
-                ),
-                context=ContextVariables(pr_url="github.com/org/repo/123"),
-                assignee=reviewer,
-                timestamp=datetime.now(),
-            )
-
-            if result.output and result.output.approved:
-                print("Review passed!")
-                for comment in result.output.comments:
-                    print(f"- {comment}")
-            ```
+    Contains all outputs and execution details from a task,
+    including raw content, structured output, messages, and
+    context updates.
     """
 
     task: Task
@@ -688,14 +467,20 @@ class TaskResult(BaseModel):
     output: BaseModel | None = None
     """Structured output data."""
 
-    context: ContextVariables | None = None
-    """Context variables for the task."""
+    new_messages: list[Message] | None = None
+    """Output messages generated during task execution."""
+
+    all_messages: list[Message] | None = None
+    """Complete conversation history of task execution."""
+
+    context_variables: ContextVariables | None = None
+    """Final context variables of task execution."""
 
     assignee: TeamMember | None = None
     """Member who executed the task."""
 
     timestamp: datetime = Field(default_factory=datetime.now)
-    """When execution completed."""
+    """Task execution completion time."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
@@ -707,8 +492,9 @@ class TaskResult(BaseModel):
 class ArtifactStatus(str, Enum):
     """Status of an execution artifact.
 
-    Tracks the progression of a planning and execution iteration
-    from creation through completion or failure.
+    Tracks the progression of a planning and execution cycle
+    from creation through completion or failure. Status
+    transitions occur automatically during processing.
     """
 
     CREATED = "created"
@@ -728,55 +514,82 @@ class ArtifactStatus(str, Enum):
 
 
 class Artifact(BaseModel):
-    """Record of a planning and execution iteration.
+    """Record of plan execution.
 
-    Captures the complete lifecycle of a single attempt to create and execute
-    a plan, including any errors that occurred.
-
-    Examples:
-        Track execution progress:
-            ```python
-            artifact = Artifact(
-                id="exec-1",
-                timestamp=datetime.now(),
-                plan=plan,
-                task_results=[
-                    TaskResult(
-                        task=review_task,
-                        content="Review completed",
-                        output=ReviewOutput(approved=True),
-                    )
-                ],
-                status=ArtifactStatus.COMPLETED,
-            )
-
-            if artifact.status == ArtifactStatus.FAILED:
-                print(f"Execution failed: {artifact.error}")
-            else:
-                print(f"Completed {len(artifact.task_results)} tasks")
-            ```
+    Contains the complete execution record including the plan,
+    task results, messages, and any errors that occurred during
+    the process.
     """
 
     id: str
-    """Unique identifier for this artifact."""
-
-    timestamp: datetime = Field(default_factory=datetime.now)
-    """When this artifact was created."""
+    """Unique artifact identifier."""
 
     plan: Plan | None = None
-    """Plan that was executed."""
+    """Executed plan."""
 
     task_results: list[TaskResult] = Field(default_factory=list)
     """Results from executed tasks."""
 
     error: Exception | None = None
-    """Error if execution failed."""
+    """Execution error if failed."""
 
     status: ArtifactStatus = ArtifactStatus.CREATED
-    """Current status of this artifact."""
+    """Current execution status."""
+
+    created_at: datetime = datetime.now()
+    """Artifact creation time."""
 
     model_config = ConfigDict(
         arbitrary_types_allowed=True,
         use_attribute_docstrings=True,
         extra="forbid",
     )
+
+
+class ApprovePlan(BaseModel):
+    """Plan approval feedback.
+
+    Indicates that the generated plan is acceptable and
+    execution should proceed.
+    """
+
+    type: Literal["approve"]
+    """Feedback type identifier."""
+
+
+class RejectPlan(BaseModel):
+    """Plan rejection feedback.
+
+    Indicates that the plan needs revision and includes
+    feedback for regeneration.
+    """
+
+    type: Literal["reject"]
+    """Feedback type identifier."""
+
+    feedback: str
+    """Feedback for plan revision."""
+
+
+PlanFeedback: TypeAlias = Annotated[ApprovePlan | RejectPlan, Discriminator("type")]
+"""Feedback on a generated plan."""
+
+PlanFeedbackCallback: TypeAlias = Callable[[Plan], Awaitable[PlanFeedback]]
+"""Callback for plan feedback.
+
+Callback function that receives a plan and returns feedback
+indicating whether the plan is acceptable or needs revision.
+
+Examples:
+    Approve the plan:
+        ```python
+        def feedback_callback(plan: Plan) -> PlanFeedback:
+            return ApprovePlan()
+        ```
+
+    Reject the plan:
+        ```python
+        def feedback_callback(plan: Plan) -> PlanFeedback:
+            return RejectPlan(feedback="The plan is incomplete.")
+        ```
+"""
