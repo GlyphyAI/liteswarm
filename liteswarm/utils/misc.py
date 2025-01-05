@@ -1,14 +1,19 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 import re
+from collections.abc import Awaitable, Callable
+from functools import wraps
 from textwrap import dedent
-from typing import Any, TypeVar
+from typing import Any, Concatenate, ParamSpec, TypeVar, overload
 
 import orjson
+from prompt_toolkit import PromptSession
+from prompt_toolkit.history import InMemoryHistory
+from prompt_toolkit.patch_stdout import patch_stdout
 from pydantic import BaseModel
 
 from liteswarm.types.misc import JSON
@@ -25,6 +30,12 @@ _AttributeDefaultType = TypeVar("_AttributeDefaultType")
 
 Used to preserve type information for default values when
 the attribute doesn't exist or has wrong type.
+"""
+
+TParams = ParamSpec("TParams")
+"""Type variable for parameter specification.
+
+Used to preserve type information for function parameters.
 """
 
 
@@ -76,8 +87,8 @@ def safe_get_attr(
             print(value3)  # Output: 100
 
             # Attribute does not exist, no default provided
-            value4: int | None = safe_get_attr(instance, "nonexistent", int)
-            print(value4)  # Output: None
+            value4: int | None = safe_get_attr(instance, "nonexistent", int, default=100)
+            print(value4)  # Output: 100
             ```
     """
     value = getattr(obj, attr, default)
@@ -289,3 +300,138 @@ def parse_content(value: Any) -> str:
     if isinstance(value, BaseModel):
         return value.model_dump_json()
     return orjson.dumps(value).decode()
+
+
+@overload
+def with_prompt_session(
+    func: Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]],
+) -> Callable[TParams, Awaitable[str]]: ...
+
+
+@overload
+def with_prompt_session(
+    func: None = None,
+    *,
+    session: PromptSession[str],
+) -> Callable[
+    [Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]]],
+    Callable[TParams, Awaitable[str]],
+]: ...
+
+
+def with_prompt_session(
+    func: Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]] | None = None,
+    *,
+    session: PromptSession[str] | None = None,
+) -> Any:
+    """Decorator that provides a shared prompt session for user input handling.
+
+    Creates and maintains a single PromptSession instance with history support,
+    command completion, and proper terminal handling. The session is shared
+    across all decorated functions to maintain consistent state and history.
+
+    Can be used either as a simple decorator or with a custom session:
+    - @with_prompt_session  # Uses default session
+    - @with_prompt_session(session=custom_session)  # Uses provided session
+
+    Args:
+        func: Async function that takes a PromptSession as its first argument.
+        session: Optional custom PromptSession instance to use instead of default.
+
+    Returns:
+        Wrapped function that automatically receives the shared session.
+
+    Examples:
+        Basic usage:
+            ```python
+            @with_prompt_session
+            async def get_input(session: PromptSession[str], prefix: str) -> str:
+                return await session.prompt_async(f"{prefix}> ")
+
+
+            # Use the decorated function
+            response = await get_input("user")  # Shows: user>
+            ```
+
+        Custom session:
+            ```python
+            custom_session = PromptSession[str](
+                history=FileHistory(".history"),
+                completer=my_completer,
+            )
+
+
+            @with_prompt_session(session=custom_session)
+            async def get_input(session: PromptSession[str], prefix: str) -> str:
+                return await session.prompt_async(f"{prefix}> ")
+            ```
+
+    Notes:
+        Default session includes:
+        - Command history (in memory)
+        - History search
+        - Terminal state handling
+        - Command completion
+        - Suspend functionality (Ctrl+Z)
+    """
+
+    def decorator(
+        f: Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]],
+    ) -> Callable[TParams, Awaitable[str]]:
+        prompt_session = session or PromptSession(
+            history=InMemoryHistory(),
+            enable_history_search=True,
+            complete_while_typing=True,
+            enable_suspend=True,
+        )
+
+        @wraps(f)
+        async def wrapper(*args: TParams.args, **kwargs: TParams.kwargs) -> str:
+            with patch_stdout():
+                return await f(prompt_session, *args, **kwargs)
+
+        return wrapper
+
+    if func is None:
+        return decorator
+
+    return decorator(func)
+
+
+@with_prompt_session
+async def prompt(session: PromptSession[str], message: str, **kwargs: Any) -> str:
+    """Get user input with a prompt message using a shared session.
+
+    Uses the shared PromptSession to display a prompt and get user input.
+    The session provides command history, search, and proper terminal handling.
+
+    Args:
+        session: Shared prompt session (injected by decorator).
+        message: Prompt message to display.
+        **kwargs: Additional arguments passed to prompt_async.
+
+    Returns:
+        User input with surrounding whitespace removed.
+
+    Examples:
+        ```python
+        # Simple prompt
+        name = await prompt("Enter your name: ")
+
+        # Password input
+        pwd = await prompt("Password: ", is_password=True)
+
+        # With auto-completion
+        cmd = await prompt("$ ", completer=my_completer)
+
+        # Multiline input
+        text = await prompt("... ", multiline=True)
+        ```
+
+    Notes:
+        - Supports command history (up/down arrows)
+        - Enables history search (Ctrl+R)
+        - Handles terminal state properly
+        - Preserves suspend functionality (Ctrl+Z)
+    """
+    return await session.prompt_async(message, **kwargs)
