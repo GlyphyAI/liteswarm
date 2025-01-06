@@ -28,6 +28,8 @@ from liteswarm.types.events import (
     AgentResponseEvent,
     AgentSwitchEvent,
     CompletionResponseChunkEvent,
+    ExecutionBeginEvent,
+    ExecutionCompleteEvent,
     SwarmEvent,
     ToolCallResultEvent,
 )
@@ -1139,6 +1141,13 @@ class Swarm:
         if not messages:
             raise SwarmError("Messages list is empty")
 
+        start_event = ExecutionBeginEvent(
+            agent=agent,
+            messages=messages,
+            context_variables=context_variables,
+        )
+        yield YieldItem(start_event)
+
         self._context_variables = context_variables or ContextVariables()
         self._activate_agent(agent)
         yield YieldItem(AgentActivateEvent(agent=agent))
@@ -1154,6 +1163,7 @@ class Swarm:
             yield YieldItem(event)
 
         result = await agent_execution_stream.get_return_value()
+        yield YieldItem(ExecutionCompleteEvent(agent=self._active_agent, execution_result=result))
         yield ReturnItem(result)
 
     # ================================================
