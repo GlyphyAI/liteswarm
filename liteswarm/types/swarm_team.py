@@ -489,6 +489,9 @@ class TaskResult(BaseModel):
     task: Task
     """Task that was executed."""
 
+    task_instructions: str
+    """Instructions for the task."""
+
     content: str | None = None
     """Raw output content."""
 
