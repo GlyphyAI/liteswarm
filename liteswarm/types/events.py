@@ -235,17 +235,6 @@ class ErrorEvent(SwarmEventBase):
         return str(error)
 
 
-class CompleteEvent(SwarmEventBase):
-    """Event emitted when execution reaches completion.
-
-    Called when a conversation reaches its natural conclusion or is
-    terminated.
-    """
-
-    type: Literal["complete"] = "complete"
-    """Discriminator field."""
-
-
 class PlanCreatedEvent(SwarmEventBase):
     """Event emitted when a new plan is successfully created.
 
@@ -274,6 +263,9 @@ class TaskStartedEvent(SwarmEventBase):
 
     task: Task
     """Task beginning execution."""
+
+    task_instructions: str
+    """Instructions for the task."""
 
     messages: list[Message]
     """Messages to be sent to the agent executing the task."""
