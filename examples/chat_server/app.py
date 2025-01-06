@@ -7,15 +7,14 @@
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
 from typing import Annotated, Any
+from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict
 
-from liteswarm.chat import LiteChat, LiteChatMemory, LiteChatOptimization, LiteChatSearch
-from liteswarm.core import Swarm
-from liteswarm.types import ChatMessage, ResponseCost, Usage
-from liteswarm.types.context import ContextVariables
+from liteswarm.chat import LiteChat
+from liteswarm.types import ChatMessage, ContextVariables, ResponseCost, Usage
 from liteswarm.types.events import ErrorEvent, SwarmEvent
 from liteswarm.utils import enable_logging
 
@@ -29,11 +28,81 @@ DEFAULT_AGENT = AGENT_TEAM.router
 
 
 @dataclass
+class ChatSession:
+    """Chat session container."""
+
+    session_id: str
+    user_id: str
+    chat: LiteChat
+
+
+@dataclass
 class ChatState:
     """State container for chat components."""
 
-    chat: LiteChat
     user_store: "UserStore"
+    sessions: dict[str, ChatSession] = field(default_factory=dict)
+
+    async def create_session(self, user_id: str) -> ChatSession:
+        """Create a new chat session.
+
+        Args:
+            user_id: ID of the user creating the session.
+
+        Returns:
+            New chat session.
+        """
+        chat = LiteChat()
+        session_id = str(uuid4())
+        session = ChatSession(
+            session_id=session_id,
+            user_id=user_id,
+            chat=chat,
+        )
+
+        self.sessions[session_id] = session
+        return session
+
+    async def get_session(self, session_id: str) -> ChatSession | None:
+        """Get a chat session by ID.
+
+        Args:
+            session_id: ID of the session to get.
+
+        Returns:
+            Chat session if found, None otherwise.
+        """
+        return self.sessions.get(session_id)
+
+    async def delete_session(self, session_id: str) -> None:
+        """Delete a chat session.
+
+        Args:
+            session_id: ID of the session to delete.
+        """
+        if session_id in self.sessions:
+            self.sessions.pop(session_id)
+
+    async def get_user_sessions(self, user_id: str) -> list[ChatSession]:
+        """Get all sessions for a user.
+
+        Args:
+            user_id: ID of the user to get sessions for.
+
+        Returns:
+            List of user's chat sessions.
+        """
+        return [s for s in self.sessions.values() if s.user_id == user_id]
+
+    async def delete_user_sessions(self, user_id: str) -> None:
+        """Delete all sessions for a user.
+
+        Args:
+            user_id: ID of the user to delete sessions for.
+        """
+        session_ids = [s.session_id for s in self.sessions.values() if s.user_id == user_id]
+        for session_id in session_ids:
+            await self.delete_session(session_id)
 
 
 @dataclass
@@ -67,7 +136,7 @@ class UserStore:
         return self._users.copy()
 
     async def delete_user(self, user_id: str) -> None:
-        """Delete user and their sessions."""
+        """Delete user."""
         if user_id not in self._users:
             return
         self._users.pop(user_id)
@@ -83,22 +152,7 @@ class StateManager:
     def get_chat_state(cls) -> ChatState:
         """Get or create chat state."""
         if cls._chat_state is None:
-            memory = LiteChatMemory()
-            search = LiteChatSearch(memory=memory)
-            optimization = LiteChatOptimization(memory=memory, search=search)
-            swarm = Swarm(include_usage=True, include_cost=True)
-            chat = LiteChat(
-                memory=memory,
-                search=search,
-                optimization=optimization,
-                swarm=swarm,
-            )
-
-            cls._chat_state = ChatState(
-                chat=chat,
-                user_store=UserStore(),
-            )
-
+            cls._chat_state = ChatState(user_store=UserStore())
         return cls._chat_state
 
 
@@ -109,56 +163,46 @@ app = FastAPI(
 )
 
 
-class User(BaseModel):
+class PydanticModel(BaseModel):
+    """Base model for Pydantic models."""
+
+    model_config = ConfigDict(
+        arbitrary_types_allowed=True,
+        use_attribute_docstrings=True,
+        extra="forbid",
+    )
+
+
+class User(PydanticModel):
     """User model for chat server."""
 
     user_id: str
     name: str | None = None
     metadata: dict[str, Any] | None = None
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class CreateSessionRequest(BaseModel):
+class CreateSessionRequest(PydanticModel):
     """Request model for creating a session."""
 
     user_id: str
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class SessionResponse(BaseModel):
+class SessionResponse(PydanticModel):
     """Response model for session operations."""
 
     session_id: str
     user_id: str
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class SendMessageRequest(BaseModel):
+class SendMessageRequest(PydanticModel):
     """Request model for sending messages."""
 
     message: str
     agent_id: str | None = None
-    context_variables: dict[str, Any] | None = None
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
+    context_variables: ContextVariables | None = None
 
 
-class MessageResponse(BaseModel):
+class MessageResponse(PydanticModel):
     """Response model for messages."""
 
     content: str
@@ -166,59 +210,34 @@ class MessageResponse(BaseModel):
     usage: Usage | None = None
     response_cost: ResponseCost | None = None
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class SessionListResponse(BaseModel):
+class SessionListResponse(PydanticModel):
     """Response model for listing sessions."""
 
     session_id: str
     user_id: str
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class MessageListResponse(BaseModel):
+class MessageListResponse(PydanticModel):
     """Response model for listing messages."""
 
     messages: list[ChatMessage]
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class CreateUserRequest(BaseModel):
+class CreateUserRequest(PydanticModel):
     """Request model for creating users."""
 
     user_id: str
     name: str | None = None
     metadata: dict[str, Any] | None = None
 
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
-
-class UserResponse(BaseModel):
+class UserResponse(PydanticModel):
     """Response model for user operations."""
 
     user_id: str
     name: str | None = None
     metadata: dict[str, Any] | None = None
-
-    model_config = ConfigDict(
-        arbitrary_types_allowed=True,
-        extra="forbid",
-    )
 
 
 async def format_chunk(event: SwarmEvent) -> bytes:
@@ -239,20 +258,30 @@ async def generate_json_chunks(
     state: ChatState,
 ) -> AsyncGenerator[bytes, None]:
     """Generate JSON chunks from chat responses."""
-    try:
-        session = await state.chat.get_session(session_id)
-        if session is None:
-            raise HTTPException(status_code=404, detail="Session not found")
+    session = await state.get_session(session_id)
+    if session is None:
+        error_event = ErrorEvent(
+            error=ValueError("Session not found or expired"),
+            agent=None,
+        )
+        yield await format_chunk(error_event)
+        return
 
+    try:
         agent = DEFAULT_AGENT
         if request.agent_id:
             requested_agent = AGENT_TEAM.agents.get(request.agent_id)
             if requested_agent is None:
-                raise HTTPException(status_code=404, detail="Agent not found")
+                error_event = ErrorEvent(
+                    error=ValueError("Agent not found"),
+                    agent=None,
+                )
+                yield await format_chunk(error_event)
+                return
             agent = requested_agent
 
-        context_variables = ContextVariables(request.context_variables or {})
-        stream = session.send_message(
+        context_variables = request.context_variables
+        stream = session.chat.send_message(
             request.message,
             agent=agent,
             context_variables=context_variables,
@@ -263,11 +292,8 @@ async def generate_json_chunks(
 
         await stream.get_return_value()
 
-    except HTTPException:
-        raise
-
     except Exception as e:
-        error_event = ErrorEvent(error=str(e), agent=None)
+        error_event = ErrorEvent(error=e, agent=None)
         yield await format_chunk(error_event)
         print(f"Error during streaming: {e}")
 
@@ -286,7 +312,7 @@ async def create_session(
     Returns:
         SessionResponse with session details.
     """
-    session = await state.chat.create_session(user_id=request.user_id)
+    session = await state.create_session(user_id=request.user_id)
     return SessionResponse(
         session_id=session.session_id,
         user_id=request.user_id,
@@ -305,11 +331,11 @@ async def delete_session(
         state: ChatState containing chat components.
     """
     try:
-        session = await state.chat.get_session(session_id)
+        session = await state.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        await state.chat.delete_session(session_id)
+        await state.delete_session(session_id)
 
     except HTTPException:
         raise
@@ -357,16 +383,19 @@ async def send_message(
         MessageResponse with response content and metadata.
     """
     try:
-        session = await state.chat.get_session(session_id)
+        session = await state.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        agent = DEFAULT_AGENT if request.agent_id == "assistant" else None
-        if agent is None:
-            raise HTTPException(status_code=404, detail="Agent not found")
+        agent = DEFAULT_AGENT
+        if request.agent_id:
+            requested_agent = AGENT_TEAM.agents.get(request.agent_id)
+            if requested_agent is None:
+                raise HTTPException(status_code=404, detail="Agent not found")
+            agent = requested_agent
 
-        context_variables = ContextVariables(request.context_variables or {})
-        stream = session.send_message(
+        context_variables = request.context_variables
+        stream = session.chat.send_message(
             request.message,
             agent=agent,
             context_variables=context_variables,
@@ -414,11 +443,11 @@ async def get_messages(
         List of messages in the session.
     """
     try:
-        session = await state.chat.get_session(session_id)
+        session = await state.get_session(session_id)
         if session is None:
             raise HTTPException(status_code=404, detail="Session not found")
 
-        messages = await session.get_messages()
+        messages = await session.chat.get_messages()
         return MessageListResponse(messages=messages)
 
     except HTTPException:
@@ -443,7 +472,7 @@ async def list_sessions(
         List of sessions with their details.
     """
     try:
-        sessions = await state.chat.get_user_sessions(user_id)
+        sessions = await state.get_user_sessions(user_id)
         return [
             SessionListResponse(session_id=session.session_id, user_id=user_id)
             for session in sessions
@@ -504,7 +533,7 @@ async def delete_user(
             raise HTTPException(status_code=404, detail="User not found")
 
         await state.user_store.delete_user(user_id)
-        await state.chat.delete_user_sessions(user_id)
+        await state.delete_user_sessions(user_id)
 
     except HTTPException:
         raise
@@ -559,7 +588,7 @@ async def switch_user(
         if user is None:
             raise HTTPException(status_code=404, detail="User not found")
 
-        sessions = await state.chat.get_user_sessions(user_id)
+        sessions = await state.get_user_sessions(user_id)
         return [
             SessionResponse(session_id=session.session_id, user_id=user_id) for session in sessions
         ]
