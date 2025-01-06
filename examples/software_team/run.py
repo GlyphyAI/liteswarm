@@ -8,7 +8,7 @@ import asyncio
 
 from liteswarm import enable_logging
 from liteswarm.core import Swarm
-from liteswarm.experimental import LiteTeamChat, LiteTeamChatSession
+from liteswarm.experimental import LiteTeamChat
 from liteswarm.types import ApprovePlan, ArtifactStatus, Plan, PlanFeedback, RejectPlan
 from liteswarm.utils.misc import prompt as prompt_user
 
@@ -20,6 +20,8 @@ from .types import FileContent, Project
 from .utils import create_context_from_project, extract_project_from_artifact, print_artifact
 
 enable_logging(default_level="DEBUG")
+
+DEFAULT_PROMPT = "Create a simple todo list app"
 
 
 def get_project_summary(project: Project) -> str:
@@ -81,38 +83,36 @@ async def handle_plan_feedback(plan: Plan) -> PlanFeedback:
                 continue
 
 
-async def create_session(chat: LiteTeamChat, swarm: Swarm) -> LiteTeamChatSession:
-    """Create a new session."""
+async def create_chat() -> LiteTeamChat:
+    """Create a new chat."""
+    swarm = Swarm()
     members = create_team_members()
     task_definitions = create_task_definitions()
     planning_agent = create_planning_agent(swarm, task_definitions)
-    session = await chat.create_session(
-        user_id="user",
+
+    chat = LiteTeamChat(
+        swarm=swarm,
         members=members,
         task_definitions=task_definitions,
         planning_agent=planning_agent,
     )
 
-    return session
+    return chat
 
 
-async def main() -> None:  # noqa: PLR0915
+async def main() -> None:
     """Run the software team example."""
     print("\nWelcome to the Software Team!")
     print("You are working on a Flutter project. All changes will be accumulated in the current project.")  # fmt: skip
     print("You can start a new project at any time to reset the state and history.\n")
 
     # Create team chat
-    swarm = Swarm(include_usage=True, include_cost=True)
-    team_chat = LiteTeamChat(swarm=swarm)
-    event_handler = EventHandler()
-
-    # Create initial session
-    session = await create_session(team_chat, swarm)
+    chat = await create_chat()
     project = create_project()
     context_variables = create_context_from_project(project)
 
-    default_prompt = "Create a simple todo list app"
+    # Create event handler
+    event_handler = EventHandler()
 
     while True:
         try:
@@ -123,13 +123,13 @@ async def main() -> None:  # noqa: PLR0915
 
             # Get the next task from user
             print("\nWhat would you like to build or modify in this project? (Press Enter for a default prompt)")  # fmt: skip
-            print(f"Default: {default_prompt}")
+            print(f"Default: {DEFAULT_PROMPT}")
             prompt = await prompt_user("\n🗣️  Enter your query: ")
-            prompt = prompt.strip() or default_prompt
+            prompt = prompt.strip() or DEFAULT_PROMPT
             prompt = build_planning_agent_user_prompt(prompt, context_variables)
 
             # Execute with feedback
-            stream = session.send_message(
+            stream = chat.send_message(
                 prompt,
                 context_variables=context_variables,
                 feedback_callback=handle_plan_feedback,
@@ -162,7 +162,7 @@ async def main() -> None:  # noqa: PLR0915
                     continue
                 case "2":
                     print("This will create a completely new project and reset all history.")
-                    session = await create_session(team_chat, swarm)
+                    chat = await create_chat()
                     project = create_project()
                     context_variables = create_context_from_project(project)
                     continue
