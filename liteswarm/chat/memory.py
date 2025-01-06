@@ -23,11 +23,14 @@ class ChatMemory(Protocol):
     Examples:
         ```python
         class MyStorage(ChatMemory):
-            async def add_message(self, message: Message, session_id: str) -> None:
+            def __init__(self) -> None:
+                self._messages = {}
+
+            async def add_message(self, message: Message) -> None:
                 # Store message in custom backend
                 ...
 
-            async def get_messages(self, session_id: str) -> list[ChatMessage]:
+            async def get_messages(self) -> list[ChatMessage]:
                 # Retrieve messages from custom backend
                 ...
 
@@ -36,32 +39,27 @@ class ChatMemory(Protocol):
         storage = MyStorage()
         await storage.add_message(
             message=Message(role="user", content="Hello!"),
-            session_id="session_123",
         )
         ```
 
     Notes:
         - All operations are asynchronous by framework design
         - Implementations should preserve message order
-        - Session isolation must be maintained
         - Methods accept custom arguments for extensibility
     """
 
     async def add_message(
         self,
         message: Message,
-        session_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         """Add a single message to storage.
 
-        Stores a message with its session context and makes it available
-        for future retrieval.
+        Stores a message and makes it available for future retrieval.
 
         Args:
             message: Message to store.
-            session_id: Identifier of the session this message belongs to.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
         """
@@ -70,18 +68,16 @@ class ChatMemory(Protocol):
     async def add_messages(
         self,
         messages: list[Message],
-        session_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         """Add multiple messages to storage.
 
-        Stores a batch of messages with their session context. More efficient
-        than adding messages individually.
+        Stores a batch of messages. More efficient than adding messages
+        individually.
 
         Args:
             messages: List of messages to store.
-            session_id: Identifier of the session these messages belong to.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
         """
@@ -89,17 +85,14 @@ class ChatMemory(Protocol):
 
     async def get_messages(
         self,
-        session_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> list[ChatMessage]:
-        """Get all messages from a session.
+        """Get all messages.
 
-        Retrieves messages belonging to the specified session in chronological
-        order.
+        Retrieves messages in chronological order.
 
         Args:
-            session_id: Identifier of the session to get messages from.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
 
@@ -165,24 +158,23 @@ class LiteChatMemory(ChatMemory):
     """In-memory implementation of chat message storage with vector search.
 
     Stores messages in memory with vector embeddings for semantic search.
-    Messages are organized by sessions and can be efficiently retrieved
-    and searched using their vector representations.
+    Each instance maintains its own message store for a single conversation.
 
     Examples:
         ```python
+        # Create memory instance
         memory = LiteChatMemory(
             embedding_model="text-embedding-3-small",
             embedding_batch_size=16,
         )
 
-        # Add messages to a session
+        # Add messages
         await memory.add_message(
             message=Message(role="user", content="Hello!"),
-            session_id="session_123",
         )
 
-        # Get session messages
-        messages = await memory.get_messages(session_id="session_123")
+        # Get messages
+        messages = await memory.get_messages()
         ```
 
     Notes:
@@ -196,7 +188,7 @@ class LiteChatMemory(ChatMemory):
         embedding_model: str = "text-embedding-3-small",
         embedding_batch_size: int = 16,
     ) -> None:
-        """Initialize a new LiteChatMemory instance.
+        """Initialize a new memory instance.
 
         Creates an in-memory message store with vector indexing capabilities.
         Messages are embedded using the specified model for semantic search.
@@ -206,14 +198,14 @@ class LiteChatMemory(ChatMemory):
             embedding_batch_size: Number of messages to embed in parallel.
         """
         self._messages: dict[str, ChatMessage] = {}  # message_id -> ChatMessage
-        self._session_messages: dict[str, set[str]] = {}  # session_id -> set[message_id]
+        self._message_ids: set[str] = set()  # Ordered set of message IDs
         self._index = LiteMessageIndex(
             embedding_model=embedding_model,
             embedding_batch_size=embedding_batch_size,
         )
 
     @override
-    async def add_message(self, message: Message, session_id: str) -> None:
+    async def add_message(self, message: Message) -> None:
         """Add a single message to memory.
 
         Converts the message to a chat message, stores it in memory, and
@@ -221,15 +213,14 @@ class LiteChatMemory(ChatMemory):
 
         Args:
             message: Message to store.
-            session_id: Identifier of the session this message belongs to.
         """
         chat_message = ChatMessage.from_message(message)
         self._messages[chat_message.id] = chat_message
-        self._session_messages.setdefault(session_id, set()).add(chat_message.id)
+        self._message_ids.add(chat_message.id)
         await self._index.index([chat_message])
 
     @override
-    async def add_messages(self, messages: list[Message], session_id: str) -> None:
+    async def add_messages(self, messages: list[Message]) -> None:
         """Add multiple messages to memory.
 
         Converts messages to chat messages, stores them in memory, and
@@ -237,33 +228,27 @@ class LiteChatMemory(ChatMemory):
 
         Args:
             messages: List of messages to store.
-            session_id: Identifier of the session these messages belong to.
         """
         chat_messages: list[ChatMessage] = []
 
         for message in messages:
-            chat_message = ChatMessage.from_message(message, session_id=session_id)
+            chat_message = ChatMessage.from_message(message)
             self._messages[chat_message.id] = chat_message
-            self._session_messages.setdefault(session_id, set()).add(chat_message.id)
+            self._message_ids.add(chat_message.id)
             chat_messages.append(chat_message)
 
         await self._index.index(chat_messages)
 
     @override
-    async def get_messages(self, session_id: str) -> list[ChatMessage]:
-        """Get all messages from a session.
+    async def get_messages(self) -> list[ChatMessage]:
+        """Get all messages in chronological order.
 
-        Retrieves messages belonging to the specified session and sorts
-        them by timestamp.
-
-        Args:
-            session_id: Identifier of the session to get messages from.
+        Retrieves messages and sorts them by timestamp.
 
         Returns:
             List of messages in chronological order.
         """
-        message_ids = self._session_messages.get(session_id, set())
-        messages = [self._messages[mid] for mid in message_ids if mid in self._messages]
+        messages = [self._messages[mid] for mid in self._message_ids if mid in self._messages]
         messages.sort(key=lambda m: m.created_at)
         return messages
 
@@ -271,23 +256,21 @@ class LiteChatMemory(ChatMemory):
     async def remove_message(self, message_id: str) -> None:
         """Remove a single message from memory.
 
-        Removes the message from both memory storage and session mapping.
+        Removes the message from both memory storage and message list.
         Does nothing if the message doesn't exist.
 
         Args:
             message_id: Identifier of the message to remove.
         """
         if message_id in self._messages:
-            message = self._messages.pop(message_id)
-            if message.session_id:
-                self._session_messages[message.session_id].discard(message_id)
+            self._messages.pop(message_id)
+            self._message_ids.discard(message_id)
 
     @override
     async def remove_messages(self, message_ids: list[str]) -> None:
         """Remove multiple messages from memory.
 
-        Removes messages one by one from both memory storage and session
-        mappings.
+        Removes messages one by one from both memory storage and message list.
 
         Args:
             message_ids: List of message identifiers to remove.
@@ -299,8 +282,8 @@ class LiteChatMemory(ChatMemory):
     async def clear(self) -> None:
         """Remove all messages from memory.
 
-        Clears all messages, session mappings, and the vector index.
+        Clears all messages and the vector index.
         """
         self._messages.clear()
-        self._session_messages.clear()
+        self._message_ids.clear()
         await self._index.clear()

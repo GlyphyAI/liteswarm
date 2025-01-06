@@ -65,21 +65,22 @@ class ChatOptimization(Protocol):
     Examples:
         ```python
         class MyOptimizer(ChatOptimization):
+            def __init__(self) -> None:
+                self._memory = {}
+
             async def optimize_context(
                 self,
-                session_id: str,
                 model: str,
                 strategy: str | None = None,
             ) -> list[ChatMessage]:
                 # Implement optimization logic
-                messages = await self.memory.get_messages(session_id)
+                messages = await self.memory.get_messages()
                 return self._apply_strategy(messages, strategy)
 
 
         # Use custom optimizer
         optimizer = MyOptimizer()
         optimized = await optimizer.optimize_context(
-            session_id="session_123",
             model="gpt-4o",
             strategy="summarize",
         )
@@ -94,17 +95,22 @@ class ChatOptimization(Protocol):
 
     async def optimize_context(
         self,
-        session_id: str,
+        model: str,
+        strategy: OptimizationStrategy | None = None,
+        rag_config: RAGStrategyConfig | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> list[ChatMessage]:
         """Optimize conversation context using specified strategy.
 
-        Applies the selected optimization strategy to reduce context size
-        while preserving important information and relationships.
+        Applies optimization to reduce context size while preserving
+        important information. Strategy determines the optimization
+        approach.
 
         Args:
-            session_id: Session ID to optimize.
+            model: Target language model identifier.
+            strategy: Optimization strategy to use.
+            rag_config: Configuration for RAG strategy.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
 
@@ -138,14 +144,12 @@ class LiteChatOptimization(ChatOptimization):
 
         # Use token-based trimming
         trimmed = await optimizer.optimize_context(
-            session_id="session_123",
             model="gpt-4o",
             strategy="trim",
         )
 
         # Use semantic search
         relevant = await optimizer.optimize_context(
-            session_id="session_123",
             model="gpt-4o",
             strategy="rag",
             rag_config=RAGStrategyConfig(
@@ -284,7 +288,10 @@ class LiteChatOptimization(ChatOptimization):
 
         return chunks
 
-    async def _summarize_chunk(self, messages: list[ChatMessage]) -> str:
+    async def _summarize_chunk(
+        self,
+        messages: list[ChatMessage],
+    ) -> str:
         """Create a concise summary of a message chunk.
 
         Uses the optimization LLM to generate a focused summary that
@@ -438,7 +445,6 @@ class LiteChatOptimization(ChatOptimization):
 
     async def _rag_strategy(
         self,
-        session_id: str,
         messages: list[ChatMessage],
         model: str,
         config: RAGStrategyConfig | None = None,
@@ -450,7 +456,6 @@ class LiteChatOptimization(ChatOptimization):
         or no configuration is provided.
 
         Args:
-            session_id: Session ID to search in.
             messages: List of messages to process.
             model: Target language model identifier.
             config: RAG strategy configuration.
@@ -472,7 +477,6 @@ class LiteChatOptimization(ChatOptimization):
 
         search_results = await self._search.search(
             query=config.query or "",
-            session_id=session_id,
             max_results=config.max_messages,
             score_threshold=config.score_threshold,
         )
@@ -495,7 +499,6 @@ class LiteChatOptimization(ChatOptimization):
     @override
     async def optimize_context(
         self,
-        session_id: str,
         model: str,
         strategy: OptimizationStrategy | None = None,
         rag_config: RAGStrategyConfig | None = None,
@@ -507,7 +510,6 @@ class LiteChatOptimization(ChatOptimization):
         system messages separately and ensures proper message ordering.
 
         Args:
-            session_id: Session ID to optimize.
             model: Target language model identifier.
             strategy: Optimization strategy to use.
             rag_config: Configuration for RAG strategy.
@@ -518,7 +520,7 @@ class LiteChatOptimization(ChatOptimization):
         Raises:
             ValueError: If unknown strategy is specified.
         """
-        messages = await self._memory.get_messages(session_id)
+        messages = await self._memory.get_messages()
         system_messages, non_system_messages = self._split_messages(messages)
         strategy = strategy or self._default_strategy
 
@@ -536,7 +538,6 @@ class LiteChatOptimization(ChatOptimization):
                 optimized = await self._summarize_strategy(non_system_messages, model)
             case "rag":
                 optimized = await self._rag_strategy(
-                    session_id=session_id,
                     messages=non_system_messages,
                     model=model,
                     config=rag_config,

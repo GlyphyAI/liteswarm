@@ -14,40 +14,40 @@ from liteswarm.types.chat import ChatMessage
 
 
 class ChatSearch(Protocol):
-    """Protocol for managing semantic search capabilities in chat sessions.
+    """Protocol for managing semantic search capabilities in chat conversations.
 
     Defines a standard interface for semantic search operations that can be
     implemented by different search backends. Supports indexing and searching
-    messages within isolated session contexts.
+    messages within isolated conversation contexts.
 
     Examples:
         ```python
         class MySearch(ChatSearch):
-            async def index(self, session_id: str) -> None:
+            def __init__(self) -> None:
+                self._index = {}
+
+            async def index(self) -> None:
                 # Index new messages
-                messages = await self.memory.get_messages(session_id)
+                messages = await self.memory.get_messages()
                 await self._update_index(messages)
 
             async def search(
                 self,
                 query: str,
-                session_id: str,
                 max_results: int | None = None,
             ) -> list[tuple[ChatMessage, float]]:
                 # Find semantically similar messages
                 return await self._compute_similarity(
                     query=query,
-                    session_id=session_id,
                     limit=max_results,
                 )
 
 
         # Use custom search
         search = MySearch()
-        await search.index(session_id="session_123")
+        await search.index()
         results = await search.search(
             query="project requirements",
-            session_id="session_123",
             max_results=5,
         )
         ```
@@ -61,18 +61,15 @@ class ChatSearch(Protocol):
 
     async def index(
         self,
-        session_id: str,
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        """Index session messages for semantic search.
+        """Index messages for semantic search.
 
-        Updates the search index with current messages from the specified
-        session. Should be called after adding new messages to ensure
-        they are searchable.
+        Updates the search index with current messages. Should be called
+        after adding new messages to ensure they are searchable.
 
         Args:
-            session_id: Session to index messages for.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
         """
@@ -81,7 +78,6 @@ class ChatSearch(Protocol):
     async def search(
         self,
         query: str,
-        session_id: str,
         max_results: int | None = None,
         score_threshold: float | None = None,
         *args: Any,
@@ -89,13 +85,12 @@ class ChatSearch(Protocol):
     ) -> list[tuple[ChatMessage, float]]:
         """Search for semantically similar messages.
 
-        Finds messages in the specified session that are semantically
-        similar to the query. Results are sorted by similarity score
-        and can be filtered by score threshold.
+        Finds messages that are semantically similar to the query.
+        Results are sorted by similarity score and can be filtered
+        by score threshold.
 
         Args:
             query: Text to search for similar messages.
-            session_id: Session to search within.
             max_results: Maximum number of results to return.
             score_threshold: Minimum similarity score (0.0 to 1.0).
             *args: Implementation-specific arguments.
@@ -108,17 +103,14 @@ class ChatSearch(Protocol):
 
     async def clear(
         self,
-        session_id: str | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> None:
         """Clear search indices.
 
-        Removes search indices for the specified session or all sessions
-        if no session ID is provided. Useful for cleanup and maintenance.
+        Removes search indices and frees associated memory.
 
         Args:
-            session_id: Session to clear, or None for all sessions.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
         """
@@ -129,14 +121,14 @@ class LiteChatSearch(ChatSearch):
     """In-memory implementation of semantic search using vector embeddings.
 
     Provides efficient semantic search capabilities using vector embeddings
-    to represent messages and compute similarities. Maintains separate
-    indices per session for isolation and concurrent access.
+    to represent messages and compute similarities. Each instance maintains
+    its own index for conversation isolation.
 
     The implementation offers:
         - Fast in-memory vector search
         - Automatic embedding computation
         - Configurable similarity thresholds
-        - Per-session index isolation
+        - Conversation isolation
         - Efficient batch processing
 
     Examples:
@@ -150,10 +142,9 @@ class LiteChatSearch(ChatSearch):
         )
 
         # Index and search messages
-        await search.index(session_id="session_123")
+        await search.index()
         results = await search.search(
             query="project requirements",
-            session_id="session_123",
             max_results=5,
             score_threshold=0.7,
         )
@@ -189,58 +180,36 @@ class LiteChatSearch(ChatSearch):
         self._memory = memory
         self._embedding_model = embedding_model
         self._embedding_batch_size = embedding_batch_size
-        self._indices: dict[str, LiteMessageIndex] = {}  # session_id -> index
-
-    def _get_or_create_index(self, session_id: str) -> LiteMessageIndex:
-        """Get or create a vector index for a session.
-
-        Retrieves an existing index or creates a new one if none exists.
-        Ensures consistent embedding settings across index creation.
-
-        Args:
-            session_id: Session to get/create index for.
-
-        Returns:
-            Vector index instance for the session.
-        """
-        if session_id not in self._indices:
-            self._indices[session_id] = LiteMessageIndex(
-                embedding_model=self._embedding_model,
-                embedding_batch_size=self._embedding_batch_size,
-            )
-        return self._indices[session_id]
+        self._index = LiteMessageIndex(
+            embedding_model=embedding_model,
+            embedding_batch_size=embedding_batch_size,
+        )
 
     @override
-    async def index(self, session_id: str) -> None:
-        """Index all messages in a session.
+    async def index(self) -> None:
+        """Index all messages in this conversation.
 
         Retrieves messages from storage and updates the vector index.
-        Creates a new index if none exists for the session.
-
-        Args:
-            session_id: Session to index messages for.
+        Creates a new index if none exists.
         """
-        messages = await self._memory.get_messages(session_id)
+        messages = await self._memory.get_messages()
         if messages:
-            index = self._get_or_create_index(session_id)
-            await index.index(messages)
+            await self._index.index(messages)
 
     @override
     async def search(
         self,
         query: str,
-        session_id: str,
         max_results: int | None = None,
         score_threshold: float | None = None,
     ) -> list[tuple[ChatMessage, float]]:
-        """Search for similar messages in a session.
+        """Search for similar messages in this conversation.
 
         Finds messages that are semantically similar to the query text.
-        Returns empty list if session has no index or no matches found.
+        Returns empty list if no index exists or no matches found.
 
         Args:
             query: Text to find similar messages for.
-            session_id: Session to search within.
             max_results: Maximum number of results to return.
             score_threshold: Minimum similarity score (0.0 to 1.0).
 
@@ -250,29 +219,16 @@ class LiteChatSearch(ChatSearch):
         Notes:
             Index should be updated before search if messages changed.
         """
-        if session_id not in self._indices:
-            return []
-
-        return await self._indices[session_id].search(
+        return await self._index.search(
             query=query,
             max_results=max_results,
             score_threshold=score_threshold,
         )
 
     @override
-    async def clear(self, session_id: str | None = None) -> None:
-        """Clear search indices.
+    async def clear(self) -> None:
+        """Clear search index.
 
-        Removes vector indices and frees associated memory. Cleans up
-        either a specific session or all sessions.
-
-        Args:
-            session_id: Session to clear, or None for all sessions.
+        Removes vector index and frees associated memory.
         """
-        if session_id is None:
-            for index in self._indices.values():
-                await index.clear()
-            self._indices.clear()
-        elif session_id in self._indices:
-            await self._indices[session_id].clear()
-            del self._indices[session_id]
+        await self._index.clear()
