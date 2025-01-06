@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Discriminator, field_serializer
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import (
     Agent,
+    AgentExecutionResult,
     AgentResponse,
     AgentResponseChunk,
     CompletionResponseChunk,
@@ -35,6 +36,44 @@ class SwarmEventBase(BaseModel):
         use_attribute_docstrings=True,
         extra="forbid",
     )
+
+
+class ExecutionBeginEvent(SwarmEventBase):
+    """Event emitted when execution begins.
+
+    Called at the very beginning of execution, before any agent activation
+    or task processing. Used to signal the start of processing and prepare
+    for incoming events.
+    """
+
+    type: Literal["execution_begin"] = "execution_begin"
+    """Discriminator field."""
+
+    agent: Agent
+    """Agent that starts the execution."""
+
+    messages: list[Message]
+    """Messages being sent to the agent."""
+
+    context_variables: ContextVariables | None = None
+    """Optional context variables for execution."""
+
+
+class ExecutionCompleteEvent(SwarmEventBase):
+    """Event emitted when execution reaches completion.
+
+    Called when a conversation reaches its natural conclusion or is
+    terminated.
+    """
+
+    type: Literal["execution_complete"] = "execution_complete"
+    """Discriminator field."""
+
+    agent: Agent
+    """Agent that completed execution."""
+
+    execution_result: AgentExecutionResult
+    """Result of the execution."""
 
 
 class CompletionResponseChunkEvent(SwarmEventBase):
@@ -278,7 +317,9 @@ class PlanCompletedEvent(SwarmEventBase):
 
 
 SwarmEvent = Annotated[
-    CompletionResponseChunkEvent
+    ExecutionBeginEvent
+    | ExecutionCompleteEvent
+    | CompletionResponseChunkEvent
     | AgentResponseChunkEvent
     | AgentResponseEvent
     | ToolCallResultEvent
@@ -287,7 +328,6 @@ SwarmEvent = Annotated[
     | AgentBeginEvent
     | AgentCompleteEvent
     | ErrorEvent
-    | CompleteEvent
     | PlanCreatedEvent
     | TaskStartedEvent
     | TaskCompletedEvent
