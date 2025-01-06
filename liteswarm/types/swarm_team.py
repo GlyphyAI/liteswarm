@@ -7,9 +7,10 @@
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import Annotated, Any, Literal, TypeAlias, TypeVar, get_args, get_origin
+from typing import Annotated, Any, Generic, Literal, TypeAlias, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, field_serializer
+from typing_extensions import TypeVar
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent, Message
@@ -17,7 +18,13 @@ from liteswarm.types.swarm import Agent, Message
 PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
 """Type variable representing a Pydantic model or its subclass."""
 
-TaskInstructions: TypeAlias = str | Callable[["Task", ContextVariables], str]
+TaskT = TypeVar("TaskT", bound="Task", default="Task")
+"""Type variable for Task subclass in task definitions."""
+
+TaskOutputT = TypeVar("TaskOutputT", bound=BaseModel, default=BaseModel)
+"""Type variable for Pydantic model used as task output."""
+
+TaskInstructions: TypeAlias = str | Callable[[TaskT, ContextVariables], str]
 """Instructions for executing a task.
 
 Can be either a static template string or a function that generates instructions
@@ -68,7 +75,7 @@ Examples:
         ```
 """
 
-TaskResponseFormat: TypeAlias = PydanticResponseFormat[BaseModel]
+TaskResponseFormat: TypeAlias = PydanticResponseFormat[TaskOutputT]
 """Format specification for task responses.
 
 Can be either a Pydantic model for direct validation or a function that parses
@@ -238,7 +245,7 @@ class Task(BaseModel):
         raise ValueError("Task type is not defined as a Literal in the task schema")
 
 
-class TaskDefinition(BaseModel):
+class TaskDefinition(BaseModel, Generic[TaskT, TaskOutputT]):
     """Blueprint for task creation and execution.
 
     Defines how a specific type of task should be created, executed,
@@ -272,10 +279,10 @@ class TaskDefinition(BaseModel):
     task_type: type[Task]
     """Task schema for validation."""
 
-    instructions: TaskInstructions
+    instructions: TaskInstructions[TaskT]
     """Static template or dynamic builder."""
 
-    response_format: TaskResponseFormat | None = None
+    response_format: TaskResponseFormat[TaskOutputT] | None = None
     """Optional output format specification."""
 
     model_config = ConfigDict(
