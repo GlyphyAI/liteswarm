@@ -253,24 +253,32 @@ class LitePlanningAgent(PlanningAgent):
 
         # Public properties
         self.swarm = swarm
-        self.agent = agent or self._default_planning_agent()
+        self.agent = agent or self._default_planning_agent(response_format)
         self.response_format = response_format or self._default_planning_response_format()
         self.response_repair_agent = response_repair_agent or self._default_response_repair_agent()
 
-    def _default_planning_agent(self) -> Agent:
+    def _default_planning_agent(self, response_format: PlanResponseFormat | None = None) -> Agent:
         """Create a default planning agent.
 
         Creates and configures an agent with GPT-4o and specialized planning
         instructions. The agent is designed to break down complex tasks into
         minimal, efficient workflows.
 
+        Args:
+            response_format: Optional plan response format.
+
         Returns:
             Agent configured with planning instructions and GPT-4o model.
         """
+        response_format = response_format or self._default_planning_response_format()
+
         return Agent(
             id="agent-planner",
             instructions=PLANNING_AGENT_SYSTEM_PROMPT,
-            llm=LLM(model="gpt-4o"),
+            llm=LLM(
+                model="gpt-4o",
+                response_format=response_format,
+            ),
         )
 
     def _default_response_repair_agent(self) -> ResponseRepairAgent:
