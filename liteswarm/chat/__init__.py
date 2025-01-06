@@ -9,7 +9,6 @@ from .index import LiteMessageIndex, MessageIndex
 from .memory import ChatMemory, LiteChatMemory
 from .optimization import ChatOptimization, LiteChatOptimization
 from .search import ChatSearch, LiteChatSearch
-from .session import LiteChatSession
 
 __all__ = [
     "Chat",
@@ -20,7 +19,6 @@ __all__ = [
     "LiteChatMemory",
     "LiteChatOptimization",
     "LiteChatSearch",
-    "LiteChatSession",
     "LiteMessageIndex",
     "MessageIndex",
 ]
