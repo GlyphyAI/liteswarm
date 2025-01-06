@@ -433,6 +433,27 @@ class TeamMember(BaseModel):
         extra="forbid",
     )
 
+    @classmethod
+    def from_agent(cls, agent: Agent, /, task_types: list[type[Task]]) -> "TeamMember":
+        """Create TeamMember from existing Agent configuration.
+
+        Simplifies TeamMember creation by reusing an Agent's configuration
+        and ID. This is useful when converting standalone agents into team
+        members with specific task capabilities.
+
+        Args:
+            agent: Existing Agent configuration to use.
+            task_types: List of Task types this member can handle.
+
+        Returns:
+            TeamMember instance with the agent's configuration.
+        """
+        return cls(
+            id=agent.id,
+            agent=agent,
+            task_types=task_types,
+        )
+
     @field_serializer("task_types")
     def serialize_task_types(self, task_types: list[type[Task]]) -> list[str]:
         """Serialize task type classes to their string identifiers.
