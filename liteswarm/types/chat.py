@@ -16,8 +16,8 @@ from liteswarm.types.swarm import Agent, AgentResponse, Message
 class ChatMessage(Message):
     """Message for multi-user chat applications.
 
-    Extends the base Message with unique identification, session support,
-    and application-specific metadata. Used to build chat applications.
+    Extends the base Message with unique identification and
+    application-specific metadata. Used to build chat applications.
 
     Examples:
         Basic usage:
@@ -26,7 +26,6 @@ class ChatMessage(Message):
                 id="msg_123",
                 role="user",
                 content="Hello",
-                session_id="session_1",
             )
             ```
 
@@ -34,7 +33,6 @@ class ChatMessage(Message):
             ```python
             chat_msg = ChatMessage.from_message(
                 Message(role="user", content="Hello"),
-                session_id="session_1",
                 metadata={"user_id": "user_123"},
             )
             ```
@@ -42,9 +40,6 @@ class ChatMessage(Message):
 
     id: str
     """Unique message identifier."""
-
-    session_id: str | None = None
-    """Identifier of session the message belongs to."""
 
     created_at: datetime = datetime.now()
     """Message creation timestamp."""
@@ -62,7 +57,7 @@ class ChatMessage(Message):
     def from_message(
         cls,
         message: Message,
-        session_id: str | None = None,
+        /,
         metadata: dict[str, Any] | None = None,
     ) -> "ChatMessage":
         """Create a ChatMessage from a base Message.
@@ -73,7 +68,6 @@ class ChatMessage(Message):
 
         Args:
             message: Base Message to convert.
-            session_id: Optional session identifier.
             metadata: Optional message metadata.
 
         Returns:
@@ -91,7 +85,6 @@ class ChatMessage(Message):
             audio=message.audio,
             # Add identification fields
             id=str(uuid.uuid4()),
-            session_id=session_id,
             created_at=datetime.now(),
             metadata=metadata,
         )
@@ -102,8 +95,7 @@ class ChatResponse(BaseModel):
 
     Encapsulates the complete state of a chat interaction, including the final
     agent that responded, new messages generated during execution, the complete
-    conversation history, and all intermediate agent responses. This object
-    provides a comprehensive view of the chat execution lifecycle.
+    conversation history, and all intermediate agent responses.
     """
 
     last_agent: Agent
