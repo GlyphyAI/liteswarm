@@ -6,7 +6,7 @@
 
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator
+from pydantic import BaseModel, ConfigDict, Discriminator, field_serializer
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import (
@@ -178,6 +178,22 @@ class ErrorEvent(SwarmEventBase):
 
     error: Exception
     """Exception that occurred."""
+
+    @field_serializer("error")
+    def serialize_error(self, error: Exception) -> str:
+        """Serialize Exception object to string representation.
+
+        This method is used by Pydantic to convert Exception objects into
+        a serializable format for JSON encoding. It ensures that error
+        information can be properly transmitted and logged.
+
+        Args:
+            error: Exception object to serialize.
+
+        Returns:
+            String representation of the error.
+        """
+        return str(error)
 
 
 class CompleteEvent(SwarmEventBase):
