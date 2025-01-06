@@ -16,13 +16,12 @@ from typing_extensions import override
 
 from liteswarm.chat import LiteChat, LiteChatMemory, LiteChatSearch
 from liteswarm.chat.optimization import LiteChatOptimization, OptimizationStrategy
-from liteswarm.chat.session import LiteChatSession
 from liteswarm.core.swarm import Swarm
 from liteswarm.repl.event_handler import ConsoleEventHandler
 from liteswarm.types.chat import RAGStrategyConfig
 from liteswarm.types.swarm import Agent, AgentContext, ResponseCost, Usage
+from liteswarm.utils.logging import LogLevel, log_verbose
 from liteswarm.utils.logging import enable_logging as liteswarm_enable_logging
-from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, validate_messages
 from liteswarm.utils.misc import prompt
 
@@ -122,23 +121,11 @@ class AgentRepl:
         )
 
         # Internal state (private)
-        self._session: LiteChatSession | None = None
         self._event_handler = ConsoleEventHandler()
         self._accumulated_usage: Usage | None = None
         self._accumulated_cost: ResponseCost | None = None
         self._active_agent: Agent | None = None
         self._agent_queue: deque[AgentContext] = deque()
-
-    async def _get_session(self) -> LiteChatSession:
-        """Get or initialize the current chat session."""
-        if self._session is None:
-            self._session = await self._initialize_session()
-
-        return self._session
-
-    async def _initialize_session(self) -> LiteChatSession:
-        """Initialize a new chat session."""
-        return await self.chat.create_session(user_id="repl_user")
 
     async def _print_welcome(self) -> None:
         """Display welcome message and available commands."""
@@ -161,8 +148,7 @@ class AgentRepl:
     async def _print_history(self) -> None:
         """Display all non-system messages in chronological order."""
         print("\n📝 Conversation Messages:")
-        session = await self._get_session()
-        messages = await session.get_messages()
+        messages = await self.chat.get_messages()
         for msg in messages:
             if msg.role != "system":
                 content = msg.content or "[No content]"
@@ -171,10 +157,7 @@ class AgentRepl:
 
     async def _print_stats(self) -> None:
         """Display conversation statistics including message counts, token usage, and costs."""
-        if self._session is None:
-            raise RuntimeError("Session not initialized. Call run() first.")
-
-        messages = await self._session.get_messages()
+        messages = await self.chat.get_messages()
         print("\n📊 Conversation Statistics:")
         print(f"Message count: {len(messages)} messages")
 
@@ -227,8 +210,7 @@ class AgentRepl:
         Args:
             filename: The target file path.
         """
-        session = await self._get_session()
-        messages = await session.get_messages()
+        messages = await self.chat.get_messages()
         memory = {"messages": dump_messages(messages)}
 
         with open(filename, "w") as f:
@@ -248,8 +230,7 @@ class AgentRepl:
                 memory: dict[str, Any] = json.load(f)
 
             messages = validate_messages(memory.get("messages", []))
-            session = await self._get_session()
-            await self.memory.add_messages(messages, session.session_id)
+            await self.memory.add_messages(messages)
 
             print(f"\n📥 Conversation memory loaded from {filename}")
             print(f"Messages: {len(messages)} messages")
@@ -374,6 +355,13 @@ class AgentRepl:
             type=int,
             help="Maximum number of messages to return",
         )
+        parser.add_argument(
+            "--threshold",
+            "-t",
+            type=float,
+            default=0.5,
+            help="Minimum similarity score (0.0 to 1.0)",
+        )
         return parser
 
     async def _handle_command(self, command: str) -> bool:
@@ -476,9 +464,8 @@ class AgentRepl:
             query: The user's input query.
         """
         try:
-            session = await self._get_session()
             agent = self._active_agent or self.agent
-            stream = session.send_message(query, agent=agent)
+            stream = self.chat.send_message(query, agent=agent)
 
             async for event in stream:
                 self._event_handler.on_event(event)
@@ -515,13 +502,12 @@ class AgentRepl:
 
             log_verbose(f"Optimizing context with {parsed}")
 
-            session = await self._get_session()
-            messages = await session.get_messages()
+            messages = await self.chat.get_messages()
             if not messages:
                 print("\n❌ No messages to optimize")
                 return
 
-            optimized = await session.optimize_messages(
+            optimized = await self.chat.optimize_messages(
                 model=parsed.model or self.agent.llm.model,
                 strategy=parsed.strategy,
                 rag_config=RAGStrategyConfig(
@@ -554,16 +540,15 @@ class AgentRepl:
             if not parsed:
                 print("\nUsage examples:")
                 print('  /find --query "calendar view" --count 5')
-                print('  /find -q "search term" -n 3')
-                print("  /find --query calendar view --count 5")
-                print("  /find -q calendar view -n 3")
+                print('  /find -q "search term" -n 3 -t 0.7')
+                print("  /find --query calendar view --threshold 0.8")
+                print("  /find -q calendar view -n 3 --threshold 0.6")
                 return
 
-            session = await self._get_session()
-            messages = await session.search_messages(
+            messages = await self.chat.search_messages(
                 query=parsed.query,
                 max_results=parsed.count,
-                score_threshold=0.5,
+                score_threshold=parsed.threshold,
                 index_messages=True,
             )
 
@@ -583,13 +568,12 @@ class AgentRepl:
             print(f"\n❌ Error finding relevant messages: {str(e)}")
             print("\nUsage examples:")
             print('  /find --query "calendar view" --count 5')
-            print('  /find -q "search term" -n 3')
-            print("  /find --query calendar view --count 5")
-            print("  /find -q calendar view -n 3")
+            print('  /find -q "search term" -n 3 -t 0.7')
+            print("  /find --query calendar view --threshold 0.8")
+            print("  /find -q calendar view -n 3 --threshold 0.6")
 
     async def run(self) -> NoReturn:
         """Run the REPL loop until explicitly terminated."""
-        await self._get_session()
         await self._print_welcome()
 
         while True:
@@ -628,6 +612,7 @@ async def start_repl(
     include_cost: bool = False,
     max_iterations: int = sys.maxsize,
     enable_logging: bool = True,
+    log_level: LogLevel = "INFO",
 ) -> NoReturn:
     """Start an interactive REPL session with the specified agent.
 
@@ -640,6 +625,7 @@ async def start_repl(
         include_cost: Whether to track costs.
         max_iterations: Maximum conversation turns.
         enable_logging: Whether to enable logging.
+        log_level: Log level to use for logging.
 
     Example:
         ```python
@@ -653,7 +639,7 @@ async def start_repl(
         ```
     """
     if enable_logging:
-        liteswarm_enable_logging()
+        liteswarm_enable_logging(default_level=log_level)
 
     repl = AgentRepl(
         agent=agent,
