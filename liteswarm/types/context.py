@@ -1,11 +1,12 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 from typing import Any
 
+from pydantic_core import CoreSchema, core_schema
 from typing_extensions import override
 
 
@@ -131,3 +132,35 @@ class ContextVariables(dict[str, Any]):
             del self[key]
         except KeyError:
             raise AttributeError(f"'ContextVariables' object has no attribute '{key}'") from None
+
+    @classmethod
+    def __get_pydantic_core_schema__(
+        cls,
+        _source_type: Any,
+        _handler: Any,
+    ) -> CoreSchema:
+        """Get the Pydantic core schema for this type.
+
+        This method is called by Pydantic to get the schema for validation
+        and serialization.
+
+        Returns:
+            The core schema for this type.
+        """
+        return core_schema.json_or_python_schema(
+            json_schema=core_schema.str_schema(),
+            python_schema=core_schema.union_schema(
+                [
+                    core_schema.is_instance_schema(cls),
+                    core_schema.dict_schema(
+                        keys_schema=core_schema.str_schema(),
+                        values_schema=core_schema.any_schema(),
+                    ),
+                ]
+            ),
+            serialization=core_schema.plain_serializer_function_ser_schema(
+                lambda x: dict(x),
+                return_schema=core_schema.dict_schema(),
+                when_used="json",
+            ),
+        )
