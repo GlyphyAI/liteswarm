@@ -150,6 +150,7 @@ async def send_message_and_stream(  # noqa: PLR0915
     message: str,
     agent_id: str | None = None,
     context_variables: ContextVariables | None = None,
+    user_id: str | None = None,
 ) -> str | None:
     """Send a message and stream the response.
 
@@ -162,86 +163,127 @@ async def send_message_and_stream(  # noqa: PLR0915
         context_variables=context_variables,
     )
 
-    async with session.post(
-        f"{BASE_URL}/sessions/{session_id}/messages/stream",
-        headers={"Accept": "application/json", "Content-Type": "application/json"},
-        json=request.model_dump(),
-        timeout=TIMEOUT,
-    ) as response:
-        response.raise_for_status()
+    try:
+        async with session.post(
+            f"{BASE_URL}/sessions/{session_id}/messages/stream",
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            json=request.model_dump(),
+            timeout=TIMEOUT,
+        ) as response:
+            if response.status == 404 and user_id:
+                # Session not found, try to create a new one
+                print("\n⚠️ Session expired, creating a new one...")
+                new_session = await create_session(session, user_id=user_id)
+                print(f"✨ Created new session: {new_session.session_id}")
 
-        if agent_id:
-            print(f"\n🤖 {get_agent_title(agent_id)} is thinking...")
+                # Retry with new session
+                async with session.post(
+                    f"{BASE_URL}/sessions/{new_session.session_id}/messages/stream",
+                    headers={"Accept": "application/json", "Content-Type": "application/json"},
+                    json=request.model_dump(),
+                    timeout=TIMEOUT,
+                ) as retry_response:
+                    retry_response.raise_for_status()
+                    return await process_stream_response(retry_response, agent_id)
+
+            response.raise_for_status()
+            return await process_stream_response(response, agent_id)
+
+    except aiohttp.ClientResponseError as e:
+        if e.status == 404:
+            print("\n❌ Session not found and couldn't recreate it")
         else:
-            print("\n🤖 Agent is thinking...")
+            print(f"\n❌ Error: {str(e)}")
 
-        current_agent = agent_id
-        first_chunk = True
-        last_active_agent = None
+        return None
 
-        async for line in response.content:
-            if not line:
-                continue
+    except Exception as e:
+        print(f"\n❌ Error: {str(e)}")
+        raise e
 
-            try:
-                event_data = json.loads(line)
-                debug_print(f"Received event: {event_data!r}")
 
-                match event_data["type"]:
-                    case "agent_switch":
-                        prev_agent = event_data.get("prev_agent", {}).get("id", current_agent)
-                        next_agent = event_data["next_agent"]["id"]
+async def process_stream_response(
+    response: aiohttp.ClientResponse, agent_id: str | None
+) -> str | None:
+    """Process streaming response and return the last active agent ID.
 
-                        if prev_agent:
-                            prev_agent_title = get_agent_title(prev_agent)
-                            next_agent_title = get_agent_title(next_agent)
-                            print(
-                                f"\n🔄 Switching from {prev_agent_title} to {next_agent_title}..."
-                            )
-                        else:
-                            next_agent_title = get_agent_title(next_agent)
-                            print(f"\n🔄 Starting with {next_agent_title}...")
+    Args:
+        response: The streaming response to process.
+        agent_id: Current agent ID.
 
-                        current_agent = next_agent
-                        first_chunk = True
+    Returns:
+        The ID of the last active agent, if any.
+    """
+    if agent_id:
+        print(f"\n🤖 {get_agent_title(agent_id)} is thinking...")
+    else:
+        print("\n🤖 Agent is thinking...")
 
-                    case "agent_response_chunk":
-                        if completion := event_data.get("response_chunk", {}).get("completion"):
-                            # Get agent ID from the response chunk
-                            chunk_agent_id = event_data.get("agent", {}).get("id")
-                            if chunk_agent_id:
-                                current_agent = chunk_agent_id
+    current_agent = agent_id
+    first_chunk = True
+    last_active_agent = None
 
-                            if content := completion.get("delta", {}).get("content"):
-                                if first_chunk:
-                                    if current_agent:
-                                        prefix = f"\n🤖 [{get_agent_title(current_agent)}]: "
-                                    else:
-                                        prefix = "\n🤖 [Agent]: "
-                                    print(prefix, end="", flush=True)
-                                    first_chunk = False
-                                print(content, end="", flush=True)
+    async for line in response.content:
+        if not line:
+            continue
 
-                    case "agent_complete":
-                        if agent := event_data.get("agent"):
-                            last_active_agent = agent.get("id")
+        try:
+            event_data = json.loads(line)
+            debug_print(f"Received event: {event_data!r}")
 
-                    case "complete":
-                        if DEBUG:
-                            print("\n✅ Stream complete.")
-                        break
+            match event_data["type"]:
+                case "agent_switch":
+                    prev_agent = event_data.get("prev_agent", {}).get("id", current_agent)
+                    next_agent = event_data["next_agent"]["id"]
 
-                    case "error":
-                        print(f"\n❌ Error: {event_data.get('error')}", file=sys.stderr)
-                        return None
+                    if prev_agent:
+                        prev_agent_title = get_agent_title(prev_agent)
+                        next_agent_title = get_agent_title(next_agent)
+                        print(f"\n🔄 Switching from {prev_agent_title} to {next_agent_title}...")
+                    else:
+                        next_agent_title = get_agent_title(next_agent)
+                        print(f"\n🔄 Starting with {next_agent_title}...")
 
-            except json.JSONDecodeError as e:
-                print(f"\n❌ Error parsing response: {e}", file=sys.stderr)
-                debug_print(f"Error details: {e}")
-                continue
+                    current_agent = next_agent
+                    first_chunk = True
 
-        print()
-        return last_active_agent
+                case "agent_response_chunk":
+                    if completion := event_data.get("response_chunk", {}).get("completion"):
+                        # Get agent ID from the response chunk
+                        chunk_agent_id = event_data.get("agent", {}).get("id")
+                        if chunk_agent_id:
+                            current_agent = chunk_agent_id
+
+                        if content := completion.get("delta", {}).get("content"):
+                            if first_chunk:
+                                if current_agent:
+                                    prefix = f"\n🤖 [{get_agent_title(current_agent)}]: "
+                                else:
+                                    prefix = "\n🤖 [Agent]: "
+                                print(prefix, end="", flush=True)
+                                first_chunk = False
+                            print(content, end="", flush=True)
+
+                case "agent_complete":
+                    if agent := event_data.get("agent"):
+                        last_active_agent = agent.get("id")
+
+                case "complete":
+                    if DEBUG:
+                        print("\n✅ Stream complete.")
+                    break
+
+                case "error":
+                    print(f"\n❌ Error: {event_data.get('error')}", file=sys.stderr)
+                    return None
+
+        except json.JSONDecodeError as e:
+            print(f"\n❌ Error parsing response: {e}", file=sys.stderr)
+            debug_print(f"Error details: {e}")
+            continue
+
+    print()
+    return last_active_agent
 
 
 @retry(
@@ -765,6 +807,7 @@ async def run_repl() -> NoReturn:
                         session_id=session_id,
                         message=user_input,
                         agent_id=last_agent_id,
+                        user_id=user_id,  # Pass user_id for session recreation
                     )
 
                     if completed_agent_id:
