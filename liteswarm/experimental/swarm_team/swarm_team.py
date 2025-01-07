@@ -19,11 +19,11 @@ from liteswarm.experimental.swarm_team.response_repair import (
 )
 from liteswarm.types.collections import AsyncStream, ReturnItem, YieldItem, returnable
 from liteswarm.types.events import (
-    PlanCompletedEvent,
-    PlanCreatedEvent,
+    PlanCreateEvent,
+    PlanExecutionCompleteEvent,
     SwarmEvent,
-    TaskCompletedEvent,
-    TaskStartedEvent,
+    TaskCompleteEvent,
+    TaskStartEvent,
 )
 from liteswarm.types.exceptions import TaskExecutionError
 from liteswarm.types.swarm import AgentExecutionResult, ContextVariables, Message
@@ -559,7 +559,7 @@ class SwarmTeam:
             yield YieldItem(event)
 
         plan_result = await stream.get_return_value()
-        yield YieldItem(PlanCreatedEvent(plan=plan_result.plan))
+        yield YieldItem(PlanCreateEvent(plan=plan_result.plan))
         yield ReturnItem(plan_result)
 
     @returnable
@@ -669,7 +669,7 @@ class SwarmTeam:
 
             artifact.status = ArtifactStatus.COMPLETED
             artifact.task_results = task_results
-            yield YieldItem(PlanCompletedEvent(plan=plan, artifact=artifact))
+            yield YieldItem(PlanExecutionCompleteEvent(plan=plan, artifact=artifact))
             yield ReturnItem(artifact)
 
         except Exception as error:
@@ -783,7 +783,7 @@ class SwarmTeam:
             )
 
             yield YieldItem(
-                TaskCompletedEvent(
+                TaskCompleteEvent(
                     task=task,
                     task_result=task_result,
                     task_context_variables=context_variables,
