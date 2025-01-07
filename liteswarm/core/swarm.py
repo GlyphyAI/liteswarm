@@ -61,10 +61,9 @@ from liteswarm.types.swarm import (
 from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, get_max_tokens
-from liteswarm.utils.misc import parse_content, safe_get_attr
+from liteswarm.utils.misc import parse_content, resolve_agent_instructions, safe_get_attr
 from liteswarm.utils.retry import retry_wrapper
 from liteswarm.utils.typing import is_subtype
-from liteswarm.utils.unwrap import unwrap_instructions
 from liteswarm.utils.usage import calculate_response_cost
 
 litellm.modify_params = True
@@ -495,7 +494,7 @@ class Swarm:
         Returns:
             Response stream for the continuation request.
         """
-        instructions = unwrap_instructions(agent.instructions, context_variables)
+        instructions = resolve_agent_instructions(agent, context_variables)
         continuation_messages = [
             Message(role="system", content=instructions),
             Message(role="assistant", content=previous_content),
@@ -921,27 +920,31 @@ class Swarm:
     # MARK: Agent Management
     # ================================================
 
-    def _create_agent_context(
+    def _create_agent_messages(
         self,
         agent: Agent,
         messages: list[Message],
+        instructions: str | None = None,
         context_variables: ContextVariables | None = None,
     ) -> list[Message]:
-        """Create execution context for an agent.
+        """Create ordered list of messages for agent execution.
 
-        Prepares a properly ordered message list by combining a system message
-        containing resolved instructions with the filtered conversation history.
-        Dynamic instructions are resolved using context variables if provided.
+        Combines a system message containing agent instructions with the
+        filtered conversation history. If instructions are not provided,
+        they will be resolved from the agent's template.
 
         Args:
-            agent: Agent requiring context creation.
-            messages: Messages to include in context.
-            context_variables: Optional variables for instruction resolution.
+            agent: Agent requiring message preparation.
+            messages: Conversation history to include.
+            instructions: Optional pre-resolved instructions.
+            context_variables: Optional variables for resolving instructions.
 
         Returns:
-            Ordered list of messages ready for execution.
+            List of messages with system message first, followed by conversation history.
         """
-        instructions = unwrap_instructions(agent.instructions, context_variables)
+        if instructions is None:
+            instructions = resolve_agent_instructions(agent, context_variables)
+
         system_message = Message(role="system", content=instructions)
         agent_messages = [message for message in messages if message.role != "system"]
         return [system_message, *agent_messages]
@@ -1025,9 +1028,15 @@ class Swarm:
                 yield YieldItem(AgentActivateEvent(agent=self._active_agent))
                 yield YieldItem(AgentSwitchEvent(prev_agent=prev_agent, next_agent=next_agent))
 
-            agent_context_messages = self._create_agent_context(
+            agent_instructions = resolve_agent_instructions(
+                agent=self._active_agent,
+                context_variables=self._context_variables,
+            )
+
+            agent_context_messages = self._create_agent_messages(
                 agent=self._active_agent,
                 messages=self._conversation_messages,
+                instructions=agent_instructions,
                 context_variables=self._context_variables,
             )
 
@@ -1153,7 +1162,7 @@ class Swarm:
         self._activate_agent(agent)
         yield YieldItem(AgentActivateEvent(agent=agent))
 
-        self._conversation_messages = self._create_agent_context(
+        self._conversation_messages = self._create_agent_messages(
             agent=agent,
             messages=messages,
             context_variables=self._context_variables,
