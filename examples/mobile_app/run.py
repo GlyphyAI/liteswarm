@@ -8,9 +8,6 @@ import asyncio
 
 from liteswarm.repl import start_repl
 from liteswarm.types import LLM, Agent, AgentTool
-from liteswarm.utils.logging import enable_logging
-
-enable_logging(default_level="DEBUG")
 
 ROUTER_INSTRUCTIONS = """You are an intelligent routing agent that coordinates the Flutter app development team.
 
@@ -242,9 +239,10 @@ async def run() -> None:
     agents = create_flutter_team()
 
     await start_repl(
-        agents["router"],
+        agent=agents["router"],
         include_usage=True,
         include_cost=True,
+        log_level="DEBUG",
     )
 
 
