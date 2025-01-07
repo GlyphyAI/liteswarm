@@ -1049,6 +1049,7 @@ class Swarm:
             yield YieldItem(
                 AgentStartEvent(
                     agent=self._active_agent,
+                    agent_instructions=agent_instructions,
                     messages=agent_context_messages,
                 )
             )
@@ -1102,6 +1103,7 @@ class Swarm:
                 yield YieldItem(
                     AgentCompleteEvent(
                         agent=self._active_agent,
+                        agent_instructions=agent_instructions,
                         response=agent_response,
                         messages=current_agent_messages,
                     )
