@@ -23,13 +23,13 @@ from liteswarm.types.collections import AsyncStream, ReturnItem, YieldItem, retu
 from liteswarm.types.events import (
     AgentActivateEvent,
     AgentCompleteEvent,
+    AgentExecutionCompleteEvent,
+    AgentExecutionStartEvent,
     AgentResponseChunkEvent,
     AgentResponseEvent,
     AgentStartEvent,
     AgentSwitchEvent,
     CompletionResponseChunkEvent,
-    ExecutionCompleteEvent,
-    ExecutionStartEvent,
     SwarmEvent,
     ToolCallResultEvent,
 )
@@ -1153,7 +1153,7 @@ class Swarm:
             raise SwarmError("Messages list is empty")
 
         yield YieldItem(
-            ExecutionStartEvent(
+            AgentExecutionStartEvent(
                 agent=agent,
                 messages=messages,
                 context_variables=context_variables,
@@ -1175,7 +1175,13 @@ class Swarm:
             yield YieldItem(event)
 
         result = await agent_execution_stream.get_return_value()
-        yield YieldItem(ExecutionCompleteEvent(agent=self._active_agent, execution_result=result))
+        yield YieldItem(
+            AgentExecutionCompleteEvent(
+                agent=self._active_agent,
+                execution_result=result,
+            )
+        )
+
         yield ReturnItem(result)
 
     # ================================================
