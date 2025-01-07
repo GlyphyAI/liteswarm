@@ -38,15 +38,15 @@ class SwarmEventBase(BaseModel):
     )
 
 
-class ExecutionBeginEvent(SwarmEventBase):
-    """Event emitted when execution begins.
+class ExecutionStartEvent(SwarmEventBase):
+    """Event emitted when execution starts.
 
     Called at the very beginning of execution, before any agent activation
     or task processing. Used to signal the start of processing and prepare
     for incoming events.
     """
 
-    type: Literal["execution_begin"] = "execution_begin"
+    type: Literal["execution_start"] = "execution_start"
     """Discriminator field."""
 
     agent: Agent
@@ -166,17 +166,20 @@ class AgentActivateEvent(SwarmEventBase):
     """Agent that was activated."""
 
 
-class AgentBeginEvent(SwarmEventBase):
-    """Event emitted when an agent begins execution.
+class AgentStartEvent(SwarmEventBase):
+    """Event emitted when an agent starts execution.
 
-    Called when an agent begins execution, either for the first time or after a switch.
+    Called when an agent starts execution, either for the first time or after a switch.
     """
 
-    type: Literal["agent_begin"] = "agent_begin"
+    type: Literal["agent_start"] = "agent_start"
     """Discriminator field."""
 
     agent: Agent
     """Agent that began execution."""
+
+    agent_instructions: str
+    """Instructions for the agent."""
 
     messages: list[Message]
     """Messages to be sent to the agent."""
@@ -238,7 +241,7 @@ class ErrorEvent(SwarmEventBase):
         return str(error)
 
 
-class PlanCreatedEvent(SwarmEventBase):
+class PlanCreateEvent(SwarmEventBase):
     """Event emitted when a new plan is successfully created.
 
     Called after a planning agent successfully creates a structured plan
@@ -246,22 +249,37 @@ class PlanCreatedEvent(SwarmEventBase):
     before execution.
     """
 
-    type: Literal["plan_created"] = "plan_created"
+    type: Literal["plan_create"] = "plan_create"
     """Discriminator field."""
 
     plan: Plan
     """Newly created execution plan."""
 
 
-class TaskStartedEvent(SwarmEventBase):
-    """Event emitted when a task begins execution.
+class PlanExecutionStartEvent(SwarmEventBase):
+    """Event emitted when a plan starts execution.
+
+    Called when a plan starts execution, after member assignment but
+    before actual processing. Used to track task progress and prepare
+    resources.
+    """
+
+    type: Literal["plan_execution_start"] = "plan_execution_start"
+    """Discriminator field."""
+
+    plan: Plan
+    """Plan that started execution."""
+
+
+class TaskStartEvent(SwarmEventBase):
+    """Event emitted when a task starts execution.
 
     Called when a task starts execution, after member assignment but
     before actual processing. Used to track task progress and prepare
     resources.
     """
 
-    type: Literal["task_started"] = "task_started"
+    type: Literal["task_start"] = "task_start"
     """Discriminator field."""
 
     task: Task
@@ -274,14 +292,14 @@ class TaskStartedEvent(SwarmEventBase):
     """Messages to be sent to the agent executing the task."""
 
 
-class TaskCompletedEvent(SwarmEventBase):
+class TaskCompleteEvent(SwarmEventBase):
     """Event emitted when a task finishes execution.
 
     Called when a task completes execution successfully. Used to process
     results and trigger dependent tasks.
     """
 
-    type: Literal["task_completed"] = "task_completed"
+    type: Literal["task_complete"] = "task_complete"
     """Discriminator field."""
 
     task: Task
@@ -294,14 +312,14 @@ class TaskCompletedEvent(SwarmEventBase):
     """Context variables used during task execution."""
 
 
-class PlanCompletedEvent(SwarmEventBase):
+class PlanExecutionCompleteEvent(SwarmEventBase):
     """Event emitted when all tasks in a plan are completed.
 
     Called when all tasks in a plan have finished execution successfully.
     Used to perform cleanup or trigger follow-up actions.
     """
 
-    type: Literal["plan_completed"] = "plan_completed"
+    type: Literal["plan_execution_complete"] = "plan_execution_complete"
     """Discriminator field."""
 
     plan: Plan
@@ -312,7 +330,7 @@ class PlanCompletedEvent(SwarmEventBase):
 
 
 SwarmEvent = Annotated[
-    ExecutionBeginEvent
+    ExecutionStartEvent
     | ExecutionCompleteEvent
     | CompletionResponseChunkEvent
     | AgentResponseChunkEvent
@@ -320,13 +338,14 @@ SwarmEvent = Annotated[
     | ToolCallResultEvent
     | AgentSwitchEvent
     | AgentActivateEvent
-    | AgentBeginEvent
+    | AgentStartEvent
     | AgentCompleteEvent
     | ErrorEvent
-    | PlanCreatedEvent
-    | TaskStartedEvent
-    | TaskCompletedEvent
-    | PlanCompletedEvent,
+    | PlanCreateEvent
+    | PlanExecutionStartEvent
+    | TaskStartEvent
+    | TaskCompleteEvent
+    | PlanExecutionCompleteEvent,
     Discriminator("type"),
 ]
 """Type alias for all Swarm events."""
