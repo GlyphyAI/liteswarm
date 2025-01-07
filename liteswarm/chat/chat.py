@@ -24,7 +24,7 @@ from liteswarm.types.context import ContextVariables
 from liteswarm.types.events import SwarmEvent
 from liteswarm.types.swarm import Agent, Message
 from liteswarm.utils.messages import validate_messages
-from liteswarm.utils.unwrap import unwrap_instructions
+from liteswarm.utils.misc import resolve_agent_instructions
 
 ReturnType = TypeVar("ReturnType")
 """Type variable for chat return type."""
@@ -233,22 +233,6 @@ class LiteChat(Chat[ChatResponse]):
         self._last_agent: Agent | None = None
         self._last_instructions: str | None = None
 
-    def _get_instructions(
-        self,
-        agent: Agent,
-        context_variables: ContextVariables | None = None,
-    ) -> str:
-        """Get agent instructions with context variables applied.
-
-        Args:
-            agent: Agent to get instructions for.
-            context_variables: Variables for instruction resolution.
-
-        Returns:
-            Processed instruction string.
-        """
-        return unwrap_instructions(agent.instructions, context_variables)
-
     @override
     @returnable
     async def send_message(
@@ -276,7 +260,7 @@ class LiteChat(Chat[ChatResponse]):
             System instructions are added when agent or variables change.
         """
         context_messages: list[Message] = []
-        instructions = self._get_instructions(agent, context_variables)
+        instructions = resolve_agent_instructions(agent, context_variables)
 
         if self._last_agent != agent or self._last_instructions != instructions:
             context_messages.append(Message(role="system", content=instructions))
@@ -294,7 +278,7 @@ class LiteChat(Chat[ChatResponse]):
 
         async for event in stream:
             if event.type == "agent_switch":
-                instructions = self._get_instructions(event.next_agent, context_variables)
+                instructions = resolve_agent_instructions(event.next_agent, context_variables)
                 context_messages.append(Message(role="system", content=instructions))
                 self._last_agent = event.next_agent
                 self._last_instructions = instructions
