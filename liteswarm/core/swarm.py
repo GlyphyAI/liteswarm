@@ -22,14 +22,14 @@ from pydantic import BaseModel, ValidationError
 from liteswarm.types.collections import AsyncStream, ReturnItem, YieldItem, returnable
 from liteswarm.types.events import (
     AgentActivateEvent,
-    AgentBeginEvent,
     AgentCompleteEvent,
     AgentResponseChunkEvent,
     AgentResponseEvent,
+    AgentStartEvent,
     AgentSwitchEvent,
     CompletionResponseChunkEvent,
-    ExecutionBeginEvent,
     ExecutionCompleteEvent,
+    ExecutionStartEvent,
     SwarmEvent,
     ToolCallResultEvent,
 )
@@ -1038,7 +1038,7 @@ class Swarm:
             )
 
             yield YieldItem(
-                AgentBeginEvent(
+                AgentStartEvent(
                     agent=self._active_agent,
                     messages=agent_context_messages,
                 )
@@ -1141,12 +1141,13 @@ class Swarm:
         if not messages:
             raise SwarmError("Messages list is empty")
 
-        start_event = ExecutionBeginEvent(
-            agent=agent,
-            messages=messages,
-            context_variables=context_variables,
+        yield YieldItem(
+            ExecutionStartEvent(
+                agent=agent,
+                messages=messages,
+                context_variables=context_variables,
+            )
         )
-        yield YieldItem(start_event)
 
         self._context_variables = context_variables or ContextVariables()
         self._activate_agent(agent)
