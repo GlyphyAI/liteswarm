@@ -249,7 +249,6 @@ async def process_stream_response(
 
                 case "agent_response_chunk":
                     if completion := event_data.get("response_chunk", {}).get("completion"):
-                        # Get agent ID from the response chunk
                         chunk_agent_id = event_data.get("agent", {}).get("id")
                         if chunk_agent_id:
                             current_agent = chunk_agent_id
@@ -268,7 +267,7 @@ async def process_stream_response(
                     if agent := event_data.get("agent"):
                         last_active_agent = agent.get("id")
 
-                case "complete":
+                case "execution_complete":
                     if DEBUG:
                         print("\n✅ Stream complete.")
                     break

@@ -8,10 +8,10 @@ from typing_extensions import override
 
 from liteswarm.repl.event_handler import ConsoleEventHandler
 from liteswarm.types.events import (
-    PlanCompletedEvent,
-    PlanCreatedEvent,
-    TaskCompletedEvent,
-    TaskStartedEvent,
+    PlanCreateEvent,
+    PlanExecutionCompleteEvent,
+    TaskCompleteEvent,
+    TaskStartEvent,
 )
 
 
@@ -19,7 +19,7 @@ class EventHandler(ConsoleEventHandler):
     """Software team event handler with detailed task and plan tracking."""
 
     @override
-    def _handle_team_plan_created(self, event: PlanCreatedEvent) -> None:
+    def _handle_plan_create(self, event: PlanCreateEvent) -> None:
         """Handle team plan created events with detailed task breakdown.
 
         Args:
@@ -41,7 +41,7 @@ class EventHandler(ConsoleEventHandler):
         print("-------------------------")
 
     @override
-    def _handle_team_task_started(self, event: TaskStartedEvent) -> None:
+    def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle team task started events with assignment details.
 
         Args:
@@ -55,7 +55,7 @@ class EventHandler(ConsoleEventHandler):
             print(f"Dependencies: {', '.join(event.task.dependencies)}")
 
     @override
-    def _handle_team_task_completed(self, event: TaskCompletedEvent) -> None:
+    def _handle_task_complete(self, event: TaskCompleteEvent) -> None:
         """Handle team task completed events with results.
 
         Args:
@@ -69,7 +69,7 @@ class EventHandler(ConsoleEventHandler):
             print(event.task_result.output.model_dump_json(indent=2))
 
     @override
-    def _handle_team_plan_completed(self, event: PlanCompletedEvent) -> None:
+    def _handle_plan_execution_complete(self, event: PlanExecutionCompleteEvent) -> None:
         """Handle team plan completed events with execution summary.
 
         Args:
