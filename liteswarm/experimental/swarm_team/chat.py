@@ -197,7 +197,7 @@ class LiteTeamChat(Chat[Artifact]):
             )
 
             async for event in plan_stream:
-                if event.type == "execution_start":
+                if event.type == "agent_execution_start":
                     if self._last_agent != event.agent:
                         add_system_message(event.agent)
 
@@ -235,7 +235,7 @@ class LiteTeamChat(Chat[Artifact]):
                 if event.type == "task_start":
                     task_instructions = event.task_instructions
 
-                if event.type == "execution_start":
+                if event.type == "agent_execution_start":
                     if self._last_agent != event.agent:
                         add_system_message(event.agent)
 
