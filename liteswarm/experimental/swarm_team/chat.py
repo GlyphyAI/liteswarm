@@ -28,7 +28,7 @@ from liteswarm.types.swarm_team import (
     TeamMember,
 )
 from liteswarm.utils.messages import validate_messages
-from liteswarm.utils.unwrap import unwrap_instructions
+from liteswarm.utils.misc import resolve_agent_instructions
 
 
 class LiteTeamChat(Chat[Artifact]):
@@ -148,22 +148,6 @@ class LiteTeamChat(Chat[Artifact]):
         self._last_instructions: str | None = None
         self._max_feedback_attempts = max_feedback_attempts
 
-    def _get_instructions(
-        self,
-        agent: Agent,
-        context_variables: ContextVariables | None = None,
-    ) -> str:
-        """Get agent instructions with context variables applied.
-
-        Args:
-            agent: Agent to get instructions for.
-            context_variables: Variables for instruction resolution.
-
-        Returns:
-            Processed instruction string.
-        """
-        return unwrap_instructions(agent.instructions, context_variables)
-
     @override
     @returnable
     async def send_message(
@@ -198,21 +182,30 @@ class LiteTeamChat(Chat[Artifact]):
         """
         chat_messages = await self.get_messages()
         context_messages = validate_messages(chat_messages)
-        context_messages.append(Message(role="user", content=message))
+
+        def add_system_message(agent: Agent) -> None:
+            instructions = resolve_agent_instructions(agent, context_variables)
+            context_messages.append(Message(role="system", content=instructions))
+            self._last_agent = agent
+            self._last_instructions = instructions
 
         feedback_attempts = 0
         while feedback_attempts < self._max_feedback_attempts:
             plan_stream = self._team.create_plan(
-                messages=context_messages,
+                messages=[*context_messages, Message(role="user", content=message)],
                 context_variables=context_variables,
             )
 
             async for event in plan_stream:
-                if event.type == "agent_begin":
-                    instructions = self._get_instructions(event.agent, context_variables)
-                    context_messages.append(Message(role="system", content=instructions))
-                    self._last_agent = event.agent
-                    self._last_instructions = instructions
+                if event.type == "execution_start":
+                    if self._last_agent != event.agent:
+                        add_system_message(event.agent)
+
+                    context_messages.append(Message(role="user", content=message))
+
+                if event.type == "agent_start":
+                    if self._last_agent != event.agent:
+                        add_system_message(event.agent)
 
                 yield YieldItem(event)
 
@@ -237,21 +230,20 @@ class LiteTeamChat(Chat[Artifact]):
                 context_variables=context_variables,
             )
 
+            task_instructions: str | None = None
             async for event in execution_stream:
-                if event.type == "agent_begin":
-                    instructions = self._get_instructions(event.agent, context_variables)
-                    context_messages.append(Message(role="system", content=instructions))
-                    self._last_agent = event.agent
-                    self._last_instructions = instructions
+                if event.type == "task_start":
+                    task_instructions = event.task_instructions
+
+                if event.type == "execution_start":
+                    if self._last_agent != event.agent:
+                        add_system_message(event.agent)
+
+                    if task_instructions:
+                        context_messages.append(Message(role="user", content=task_instructions))
 
                 if event.type == "agent_complete":
                     context_messages.extend(event.messages)
-
-                if event.type == "task_started":
-                    for msg in reversed(event.messages):
-                        if msg.role == "user":
-                            context_messages.append(msg)
-                            break
 
                 yield YieldItem(event)
 
