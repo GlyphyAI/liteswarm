@@ -364,6 +364,7 @@ class SwarmTeam:
         response: str,
         assignee: TeamMember,
         task: Task,
+        task_instructions: str,
         task_execution_result: AgentExecutionResult,
         task_context_variables: ContextVariables | None = None,
     ) -> TaskResult:
@@ -378,6 +379,7 @@ class SwarmTeam:
             response: Raw response string from agent.
             assignee: Team member who executed the task.
             task: Task that was executed.
+            task_instructions: Instructions for the task.
             task_execution_result: Raw execution result from swarm.
             task_context_variables: Optional context for processing.
 
@@ -391,27 +393,10 @@ class SwarmTeam:
         task_definition = self._task_registry.get_task_definition(task.type)
         response_format = task_definition.response_format
 
-        if not response_format:
-            task_result = TaskResult(
+        def create_task_result(output: BaseModel | None = None) -> TaskResult:
+            return TaskResult(
                 task=task,
-                content=response,
-                new_messages=task_execution_result.new_messages,
-                all_messages=task_execution_result.all_messages,
-                context_variables=task_context_variables,
-                assignee=assignee,
-            )
-
-            return task_result
-
-        try:
-            output = self._parse_response(
-                response=response,
-                response_format=response_format,
-                task_context_variables=task_context_variables,
-            )
-
-            task_result = TaskResult(
-                task=task,
+                task_instructions=task_instructions,
                 content=response,
                 output=output,
                 new_messages=task_execution_result.new_messages,
@@ -420,7 +405,17 @@ class SwarmTeam:
                 assignee=assignee,
             )
 
-            return task_result
+        if not response_format:
+            return create_task_result()
+
+        try:
+            output = self._parse_response(
+                response=response,
+                response_format=response_format,
+                task_context_variables=task_context_variables,
+            )
+
+            return create_task_result(output)
 
         except ValidationError as validation_error:
             repaired_response = await self.response_repair_agent.repair_response(
@@ -431,17 +426,7 @@ class SwarmTeam:
                 context_variables=task_context_variables,
             )
 
-            task_result = TaskResult(
-                task=task,
-                content=response,
-                output=repaired_response,
-                new_messages=task_execution_result.new_messages,
-                all_messages=task_execution_result.all_messages,
-                context_variables=task_context_variables,
-                assignee=assignee,
-            )
-
-            return task_result
+            return create_task_result(repaired_response)
 
     def _select_matching_member(self, task: Task) -> TeamMember | None:
         """Select best team member for task.
@@ -632,17 +617,9 @@ class SwarmTeam:
                 log_verbose(f"Executing tasks: {next_tasks}", level="DEBUG")
                 for task in next_tasks:
                     try:
-                        task_definition = self._task_registry.get_task_definition(task.type)
-                        task_instructions = self._prepare_instructions(
-                            task=task,
-                            task_definition=task_definition,
-                            task_context_variables=current_context_variables,
-                        )
-
-                        task_message = Message(role="user", content=task_instructions)
                         task_stream = self.execute_task(
                             task,
-                            messages=[*current_messages, task_message],
+                            messages=current_messages,
                             context_variables=current_context_variables,
                         )
 
@@ -652,8 +629,11 @@ class SwarmTeam:
                         task_result = await task_stream.get_return_value()
                         task_results.append(task_result)
 
+                        if content := task_result.task_instructions:
+                            current_messages.append(Message(role="user", content=content))
+
                         if task_result.new_messages:
-                            new_messages = [task_message, *task_result.new_messages]
+                            new_messages = [*current_messages, *task_result.new_messages]
                             current_messages.extend(new_messages)
                             execution_messages.extend(new_messages)
 
@@ -752,13 +732,29 @@ class SwarmTeam:
             )
 
         try:
+            task_definition = self._task_registry.get_task_definition(task.type)
+            task_instructions = self._prepare_instructions(
+                task=task,
+                task_definition=task_definition,
+                task_context_variables=context_variables,
+            )
+
+            task_message = Message(role="user", content=task_instructions)
+            task_messages = [*messages, task_message]
+
+            yield YieldItem(
+                TaskStartEvent(
+                    task=task,
+                    task_instructions=task_instructions,
+                    messages=task_messages,
+                )
+            )
+
             task.status = TaskStatus.IN_PROGRESS
             task.assignee = assignee.agent.id
-            yield YieldItem(TaskStartedEvent(task=task, messages=messages))
-
             task_stream = self.swarm.stream(
                 agent=assignee.agent,
-                messages=messages,
+                messages=task_messages,
                 context_variables=context_variables,
             )
 
@@ -778,6 +774,7 @@ class SwarmTeam:
                 response=content,
                 assignee=assignee,
                 task=task,
+                task_instructions=task_instructions,
                 task_context_variables=context_variables,
                 task_execution_result=task_execution_result,
             )
