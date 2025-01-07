@@ -11,13 +11,13 @@ from liteswarm.types.events import (
     AgentCompleteEvent,
     AgentResponseChunkEvent,
     AgentSwitchEvent,
-    CompleteEvent,
     ErrorEvent,
-    PlanCompletedEvent,
-    PlanCreatedEvent,
+    ExecutionCompleteEvent,
+    PlanCreateEvent,
+    PlanExecutionCompleteEvent,
     SwarmEvent,
-    TaskCompletedEvent,
-    TaskStartedEvent,
+    TaskCompleteEvent,
+    TaskStartEvent,
     ToolCallResultEvent,
 )
 
@@ -85,17 +85,17 @@ class ConsoleEventHandler:
                 self._handle_agent_complete(event)
             case ErrorEvent():
                 self._handle_error(event)
-            case CompleteEvent():
+            case ExecutionCompleteEvent():
                 self._handle_complete(event)
 
             # Swarm Team Events
-            case PlanCreatedEvent():
+            case PlanCreateEvent():
                 self._handle_team_plan_created(event)
-            case TaskStartedEvent():
+            case TaskStartEvent():
                 self._handle_team_task_started(event)
-            case TaskCompletedEvent():
+            case TaskCompleteEvent():
                 self._handle_team_task_completed(event)
-            case PlanCompletedEvent():
+            case PlanExecutionCompleteEvent():
                 self._handle_team_plan_completed(event)
 
     def _handle_response_chunk(self, event: AgentResponseChunkEvent) -> None:
@@ -163,7 +163,7 @@ class ConsoleEventHandler:
         print(f"\n❌ [{agent_id}] Error: {str(event.error)}", file=sys.stderr)
         self._last_agent = None
 
-    def _handle_complete(self, event: CompleteEvent) -> None:
+    def _handle_complete(self, event: ExecutionCompleteEvent) -> None:
         """Process completion.
 
         Args:
@@ -172,7 +172,7 @@ class ConsoleEventHandler:
         self._last_agent_id = None
         print("\n\n✅ Completed\n", flush=True)
 
-    def _handle_team_plan_created(self, event: PlanCreatedEvent) -> None:
+    def _handle_team_plan_created(self, event: PlanCreateEvent) -> None:
         """Process team plan creation.
 
         Args:
@@ -182,7 +182,7 @@ class ConsoleEventHandler:
         task_count = len(event.plan.tasks)
         print(f"\n\n🔧 Plan created (task count: {task_count}): {plan_id}\n", flush=True)
 
-    def _handle_team_task_started(self, event: TaskStartedEvent) -> None:
+    def _handle_team_task_started(self, event: TaskStartEvent) -> None:
         """Process team task start.
 
         Args:
@@ -192,7 +192,7 @@ class ConsoleEventHandler:
         assignee_id = event.task.assignee if event.task.assignee else "unknown"
         print(f"\n\n🔧 Task started: {task_id} by {assignee_id}\n", flush=True)
 
-    def _handle_team_task_completed(self, event: TaskCompletedEvent) -> None:
+    def _handle_team_task_completed(self, event: TaskCompleteEvent) -> None:
         """Process team task completion.
 
         Args:
@@ -206,7 +206,7 @@ class ConsoleEventHandler:
             flush=True,
         )
 
-    def _handle_team_plan_completed(self, event: PlanCompletedEvent) -> None:
+    def _handle_team_plan_completed(self, event: PlanExecutionCompleteEvent) -> None:
         """Process team plan completion.
 
         Args:
