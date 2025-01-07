@@ -16,7 +16,9 @@ from prompt_toolkit.history import InMemoryHistory
 from prompt_toolkit.patch_stdout import patch_stdout
 from pydantic import BaseModel
 
+from liteswarm.types.context import ContextVariables
 from liteswarm.types.misc import JSON
+from liteswarm.types.swarm import Agent
 
 _AttributeType = TypeVar("_AttributeType")
 """Type variable for attribute value type.
@@ -435,3 +437,29 @@ async def prompt(session: PromptSession[str], message: str, **kwargs: Any) -> st
         - Preserves suspend functionality (Ctrl+Z)
     """
     return await session.prompt_async(message, **kwargs)
+
+
+def resolve_agent_instructions(
+    agent: Agent,
+    context_variables: ContextVariables | None = None,
+) -> str:
+    """Resolve agent instructions using context variables.
+
+    Processes the agent's instruction template by substituting any
+    placeholders with values from context variables. If no context
+    variables are provided, returns the raw instructions.
+
+    Args:
+        agent: Agent whose instructions need to be resolved.
+        context_variables: Optional variables for template substitution.
+
+    Returns:
+        Resolved instruction string ready for execution.
+    """
+    if isinstance(agent.instructions, str):
+        return agent.instructions
+
+    if callable(agent.instructions):
+        return agent.instructions(context_variables or ContextVariables())
+
+    raise ValueError(f"Invalid instructions type: {type(agent.instructions)}")
