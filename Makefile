@@ -111,12 +111,12 @@ run-chat-lite-chat-example:
 run-chat-lite-team-chat-example:
 	python -m examples.chat_basic.lite_team_chat.run
 
-.PHONY: run-chat-api-server
-run-chat-api-server:
+.PHONY: run-chat-api-server-example
+run-chat-api-server-example:
 	python -m examples.chat_api.server.run
 
-.PHONY: run-chat-api-client
-run-chat-api-client:
+.PHONY: run-chat-api-client-example
+run-chat-api-client-example:
 	python -m examples.chat_api.client.run
 
 .PHONY: run-swarm-team-basic-example
