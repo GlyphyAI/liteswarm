@@ -12,6 +12,27 @@ A lightweight, LLM-agnostic framework for building AI agents with dynamic agent 
 - **Stateful Chat Interface**: Build chat applications with built-in state management
 - **Event Streaming**: Real-time streaming of agent responses and tool calls
 
+## Requirements
+
+- **Python**: Version 3.11 or higher
+- **Async Runtime**: LiteSwarm provides only async API, so you need to use an event loop to run it
+- **LLM Provider Key**: You'll need an API key from a supported LLM provider (see [supported providers](https://docs.litellm.ai/docs/providers))
+  <details>
+  <summary>[click to see how to set keys]</summary>
+
+  ```python
+  # Environment variable
+  export OPENAI_API_KEY=sk-...
+  os.environ["OPENAI_API_KEY"] = "sk-..."
+  
+  # .env file
+  OPENAI_API_KEY=sk-...
+  
+  # Direct in code
+  LLM(model="gpt-4o", key="sk-...")
+  ```
+  </details>
+
 ## Installation
 
 ```bash
