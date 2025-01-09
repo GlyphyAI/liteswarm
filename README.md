@@ -209,7 +209,7 @@ If you use LiteSwarm in your research, please cite our work:
     month = jan,
     title = {{LiteSwarm}},
     url = {https://github.com/glyphyai/liteswarm},
-    version = {0.5.0},
+    version = {0.5.1},
     year = {2025}
 }
 ``` 
