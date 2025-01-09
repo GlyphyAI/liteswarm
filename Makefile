@@ -20,21 +20,21 @@ install-all:
 
 .PHONY: format
 format:
-	ruff format .
-	ruff check . --fix
+	uv run ruff format .
+	uv run ruff check . --fix
 
 .PHONY: lint
 lint:
-	ruff check .
-	mypy .
+	uv run ruff check .
+	uv run mypy .
 
 .PHONY: mypy
 mypy:
-	mypy .
+	uv run mypy .
 
 .PHONY: test
 test:
-	pytest -v -s
+	uv run pytest -v -s
 
 # ================================================
 # MARK: Commitizen commands
@@ -42,15 +42,15 @@ test:
 
 .PHONY: commit
 commit:
-	cz commit
+	uv run cz commit
 
 .PHONY: bump
 bump:
-	cz bump
+	uv run cz bump
 
 .PHONY: changelog
 changelog:
-	cz changelog
+	uv run cz changelog
 
 .PHONY: release
 release:
@@ -58,7 +58,7 @@ release:
 	make lint
 	make test
 	# Update version and changelog
-	cz bump --changelog
+	uv run cz bump --changelog
 	# Push changes
 	git push
 	git push --tags
