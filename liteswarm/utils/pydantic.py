@@ -25,7 +25,7 @@ from pydantic.fields import FieldInfo, _FromFieldInfoInputs
 from pydantic_core import PydanticUndefined
 from typing_extensions import override
 
-from liteswarm.utils.typing import is_subtype, union
+from liteswarm.types.typing import is_subtype, union
 
 T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V", bound=BaseModel)
