@@ -6,28 +6,33 @@
 
 import asyncio
 
-from liteswarm.repl import start_repl
-from liteswarm.types import LLM, Agent
-
-INSTRUCTIONS = """
-You are a helpful AI assistant.
-Your goal is to help users with their questions and tasks.
-Be concise but thorough in your responses.
-""".strip()
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent, Message
+from liteswarm.utils.misc import prompt
 
 
-async def run() -> None:
-    assistant = Agent(
+async def main() -> None:
+    agent = Agent(
         id="assistant",
-        instructions=INSTRUCTIONS,
-        llm=LLM(
-            model="claude-3-5-haiku-20241022",
-            temperature=0.7,
-        ),
+        instructions="You are a helpful assistant.",
+        llm=LLM(model="gpt-4o"),
     )
 
-    await start_repl(assistant)
+    swarm = Swarm()
+    messages: list[Message] = []
+
+    while True:
+        # Get user input and run agent execution
+        user_message = await prompt("> ")
+        messages.append(Message(role="user", content=user_message))
+        result = await swarm.execute(agent, messages=messages)
+
+        # Add new messages to history
+        messages.extend(result.new_messages)
+
+        # Print the last agent response
+        print(result.agent_response.content)
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())
