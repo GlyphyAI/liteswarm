@@ -10,21 +10,18 @@ from enum import Enum
 from typing import Annotated, Any, Generic, Literal, TypeAlias, get_args, get_origin
 
 from pydantic import BaseModel, ConfigDict, Discriminator, Field, field_serializer
-from typing_extensions import TypeVar
 
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent, Message
+from liteswarm.types.typing import TypeVar
 
-PydanticModel = TypeVar("PydanticModel", bound=BaseModel)
-"""Type variable representing a Pydantic model or its subclass."""
-
-TaskT = TypeVar("TaskT", bound="Task", default="Task")
+_Task = TypeVar("_Task", bound="Task", default="Task")
 """Type variable for Task subclass in task definitions."""
 
-TaskOutputT = TypeVar("TaskOutputT", bound=BaseModel, default=BaseModel)
-"""Type variable for Pydantic model used as task output."""
+_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel, default=BaseModel)
+"""Type variable for Pydantic model used as response output."""
 
-TaskInstructions: TypeAlias = str | Callable[[TaskT, ContextVariables], str]
+TaskInstructions: TypeAlias = str | Callable[[_Task, ContextVariables], str]
 """Instructions for executing a task.
 
 Can be either a static template string or a function that generates instructions
@@ -46,37 +43,8 @@ Examples:
         ```
 """
 
-PydanticResponseFormat: TypeAlias = (
-    type[PydanticModel] | Callable[[str, ContextVariables], PydanticModel]
-)
-"""Generic format specification for Pydantic model responses.
-
-Can be either a Pydantic model for direct validation or a function that parses
-output with context. This format is used anywhere a Pydantic model is expected
-as a response format.
-
-Examples:
-    Static format using a Pydantic model:
-        ```python
-        class ReviewOutput(BaseModel):
-            issues: list[str]
-            approved: bool
-
-        response_format: PydanticResponseFormat = ReviewOutput
-        ```
-
-    Dynamic format using a parser function:
-        ```python
-        def parse_review(content: str, context: ContextVariables) -> ReviewOutput:
-            data = json.loads(content)
-            return ReviewOutput.model_validate(data)
-
-        response_format: PydanticResponseFormat = parse_review
-        ```
-"""
-
-TaskResponseFormat: TypeAlias = PydanticResponseFormat[TaskOutputT]
-"""Format specification for task responses.
+ResponseFormat: TypeAlias = type[_ResponseModel] | Callable[[str, ContextVariables], _ResponseModel]
+"""Specification for model output format and validation.
 
 Can be either a Pydantic model for direct validation or a function that parses
 output with context.
@@ -89,42 +57,20 @@ Examples:
             success_rate: float
             errors: list[str] = []
 
-        response_format: TaskResponseFormat = ProcessingOutput
+        response_format: ResponseFormat = ProcessingOutput
         ```
 
     Using parser:
         ```python
-        def parse_output(content: str, context: ContextVariables) -> BaseModel:
+        def parse_output(content: str, context: ContextVariables) -> ProcessingOutput:
             data = json.loads(content)
             return ProcessingOutput.model_validate(data)
 
-        response_format: TaskResponseFormat = parse_output
+        response_format: ResponseFormat = parse_output
         ```
 """
 
-PromptTemplate: TypeAlias = str | Callable[[str, ContextVariables], str]
-"""Template for formatting prompts with context.
-
-Can be either a static template string or a function that generates prompts
-dynamically based on context.
-
-Examples:
-    Static template:
-        ```python
-        template: PromptTemplate = "Process {prompt} using {tools}"
-        ```
-
-    Dynamic template:
-        ```python
-        def generate_prompt(prompt: str, context: ContextVariables) -> str:
-            tools = context.get("tools", [])
-            return f"Process {prompt} using available tools: {tools}"
-
-        template: PromptTemplate = generate_prompt
-        ```
-"""
-
-PlanResponseFormat: TypeAlias = PydanticResponseFormat["Plan"]
+PlanResponseFormat: TypeAlias = ResponseFormat["Plan"]
 """Format specification for plan responses.
 
 Can be either a Plan subclass or a function that parses responses into Plan objects.
@@ -245,7 +191,7 @@ class Task(BaseModel):
         raise ValueError("Task type is not defined as a Literal in the task schema")
 
 
-class TaskDefinition(BaseModel, Generic[TaskT, TaskOutputT]):
+class TaskDefinition(BaseModel, Generic[_Task, _ResponseModel]):
     """Blueprint for task creation and execution.
 
     Defines how a specific type of task should be created, executed,
@@ -279,10 +225,10 @@ class TaskDefinition(BaseModel, Generic[TaskT, TaskOutputT]):
     task_type: type[Task]
     """Task schema for validation."""
 
-    instructions: TaskInstructions[TaskT]
+    instructions: TaskInstructions[_Task]
     """Static template or dynamic builder."""
 
-    response_format: TaskResponseFormat[TaskOutputT] | None = None
+    response_format: ResponseFormat[_ResponseModel] | None = None
     """Optional output format specification."""
 
     model_config = ConfigDict(
@@ -478,7 +424,7 @@ class TeamMember(BaseModel):
         return [task_type.get_task_type() for task_type in task_types]
 
 
-class TaskResult(BaseModel):
+class TaskResult(BaseModel, Generic[_ResponseModel]):
     """Result of task execution.
 
     Contains all outputs and execution details from a task,
@@ -495,13 +441,13 @@ class TaskResult(BaseModel):
     content: str | None = None
     """Raw output content."""
 
-    output: BaseModel | None = None
+    output: _ResponseModel | None = None
     """Structured output data."""
 
-    new_messages: list[Message] | None = None
+    new_messages: list[Message] = Field(default_factory=list)
     """Output messages generated during task execution."""
 
-    all_messages: list[Message] | None = None
+    all_messages: list[Message] = Field(default_factory=list)
     """Complete conversation history of task execution."""
 
     context_variables: ContextVariables | None = None
@@ -518,6 +464,20 @@ class TaskResult(BaseModel):
         use_attribute_docstrings=True,
         extra="forbid",
     )
+
+    @field_serializer("timestamp")
+    def serialize_timestamp(self, timestamp: datetime) -> str:
+        """Serialize timestamp to ISO format.
+
+        Converts the timestamp to an ISO 8601 formatted string.
+
+        Args:
+            timestamp: Timestamp to serialize.
+
+        Returns:
+            ISO formatted timestamp string.
+        """
+        return timestamp.isoformat()
 
 
 class ArtifactStatus(str, Enum):
@@ -560,6 +520,12 @@ class Artifact(BaseModel):
 
     task_results: list[TaskResult] = Field(default_factory=list)
     """Results from executed tasks."""
+
+    new_messages: list[Message] = Field(default_factory=list)
+    """Output messages generated during execution."""
+
+    all_messages: list[Message] = Field(default_factory=list)
+    """Complete conversation history of execution."""
 
     error: Exception | None = None
     """Execution error if failed."""
