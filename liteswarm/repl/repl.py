@@ -472,8 +472,7 @@ class AgentRepl:
                 if event.type == "agent_switch":
                     self._active_agent = event.next_agent
 
-            chat_response = await stream.get_return_value()
-            result = chat_response.agent_execution
+            result = await stream.get_return_value()
             for response in result.agent_responses:
                 if response.usage:
                     self._update_usage(response.usage)

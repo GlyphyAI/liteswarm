@@ -295,7 +295,7 @@ class LiteChat(Chat[ChatResponse]):
         await self._memory.add_messages(context_messages)
 
         result = await stream.get_return_value()
-        yield ReturnItem(ChatResponse(agent_execution=result))
+        yield ReturnItem(ChatResponse.from_agent_execution(result))
 
     @override
     async def get_messages(self) -> list[ChatMessage]:

@@ -6,37 +6,25 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Generic
+from typing import Any, Generic, Self
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from liteswarm.types.llm import ResponseFormatPydantic
 from liteswarm.types.swarm import AgentExecutionResult, Message
 
 
 class ChatMessage(Message):
-    """Message for multi-user chat applications.
+    """A wrapper around base Message type for conversational applications.
 
-    Extends the base Message with unique identification and
-    application-specific metadata. Used to build chat applications.
+    ChatMessage extends Message to provide additional fields needed for chat
+    applications. It preserves all base message attributes while adding
+    identification and metadata support.
 
-    Examples:
-        Basic usage:
-            ```python
-            message = ChatMessage(
-                id="msg_123",
-                role="user",
-                content="Hello",
-            )
-            ```
-
-        With metadata:
-            ```python
-            chat_msg = ChatMessage.from_message(
-                Message(role="user", content="Hello"),
-                metadata={"user_id": "user_123"},
-            )
-            ```
+    Notes:
+        - Inherits all Message capabilities
+        - Adds unique identification
+        - Supports application metadata
     """
 
     id: str
@@ -96,16 +84,55 @@ class ChatMessage(Message):
         )
 
 
-class ChatResponse(BaseModel, Generic[ResponseFormatPydantic]):
-    """Response object containing execution results and conversation state.
+class ChatResponse(AgentExecutionResult[ResponseFormatPydantic], Generic[ResponseFormatPydantic]):
+    """Chat-optimized execution result for conversational applications.
 
-    Encapsulates the complete state of a chat interaction, including the final
-    agent that responded, new messages generated during execution, the complete
-    conversation history, and all intermediate agent responses.
+    ChatResponse extends AgentExecutionResult to provide a chat-friendly interface
+    for conversational applications. It preserves all execution details while allowing
+    for future chat-specific extensions like conversation state and metadata.
+
+    Type Parameters:
+        ResponseFormatPydantic: The type of the parsed response format.
+
+    Notes:
+        - Inherits all AgentExecutionResult capabilities
+        - Optimized for chat applications
+        - Supports future chat-specific extensions
     """
 
-    agent_execution: AgentExecutionResult[ResponseFormatPydantic]
-    """Complete agent execution result."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    """Unique response identifier."""
+
+    @classmethod
+    def from_agent_execution(
+        cls,
+        agent_execution: AgentExecutionResult[ResponseFormatPydantic],
+        /,
+        *,
+        id: str | None = None,
+    ) -> Self:
+        """Create a ChatResponse from an AgentExecutionResult.
+
+        Converts a standard AgentExecutionResult into a chat-optimized response
+        while preserving all execution details. This allows reuse of Swarm's
+        execution capabilities in chat applications.
+
+        Args:
+            agent_execution: Agent execution result to convert.
+            id: Optional unique response identifier.
+
+        Returns:
+            New ChatResponse with all execution details.
+        """
+        return cls(
+            id=id or str(uuid.uuid4()),
+            agent=agent_execution.agent,
+            agent_response=agent_execution.agent_response,
+            agent_responses=agent_execution.agent_responses,
+            new_messages=agent_execution.new_messages,
+            all_messages=agent_execution.all_messages,
+            context_variables=agent_execution.context_variables,
+        )
 
 
 class RAGStrategyConfig(BaseModel):
