@@ -28,8 +28,8 @@ from liteswarm.types.exceptions import PlanValidationError, ResponseParsingError
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables, Message
 from liteswarm.types.swarm_team import Plan, PlanResponseFormat, PlanResult, TaskDefinition
+from liteswarm.types.typing import is_callable, is_subtype
 from liteswarm.utils.tasks import create_plan_with_tasks
-from liteswarm.utils.typing import is_callable, is_subtype
 
 PLANNING_AGENT_SYSTEM_PROMPT = """
 You are an expert task planning specialist with deep experience in breaking down complex work into efficient, minimal workflows.

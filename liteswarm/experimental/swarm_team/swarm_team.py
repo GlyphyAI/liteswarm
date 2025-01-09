@@ -31,15 +31,15 @@ from liteswarm.types.swarm_team import (
     Artifact,
     ArtifactStatus,
     Plan,
+    ResponseFormat,
     Task,
     TaskDefinition,
-    TaskResponseFormat,
     TaskResult,
     TaskStatus,
     TeamMember,
 )
+from liteswarm.types.typing import is_callable, is_subtype
 from liteswarm.utils.logging import log_verbose
-from liteswarm.utils.typing import is_callable, is_subtype
 
 
 class SwarmTeam:
@@ -325,7 +325,7 @@ class SwarmTeam:
     def _parse_response(
         self,
         response: str,
-        response_format: TaskResponseFormat,
+        response_format: ResponseFormat,
         task_context_variables: ContextVariables | None = None,
     ) -> BaseModel:
         """Parse agent response using schema with error recovery.
@@ -609,7 +609,6 @@ class SwarmTeam:
         log_verbose(f"Executing plan: {plan.tasks}", level="DEBUG")
         current_messages = messages.copy() if messages else []
         current_context_variables = context_variables or ContextVariables()
-        execution_messages: list[Message] = []
         task_results: list[TaskResult] = []
 
         try:
@@ -633,13 +632,14 @@ class SwarmTeam:
                             current_messages.append(Message(role="user", content=content))
 
                         if task_result.new_messages:
-                            new_messages = [*current_messages, *task_result.new_messages]
-                            current_messages.extend(new_messages)
-                            execution_messages.extend(new_messages)
+                            current_messages.extend(task_result.new_messages)
 
                         if task_result.context_variables:
                             current_context_variables = ContextVariables(current_context_variables)
                             current_context_variables.update(task_result.context_variables)
+
+                        artifact.new_messages = [*artifact.new_messages, *task_result.new_messages]
+                        artifact.all_messages = [*task_result.all_messages]
 
                     except Exception as e:
                         artifact.status = ArtifactStatus.FAILED

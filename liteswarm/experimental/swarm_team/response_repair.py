@@ -4,19 +4,22 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from typing import Protocol
+from typing import Protocol, TypeVar
 
 import json_repair
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 from typing_extensions import override
 
 from liteswarm.core.swarm import Swarm
 from liteswarm.types.exceptions import ResponseRepairError
 from liteswarm.types.llm import LLM
 from liteswarm.types.swarm import Agent, ContextVariables, Message
-from liteswarm.types.swarm_team import PydanticModel, PydanticResponseFormat
+from liteswarm.types.swarm_team import ResponseFormat
+from liteswarm.types.typing import is_callable
 from liteswarm.utils.logging import log_verbose
-from liteswarm.utils.typing import is_callable
+
+_PydanticModel = TypeVar("_PydanticModel", bound=BaseModel)
+"""Type variable for Pydantic models."""
 
 REPAIR_SYSTEM_PROMPT = """You are a specialized JSON repair agent. Your task is to fix invalid JSON responses to match their schema exactly.
 
@@ -143,10 +146,10 @@ class ResponseRepairAgent(Protocol):
         self,
         agent: Agent,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel],
+        response_format: ResponseFormat[_PydanticModel],
         validation_error: ValidationError,
         context_variables: ContextVariables | None = None,
-    ) -> PydanticModel:
+    ) -> _PydanticModel:
         """Repair an invalid response to match the expected format.
 
         The repair process should attempt to fix the invalid response while maintaining
@@ -236,9 +239,9 @@ class LiteResponseRepairAgent(ResponseRepairAgent):
     def _parse_response(
         self,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel],
+        response_format: ResponseFormat[_PydanticModel],
         context_variables: ContextVariables | None = None,
-    ) -> PydanticModel:
+    ) -> _PydanticModel:
         """Parse and validate a response string.
 
         Args:
@@ -265,10 +268,10 @@ class LiteResponseRepairAgent(ResponseRepairAgent):
     async def _repair_with_llm(
         self,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel],
+        response_format: ResponseFormat[_PydanticModel],
         validation_error: ValidationError,
         context_variables: ContextVariables | None = None,
-    ) -> PydanticModel:
+    ) -> _PydanticModel:
         """Use an LLM to repair an invalid response.
 
         Args:
@@ -309,7 +312,7 @@ class LiteResponseRepairAgent(ResponseRepairAgent):
                 context_variables=context_variables,
             )
 
-            if not result.last_agent_response.content:
+            if not result.agent_response.content:
                 log_verbose("No content received from repair agent", level="ERROR")
                 raise ResponseRepairError(
                     "No repaired content received",
@@ -318,12 +321,12 @@ class LiteResponseRepairAgent(ResponseRepairAgent):
                 )
 
             log_verbose(
-                f"Repair agent response:\n{result.last_agent_response.content}",
+                f"Repair agent response:\n{result.agent_response.content}",
                 level="DEBUG",
             )
 
             parsed_response = self._parse_response(
-                response=result.last_agent_response.content,
+                response=result.agent_response.content,
                 response_format=response_format,
                 context_variables=context_variables,
             )
@@ -347,9 +350,9 @@ class LiteResponseRepairAgent(ResponseRepairAgent):
     async def _repair_with_json_repair(
         self,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel],
+        response_format: ResponseFormat[_PydanticModel],
         context_variables: ContextVariables | None = None,
-    ) -> PydanticModel:
+    ) -> _PydanticModel:
         """Use json_repair to fix common JSON issues.
 
         Args:
@@ -379,10 +382,10 @@ class LiteResponseRepairAgent(ResponseRepairAgent):
         self,
         agent: Agent,
         response: str,
-        response_format: PydanticResponseFormat[PydanticModel],
+        response_format: ResponseFormat[_PydanticModel],
         validation_error: ValidationError,
         context_variables: ContextVariables | None = None,
-    ) -> PydanticModel:
+    ) -> _PydanticModel:
         """Repair an invalid response to match the expected format.
 
         Uses multiple repair strategies in sequence:
