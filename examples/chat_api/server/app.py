@@ -510,7 +510,7 @@ async def create_user(
         )
 
     except ValueError as e:
-        raise HTTPException(status_code=409, detail=str(e))
+        raise HTTPException(status_code=409, detail=str(e)) from e
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e

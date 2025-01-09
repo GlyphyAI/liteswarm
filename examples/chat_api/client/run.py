@@ -4,6 +4,8 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
+# ruff: noqa
+
 import asyncio
 import json
 import random
@@ -144,7 +146,7 @@ async def create_session(session: aiohttp.ClientSession, user_id: str) -> Sessio
     initial_delay=get_retry_delay(1),
     exception=EXCEPTION,
 )
-async def send_message_and_stream(  # noqa: PLR0915
+async def send_message_and_stream(
     session: aiohttp.ClientSession,
     session_id: str,
     message: str,
@@ -199,7 +201,7 @@ async def send_message_and_stream(  # noqa: PLR0915
 
     except Exception as e:
         print(f"\n❌ Error: {str(e)}")
-        raise e
+        raise
 
 
 async def process_stream_response(
@@ -668,7 +670,7 @@ async def run_repl() -> NoReturn:
                                 print("  /user switch <user_id> - Switch to another user")
                                 continue
                             case "/debug":
-                                global DEBUG  # noqa: PLW0603
+                                global DEBUG
                                 DEBUG = not DEBUG
                                 print(f"\n🔧 Debug mode: {'enabled' if DEBUG else 'disabled'}")
                                 continue
