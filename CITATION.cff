@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "LiteSwarm: A Lightweight Framework for Building AI Agent Systems"
+title: LiteSwarm
 message: "If you use LiteSwarm in your research or project, please cite it as below."
 type: software
 authors:
@@ -8,7 +8,10 @@ authors:
   - name: "GlyphyAI"
 repository-code: "https://github.com/glyphyai/liteswarm"
 url: "https://github.com/glyphyai/liteswarm"
-abstract: "An extensible framework for building AI agent systems with a focus on structured interactions, LLM-agnostic design, and composable architecture. Features include multi-agent orchestration, structured outputs, and provider-agnostic response parsing."
+abstract: |
+  An extensible framework for building AI agent systems with a focus on structured
+  interactions, LLM-agnostic design, and composable architecture. Features include
+  multi-agent orchestration, structured outputs, and provider-agnostic response parsing.
 keywords:
   - agents
   - multi-agent
