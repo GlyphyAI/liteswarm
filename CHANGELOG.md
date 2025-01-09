@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## 0.5.0 (2024-01-15)
+
+### Added
+- Chat components built on top of Swarm and SwarmTeam for building chat applications
+- Type-safe structured outputs with Pydantic model support
+- New events for managing agent flow (activate, begin, complete, response)
+- TypeVar type checking trick to work around Pydantic bound generics
+- New examples showcasing chat and team chat functionality
+
+### Changed
+- **BREAKING**: Reworked core Swarm API to be fully stateless
+- **BREAKING**: Removed session management in chat components
+- Reorganized SwarmTeam to be stateless with streaming API support
+- Simplified field names and event model naming for consistency
+- Updated all examples to use new stateless API
+- Improved type safety around response formats
+- Simplified swarm team types generics
+- Renamed get_result to get_return_value for ReturnableAsyncGenerator
+
+### Removed
+- Obsolete MessageStore, ContextManager, EventHandler
+- Redundant unwrap utils
+- Ambiguous messages file
+- Deprecated types and components
+
+[0.5.0]: https://github.com/glyphyai/liteswarm/releases/tag/0.5.0
+
 ## 0.4.0 (2024-12-26)
 
 ### Added
