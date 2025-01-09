@@ -6,14 +6,21 @@
 
 from collections.abc import Callable
 from enum import Enum
-from typing import Annotated, Any, Literal, TypeAlias
+from typing import Annotated, Any, Generic, Literal, TypeAlias
 
 from litellm.types.utils import Delta as LiteDelta
 from litellm.types.utils import FunctionCall, Usage
 from pydantic import BaseModel, ConfigDict, Discriminator, field_serializer
 
 from liteswarm.types.context import ContextVariables
-from liteswarm.types.llm import LLM, AudioResponse, FinishReason, MessageRole, ToolCall
+from liteswarm.types.llm import (
+    LLM,
+    AudioResponse,
+    FinishReason,
+    MessageRole,
+    ResponseFormatPydantic,
+    ToolCall,
+)
 from liteswarm.types.misc import JSON
 
 AgentInstructions: TypeAlias = str | Callable[[ContextVariables], str]
@@ -129,7 +136,7 @@ class AgentState(str, Enum):
     """Agent needs replacement."""
 
 
-class Agent(BaseModel):
+class Agent(BaseModel, Generic[ResponseFormatPydantic]):
     """Configuration for an AI conversation participant.
 
     Defines an agent's identity, behavior, and capabilities through
@@ -187,7 +194,7 @@ class Agent(BaseModel):
     instructions: AgentInstructions
     """Behavior definition (static text or dynamic function)."""
 
-    llm: LLM
+    llm: LLM[ResponseFormatPydantic]
     """Language model and tool configuration."""
 
     state: AgentState = AgentState.IDLE
@@ -573,7 +580,7 @@ class AgentResponseChunk(BaseModel):
     )
 
 
-class AgentResponse(BaseModel):
+class AgentResponse(BaseModel, Generic[ResponseFormatPydantic]):
     """Final response collected after agent execution completes.
 
     Accumulates streaming chunks into a complete response, including
@@ -612,7 +619,7 @@ class AgentResponse(BaseModel):
     )
 
 
-class AgentExecutionResult(BaseModel):
+class AgentExecutionResult(BaseModel, Generic[ResponseFormatPydantic]):
     """Complete result of agent execution.
 
     Contains the final state after all processing, including responses,
