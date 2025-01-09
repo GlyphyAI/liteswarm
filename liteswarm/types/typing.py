@@ -5,9 +5,41 @@
 # https://opensource.org/licenses/MIT.
 
 from collections.abc import Callable, Sequence
-from typing import Any, TypeGuard, TypeVar, Union, get_origin
+from typing import TYPE_CHECKING, Any, TypeGuard, Union, get_origin
 
 from typing_extensions import TypeIs
+
+if TYPE_CHECKING:
+    from typing_extensions import TypeVar
+else:
+    from typing_extensions import TypeVar as OriginalTypeVar
+
+    def create_typevar(
+        name: str,
+        *args: Any,
+        bound: Any | None = None,
+        default: Any | None = None,
+        **kwargs: Any,
+    ) -> OriginalTypeVar:
+        """Create a TypeVar with conditional default parameter.
+
+        During type checking, includes the default parameter for better type inference.
+        At runtime, omits the default parameter to avoid Pydantic compatibility issues.
+
+        Args:
+            name: Name of the TypeVar.
+            *args: Additional positional arguments for OriginalTypeVar.
+            bound: Optional bound type.
+            default: Optional default type (only used during type checking).
+            **kwargs: Additional keyword arguments for OriginalTypeVar.
+
+        Returns:
+            TypeVar with conditional default parameter.
+        """
+        return OriginalTypeVar(name, *args, bound=bound, **kwargs)
+
+    TypeVar = create_typevar
+
 
 T = TypeVar("T")
 
