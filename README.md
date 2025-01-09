@@ -12,6 +12,12 @@ A lightweight, LLM-agnostic framework for building AI agents with dynamic agent 
 - **Stateful Chat Interface**: Build chat applications with built-in state management
 - **Event Streaming**: Real-time streaming of agent responses and tool calls
 
+## Installation
+
+```bash
+pip install liteswarm
+```
+
 ## Requirements
 
 - **Python**: Version 3.11 or higher
@@ -32,12 +38,6 @@ A lightweight, LLM-agnostic framework for building AI agents with dynamic agent 
   LLM(model="gpt-4o", key="sk-...")
   ```
   </details>
-
-## Installation
-
-```bash
-pip install liteswarm
-```
 
 ## Quick Start
 
