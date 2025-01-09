@@ -96,21 +96,13 @@ class ChatOptimization(Protocol):
     async def optimize_context(
         self,
         model: str,
-        strategy: OptimizationStrategy | None = None,
-        rag_config: RAGStrategyConfig | None = None,
         *args: Any,
         **kwargs: Any,
     ) -> list[ChatMessage]:
-        """Optimize conversation context using specified strategy.
-
-        Applies optimization to reduce context size while preserving
-        important information. Strategy determines the optimization
-        approach.
+        """Optimize conversation context.
 
         Args:
             model: Target language model identifier.
-            strategy: Optimization strategy to use.
-            rag_config: Configuration for RAG strategy.
             *args: Implementation-specific arguments.
             **kwargs: Implementation-specific keyword arguments.
 
