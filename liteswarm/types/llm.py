@@ -494,35 +494,6 @@ class LLM(BaseModel, Generic[ResponseFormatPydantic]):
 
         Returns:
             API-compatible format specification or None.
-
-        Examples:
-            Basic format:
-                ```python
-                llm = LLM(response_format={"type": "text"})
-                ```
-
-            JSON schema format:
-                ```python
-                llm = LLM(
-                    response_format={
-                        "type": "json_schema",
-                        "json_schema": ResponseSchema(
-                            name="review",
-                            json_schema={"type": "object"},
-                        ),
-                    }
-                )
-                ```
-
-            Pydantic model format:
-                ```python
-                class Output(BaseModel):
-                    value: int
-                    details: str
-
-
-                llm = LLM(response_format=Output)  # Converted to JSON schema
-                ```
         """
         if isinstance(response_format, type) and issubclass(response_format, BaseModel):
             return response_format.model_json_schema()
@@ -539,27 +510,6 @@ class LLM(BaseModel, Generic[ResponseFormatPydantic]):
 
         Raises:
             ValueError: If litellm_kwargs contains conflicting keys.
-
-        Examples:
-            Valid configuration:
-                ```python
-                llm = LLM(
-                    model="gpt-4o",
-                    temperature=0.7,
-                    litellm_kwargs={"custom_option": "value"},
-                )
-                ```
-
-            Invalid configuration:
-                ```python
-                llm = LLM(
-                    model="gpt-4o",
-                    temperature=0.7,
-                    litellm_kwargs={
-                        "temperature": 0.5  # Raises ValueError
-                    },
-                )
-                ```
         """
         if self.litellm_kwargs:
             field_names = set(self.model_fields.keys()) - {"litellm_kwargs"}
