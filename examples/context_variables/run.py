@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from liteswarm.core import Swarm
 from liteswarm.types import LLM, Agent, AgentExecutionResult, ContextVariables, Message, ToolResult
 from liteswarm.utils import dump_messages, enable_logging
+from liteswarm.utils.misc import prompt
 
 enable_logging(default_level="DEBUG")
 
@@ -160,7 +161,7 @@ async def run_selected_example() -> None:
     print("2. Agent switching")
     print("3. Error handling")
     print("4. Pydantic output")
-    choice = input("Enter the number of the example to run: ")
+    choice = await prompt("Enter the number of the example to run: ")
 
     match choice:
         case "1":
