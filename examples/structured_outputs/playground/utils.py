@@ -11,7 +11,7 @@ from pydantic import BaseModel
 
 from liteswarm.core import Swarm
 from liteswarm.types import Agent, ContextVariables, Message
-from liteswarm.utils.typing import is_callable
+from liteswarm.types.typing import is_callable
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -77,7 +77,7 @@ async def generate_structured_response_typed(
             print()
 
     result = await stream.get_return_value()
-    response = result.last_agent_response
+    response = result.agent_response
     if not response.content:
         raise ValueError("No response content")
 

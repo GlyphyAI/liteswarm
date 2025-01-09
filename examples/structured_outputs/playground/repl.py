@@ -10,12 +10,14 @@ from typing import NoReturn, TypeVar
 
 from pydantic import BaseModel
 
+from liteswarm.utils.misc import prompt
+
 from .strategy import StrategyBuilderRegistry, StrategyId
 
 T = TypeVar("T", bound=BaseModel)
 
 
-def get_model_input(available_models: list[str], default_model: str) -> str:
+async def get_model_input(available_models: list[str], default_model: str) -> str:
     """Get model selection from user input.
 
     Presents available models and allows user to select from list or enter
@@ -34,10 +36,9 @@ def get_model_input(available_models: list[str], default_model: str) -> str:
     print(f"{len(available_models) + 1}. Enter custom model")
 
     while True:
+        count = len(available_models) + 1
         try:
-            choice = input(
-                f"\nSelect model (1-{len(available_models) + 1}) or press Enter for default: "
-            ).strip()
+            choice = await prompt(f"\nSelect model (1-{count}) or press Enter for default: ")
             if not choice:
                 return default_model
 
@@ -45,15 +46,15 @@ def get_model_input(available_models: list[str], default_model: str) -> str:
             if 0 <= idx < len(available_models):
                 return available_models[idx]
             elif idx == len(available_models):
-                custom = input("Enter custom model name: ").strip()
+                custom = await prompt("Enter custom model name: ")
                 if custom:
                     return custom
-            print(f"Invalid choice. Please select 1-{len(available_models) + 1}.")
+            print(f"Invalid choice. Please select 1-{count}.")
         except ValueError:
-            print(f"Invalid input. Please enter a number 1-{len(available_models) + 1}.")
+            print(f"Invalid input. Please enter a number 1-{count}.")
 
 
-def get_user_input(
+async def get_user_input(
     registry: StrategyBuilderRegistry[T],
 ) -> tuple[StrategyId, str, str]:
     """Get strategy, model and prompt selections from user.
@@ -79,8 +80,10 @@ def get_user_input(
 
     while True:
         try:
-            choice = input(f"\nSelect strategy (1-{len(items)}) or press Enter for default: ")
-            choice = choice.strip()
+            choice = await prompt(
+                f"\nSelect strategy (1-{len(items)}) or press Enter for default: "
+            )
+
             if not choice:
                 strategy_id = registry.default_strategy_id
                 break
@@ -96,13 +99,13 @@ def get_user_input(
             print(f"Invalid input. Please enter a number 1-{len(items)}.")
 
     strategy_builder = registry.strategy_builders[strategy_id]
-    model = get_model_input(strategy_builder.available_models, strategy_builder.default_model)
+    model = await get_model_input(strategy_builder.available_models, strategy_builder.default_model)
 
     default_prompt = registry.default_strategy_prompt
-    prompt = input(f"\nEnter prompt or press Enter for default:\n{default_prompt}\n> ").strip()
-    prompt = prompt.strip() or default_prompt
+    user_prompt = input(f"\nEnter prompt or press Enter for default:\n{default_prompt}\n> ").strip()
+    user_prompt = user_prompt.strip() or default_prompt
 
-    return strategy_id, model, prompt
+    return strategy_id, model, user_prompt
 
 
 async def start_repl(
@@ -128,13 +131,13 @@ async def start_repl(
     print("=" * 25)
 
     while True:
-        strategy_id, model, prompt = get_user_input(registry)
+        strategy_id, model, user_prompt = await get_user_input(registry)
 
         try:
-            await run_example(strategy_id, model, prompt)
+            await run_example(strategy_id, model, user_prompt)
         except Exception as e:
             print(f"\nError: {e}")
 
-        again = input("\nTry another? (y/N): ").lower()
+        again = (await prompt("\nTry another? (y/N): ")).lower()
         if again != "y":
             sys.exit()

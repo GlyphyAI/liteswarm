@@ -7,7 +7,7 @@
 import asyncio
 import os
 
-from liteswarm.utils.logging import enable_logging
+from liteswarm.utils import enable_logging
 
 from .repl import start_repl
 from .strategies import anthropic_pydantic, llm_json_object, llm_json_tags, openai_pydantic
