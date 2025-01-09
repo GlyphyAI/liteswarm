@@ -138,12 +138,14 @@ filterwarnings = [
 ]
 
 [tool.mypy]
-python_version = "3.11"
+plugins = ["pydantic.mypy"]
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_unreachable = true
 ignore_missing_imports = true
 disallow_any_generics = true
 disallow_untyped_defs = true
 disallow_any_unimported = true
-warn_unreachable = true
 explicit_package_bases = true
 enable_error_code = [
     "explicit-override",
@@ -152,9 +154,11 @@ enable_error_code = [
     "unused-awaitable",
     "unused-ignore",
 ]
-plugins = [
-    "pydantic.mypy",
-]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
 
 [tool.commitizen]
 name = "cz_conventional_commits"
