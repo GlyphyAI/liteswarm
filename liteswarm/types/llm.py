@@ -5,7 +5,7 @@
 # https://opensource.org/licenses/MIT.
 
 from collections.abc import Callable
-from typing import Any, Literal, Self, TypeAlias
+from typing import Any, Generic, Literal, Self, TypeAlias
 
 from litellm import (
     ChatCompletionAudioParam,
@@ -16,6 +16,8 @@ from litellm import (
 from litellm.types.utils import ChatCompletionAudioResponse, ChatCompletionDeltaToolCall
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 from typing_extensions import TypedDict
+
+from liteswarm.types.typing import TypeVar
 
 AgentTool: TypeAlias = Callable[..., Any]
 """Function that can be called by agents.
@@ -207,10 +209,17 @@ class ResponseSchema(BaseModel):
     """Whether to enforce strict validation."""
 
 
-class ResponseFormatBasic(TypedDict):
-    """Basic response format specification."""
+class ResponseFormatText(TypedDict):
+    """Text response format specification."""
 
-    type: Literal["text", "json_object"]
+    type: Literal["text"]
+    """Response format type."""
+
+
+class ResponseFormatJsonObject(TypedDict):
+    """JSON object response format specification."""
+
+    type: Literal["json_object"]
     """Response format type."""
 
 
@@ -235,7 +244,23 @@ class StreamOptions(BaseModel):
     """Whether to include token usage stats."""
 
 
-ResponseFormat: TypeAlias = ResponseFormatBasic | ResponseFormatJsonSchema | type[BaseModel]
+ResponseFormatPydantic = TypeVar(
+    "ResponseFormatPydantic",
+    bound=BaseModel,
+    default=BaseModel,
+)
+"""Type variable for Pydantic model used as response output.
+
+This type variable allows for type-safe validation of response formats
+by ensuring that the response format is a subclass of BaseModel.
+"""
+
+ResponseFormat: TypeAlias = (
+    ResponseFormatText
+    | ResponseFormatJsonObject
+    | ResponseFormatJsonSchema
+    | type[ResponseFormatPydantic]
+)
 """Specification for model output format and validation.
 
 Controls response structure and validation:
@@ -286,7 +311,7 @@ Examples:
 """
 
 
-class LLM(BaseModel):
+class LLM(BaseModel, Generic[ResponseFormatPydantic]):
     """Configuration for language model interactions.
 
     Provides comprehensive control over LLM behavior including model
@@ -333,7 +358,7 @@ class LLM(BaseModel):
     parallel_tool_calls: bool | None = None
     """Allow concurrent tool calls."""
 
-    response_format: ResponseFormat | None = None
+    response_format: ResponseFormat[ResponseFormatPydantic] | None = None
     """Output format specification."""
 
     logprobs: bool | None = None
@@ -455,7 +480,7 @@ class LLM(BaseModel):
     @field_serializer("response_format")
     def serialize_response_format(
         self,
-        response_format: ResponseFormat | None,
+        response_format: ResponseFormat[ResponseFormatPydantic] | None,
     ) -> dict[str, Any] | None:
         """Serialize response format for API requests.
 
