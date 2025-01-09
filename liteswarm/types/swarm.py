@@ -524,6 +524,9 @@ class CompletionResponseChunk(BaseModel):
         - Cost is calculated based on model-specific token pricing.
     """
 
+    id: str
+    """Unique identifier for the completion."""
+
     delta: Delta
     """Content and tool updates."""
 
@@ -577,6 +580,9 @@ class AgentResponse(BaseModel):
     content, tool calls, and execution statistics. Used to track the
     full output of a single agent interaction.
     """
+
+    id: str
+    """Unique identifier for the response."""
 
     role: MessageRole | None = None
     """Role in the conversation."""
