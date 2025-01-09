@@ -10,9 +10,13 @@ install:
 install-dev:
 	uv pip install -e ".[dev]"
 
+.PHONY: install-docs
+install-docs:
+	uv pip install -e ".[docs]"
+
 .PHONY: install-all
 install-all:
-	uv pip install -e ".[dev,examples]"
+	uv pip install -e ".[dev,examples,docs]"
 
 .PHONY: format
 format:
@@ -134,3 +138,23 @@ save-pr-commit-messages:
 	@[ -n "$(PR_NUMBER)" ] || (echo "Error: PR_NUMBER is not set"; exit 1)
 	@echo "Saving commit messages for PR_NUMBER=$(PR_NUMBER)"
 	gh pr view $(PR_NUMBER) --json commits --jq '.commits[] | "\(.messageHeadline) \(.messageBody)"' > pr$(PR_NUMBER)_commit_messages.txt
+
+# ================================================
+# MARK: Documentation commands
+# ================================================
+
+.PHONY: docs-serve
+docs-serve:
+	@echo "Starting documentation server..."
+	@pkill -f "mkdocs serve" || true
+	@mkdocs serve
+
+.PHONY: docs-build
+docs-build:
+	@echo "Building documentation..."
+	@mkdocs build
+
+.PHONY: docs-clean
+docs-clean:
+	@echo "Cleaning documentation..."
+	@rm -rf site/
