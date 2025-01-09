@@ -5,5 +5,6 @@
 # https://opensource.org/licenses/MIT.
 
 from .swarm import Swarm
+from .swarm_stream import SwarmStream
 
-__all__ = ["Swarm"]
+__all__ = ["Swarm", "SwarmStream"]
