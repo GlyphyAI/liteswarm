@@ -2,7 +2,8 @@
 
 A lightweight, LLM-agnostic framework for building AI agents with dynamic agent switching capabilities. Supports 100+ language models through [litellm](https://github.com/BerriAI/litellm).
 
-> **Note**: LiteSwarm is currently in early preview. The API is likely to change as we gather feedback and improve the framework.
+> [!WARNING]
+> LiteSwarm is currently in early preview. The API is likely to change as we gather feedback and improve the framework.
 
 ## Features
 
