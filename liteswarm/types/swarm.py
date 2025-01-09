@@ -90,7 +90,7 @@ class Message(BaseModel):
             ```
     """
 
-    role: MessageRole
+    role: MessageRole | None = None
     """Role of the message author."""
 
     content: str | None = None
@@ -560,8 +560,8 @@ class AgentResponseChunk(BaseModel):
     content: str | None = None
     """Accumulated response content."""
 
-    parsed_content: JSON | BaseModel | None = None
-    """Parsed content if response format specified."""
+    parsed: JSON | None = None
+    """Partial parsed response if response format specified."""
 
     tool_calls: list[ToolCall] | None = None
     """Accumulated tool calls."""
@@ -593,8 +593,8 @@ class AgentResponse(BaseModel):
     content: str | None = None
     """Final response content."""
 
-    parsed_content: JSON | BaseModel | None = None
-    """Parsed content if response format specified."""
+    parsed: ResponseFormatPydantic | None = None
+    """Parsed response if response format specified."""
 
     tool_calls: list[ToolCall] | None = None
     """Tool calls made during execution."""
@@ -620,13 +620,13 @@ class AgentExecutionResult(BaseModel):
     history and final agent state.
     """
 
-    last_agent: Agent
+    agent: Agent[ResponseFormatPydantic]
     """Agent that produced final response."""
 
-    last_agent_response: AgentResponse
+    agent_response: AgentResponse[ResponseFormatPydantic]
     """Final response from agent."""
 
-    agent_responses: list[AgentResponse]
+    agent_responses: list[AgentResponse[BaseModel]]
     """Agent responses collected during execution."""
 
     new_messages: list[Message]
