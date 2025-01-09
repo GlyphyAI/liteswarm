@@ -40,12 +40,6 @@ Welcome to LiteSwarm's advanced features documentation. This guide explores the 
 
 7. [Building with LiteSwarm](#building-with-liteswarm)
 
-This document covers advanced features of LiteSwarm, including:
-- SwarmTeam for complex workflows
-- Structured outputs
-- Error handling
-- Context variables
-
 ## SwarmTeam
 
 SwarmTeam is an experimental orchestration framework for building collaborative agent workflows. It provides a structured way to:
