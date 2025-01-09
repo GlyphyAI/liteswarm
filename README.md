@@ -179,13 +179,14 @@ For more examples, check out the [examples](examples/) directory. To learn more 
 If you use LiteSwarm in your research, please cite our work:
 
 ```bibtex
-@software{mozharovskii_2024_liteswarm,
-    title = {{LiteSwarm: A Lightweight Framework for Building AI Agent Systems}},
+@software{Mozharovskii_LiteSwarm_2024,
     author = {Mozharovskii, Evgenii and {GlyphyAI}},
-    year = {2024},
-    url = {https://github.com/glyphyai/liteswarm},
     license = {MIT},
-    version = {0.4.0}
+    month = dec,
+    title = {{LiteSwarm}},
+    url = {https://github.com/glyphyai/liteswarm},
+    version = {0.4.0},
+    year = {2024}
 }
 ``` 
 
