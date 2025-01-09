@@ -129,15 +129,15 @@ run-swarm-team-basic-example:
 
 .PHONY: save-pr-diff
 save-pr-diff:
-	@[ -n "$(PR_NUMBER)" ] || (echo "Error: PR_NUMBER is not set"; exit 1)
-	@echo "Saving diff for PR_NUMBER=$(PR_NUMBER)"
-	gh pr diff $(PR_NUMBER) > pr$(PR_NUMBER)_diff.patch
+	@[ -n "$(PR)" ] || (echo "Error: PR is not set"; exit 1)
+	@echo "Saving diff for PR=$(PR)"
+	gh pr diff $(PR) > pr$(PR)_diff.patch
 
 .PHONY: save-pr-commit-messages
 save-pr-commit-messages:
-	@[ -n "$(PR_NUMBER)" ] || (echo "Error: PR_NUMBER is not set"; exit 1)
-	@echo "Saving commit messages for PR_NUMBER=$(PR_NUMBER)"
-	gh pr view $(PR_NUMBER) --json commits --jq '.commits[] | "\(.messageHeadline) \(.messageBody)"' > pr$(PR_NUMBER)_commit_messages.txt
+	@[ -n "$(PR)" ] || (echo "Error: PR is not set"; exit 1)
+	@echo "Saving commit messages for PR=$(PR)"
+	gh pr view $(PR) --json commits --jq '.commits[] | "\(.messageHeadline) \(.messageBody)"' > pr$(PR)_commit_messages.txt
 
 # ================================================
 # MARK: Documentation commands
