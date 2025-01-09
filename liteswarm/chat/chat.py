@@ -22,6 +22,7 @@ from liteswarm.types.collections import (
 )
 from liteswarm.types.context import ContextVariables
 from liteswarm.types.events import SwarmEvent
+from liteswarm.types.llm import ResponseFormatPydantic
 from liteswarm.types.swarm import Agent, Message
 from liteswarm.utils.messages import validate_messages
 from liteswarm.utils.misc import resolve_agent_instructions
@@ -241,7 +242,8 @@ class LiteChat(Chat[ChatResponse]):
         /,
         agent: Agent,
         context_variables: ContextVariables | None = None,
-    ) -> AsyncStream[SwarmEvent, ChatResponse]:
+        response_format: type[ResponseFormatPydantic] | None = None,
+    ) -> AsyncStream[SwarmEvent, ChatResponse[ResponseFormatPydantic]]:
         """Send message and stream response events.
 
         Processes the message using the specified agent, applying context
@@ -252,6 +254,7 @@ class LiteChat(Chat[ChatResponse]):
             message: Message content to send.
             agent: Agent to process the message.
             context_variables: Variables for instruction resolution.
+            response_format: Optional type to parse the response into.
 
         Returns:
             ReturnableAsyncGenerator yielding events and returning ChatResponse.
@@ -274,6 +277,7 @@ class LiteChat(Chat[ChatResponse]):
             agent=agent,
             messages=[*validate_messages(chat_messages), *context_messages],
             context_variables=context_variables,
+            response_format=response_format,
         )
 
         async for event in stream:
@@ -291,14 +295,7 @@ class LiteChat(Chat[ChatResponse]):
         await self._memory.add_messages(context_messages)
 
         result = await stream.get_return_value()
-        yield ReturnItem(
-            ChatResponse(
-                last_agent=result.last_agent,
-                new_messages=result.new_messages,
-                all_messages=result.all_messages,
-                agent_responses=result.agent_responses,
-            )
-        )
+        yield ReturnItem(ChatResponse(agent_execution=result))
 
     @override
     async def get_messages(self) -> list[ChatMessage]:
