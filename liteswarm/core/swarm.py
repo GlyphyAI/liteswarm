@@ -10,16 +10,21 @@ from collections import deque
 from collections.abc import AsyncGenerator
 from typing import Any
 
-import jiter
 import litellm
 import orjson
 from litellm import CustomStreamWrapper
 from litellm.exceptions import ContextWindowExceededError
 from litellm.types.utils import ChatCompletionDeltaToolCall, ModelResponse, StreamingChoices, Usage
 from litellm.utils import token_counter
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
-from liteswarm.types.collections import AsyncStream, ReturnItem, YieldItem, returnable
+from liteswarm.core.swarm_stream import SwarmStream
+from liteswarm.types.collections import (
+    AsyncStream,
+    ReturnItem,
+    YieldItem,
+    returnable,
+)
 from liteswarm.types.events import (
     AgentActivateEvent,
     AgentCompleteEvent,
@@ -40,8 +45,12 @@ from liteswarm.types.exceptions import (
     MaxResponseContinuationsError,
     SwarmError,
 )
-from liteswarm.types.llm import ResponseFormat, ResponseFormatJsonSchema, ResponseSchema
-from liteswarm.types.misc import JSON
+from liteswarm.types.llm import (
+    ResponseFormat,
+    ResponseFormatJsonSchema,
+    ResponseFormatPydantic,
+    ResponseSchema,
+)
 from liteswarm.types.swarm import (
     Agent,
     AgentContext,
@@ -58,12 +67,17 @@ from liteswarm.types.swarm import (
     ToolCallResult,
     ToolResult,
 )
+from liteswarm.types.typing import is_subtype
 from liteswarm.utils.function import function_has_parameter, functions_to_json
 from liteswarm.utils.logging import log_verbose
 from liteswarm.utils.messages import dump_messages, get_max_tokens
-from liteswarm.utils.misc import parse_content, resolve_agent_instructions, safe_get_attr
+from liteswarm.utils.misc import (
+    parse_content,
+    parse_response,
+    resolve_agent_instructions,
+    safe_get_attr,
+)
 from liteswarm.utils.retry import retry_wrapper
-from liteswarm.utils.typing import is_subtype
 from liteswarm.utils.usage import calculate_response_cost
 
 litellm.modify_params = True
@@ -530,14 +544,14 @@ class Swarm:
         try:
             accumulated_content: str = ""
             continuation_count: int = 0
-            current_stream: CustomStreamWrapper = await self._get_initial_stream(
+            current_stream: CustomStreamWrapper = await self._get_initial_completion(
                 agent=agent,
                 messages=messages,
             )
 
             while continuation_count < self.max_response_continuations:
                 async for chunk in current_stream:
-                    response_chunk = self._process_stream_chunk(agent, chunk)
+                    response_chunk = self._process_completion_chunk(agent, chunk)
                     if response_chunk.delta.content:
                         accumulated_content += response_chunk.delta.content
 
@@ -545,7 +559,7 @@ class Swarm:
 
                     if response_chunk.finish_reason == "length":
                         continuation_count += 1
-                        current_stream = await self._handle_continuation(
+                        current_stream = await self._handle_response_continuation(
                             agent=agent,
                             continuation_count=continuation_count,
                             accumulated_content=accumulated_content,
@@ -567,7 +581,7 @@ class Swarm:
                 original_error=e,
             ) from e
 
-    async def _get_initial_stream(
+    async def _get_initial_completion(
         self,
         agent: Agent,
         messages: list[Message],
@@ -609,12 +623,12 @@ class Swarm:
                 original_error=e,
             ) from e
 
-    def _process_stream_chunk(
+    def _process_completion_chunk(
         self,
         agent: Agent,
         chunk: ModelResponse,
     ) -> CompletionResponseChunk:
-        """Process a raw stream chunk into a structured response.
+        """Process completion stream chunk into a structured response.
 
         Extracts response delta, determines finish reason, and calculates usage
         statistics from the raw chunk data.
@@ -645,13 +659,14 @@ class Swarm:
             )
 
         return CompletionResponseChunk(
+            id=chunk.id,
             delta=delta,
             finish_reason=finish_reason,
             usage=usage,
             response_cost=response_cost,
         )
 
-    async def _handle_continuation(
+    async def _handle_response_continuation(
         self,
         agent: Agent,
         continuation_count: int,
@@ -726,63 +741,21 @@ class Swarm:
             or is_subtype(response_format, ResponseSchema)
         )
 
-    def _parse_agent_response_content(
-        self,
-        full_content: str,
-        response_format: ResponseFormat | None,
-    ) -> JSON | BaseModel | None:
-        """Parse agent response content into specified format.
-
-        Attempts to parse the content as JSON or a Pydantic model based on the
-        specified response format. Handles partial JSON parsing for streaming
-        responses.
-
-        Args:
-            full_content: Complete response content to parse.
-            response_format: Target format specification.
-
-        Returns:
-            Parsed content in specified format, or None if parsing not needed.
-
-        Raises:
-            CompletionError: If JSON parsing fails.
-        """
-        try:
-            partial_json = jiter.from_json(
-                full_content.encode(),
-                partial_mode="trailing-strings",
-            )
-
-            if is_subtype(response_format, BaseModel):
-                try:
-                    return response_format.model_validate(partial_json)
-                except ValidationError:
-                    pass
-
-            return partial_json
-
-        except Exception as e:
-            raise CompletionError(
-                f"Failed to parse agent response content: {e}",
-                original_error=e,
-            ) from e
-
     @returnable
-    async def _process_agent_response(
+    async def _stream_agent_response(
         self,
         agent: Agent,
         messages: list[Message],
         context_variables: ContextVariables,
     ) -> AsyncStream[SwarmEvent, AgentResponse]:
-        """Process agent response and stream completion events.
+        """Stream agent response and process completion events.
 
-        Handles the core response processing from the language model by streaming both raw
-        completion chunks and processed agent response chunks. The method accumulates
-        content and tool calls incrementally while handling response parsing based on
-        the specified format.
+        Streams raw completion chunks and agent response chunks from the language model.
+        Accumulates content and tool calls incrementally, with optional response parsing
+        based on the agent response format configuration.
 
         Args:
-            agent: Agent processing the response.
+            agent: Agent whose response is being streamed.
             messages: Messages providing conversation context.
             context_variables: Context for dynamic resolution.
 
@@ -794,9 +767,9 @@ class Swarm:
             CompletionError: If completion fails after retries.
             ContextLengthError: If context exceeds limits after reduction.
         """
-        full_content: str | None = None
-        full_tool_calls: list[ChatCompletionDeltaToolCall] = []
-        parsed_content: JSON | BaseModel | None = None
+        snapshot_content: str | None = None
+        snapshot_tool_calls: list[ChatCompletionDeltaToolCall] = []
+
         should_parse_content = self._should_parse_agent_response(
             model=agent.llm.model,
             response_format=agent.llm.response_format,
@@ -821,40 +794,50 @@ class Swarm:
 
             delta = completion_chunk.delta
             if delta.content:
-                if full_content is None:
-                    full_content = delta.content
+                if snapshot_content is None:
+                    snapshot_content = delta.content
                 else:
-                    full_content += delta.content
+                    snapshot_content += delta.content
 
-            if should_parse_content and full_content:
-                parsed_content = self._parse_agent_response_content(
-                    full_content=full_content,
-                    response_format=agent.llm.response_format,
-                )
+            chunk_parsed: object | None = None
+            if should_parse_content and snapshot_content:
+                chunk_parsed = parse_response(snapshot_content)
 
             if delta.tool_calls:
                 for tool_call in delta.tool_calls:
                     if tool_call.id:
-                        full_tool_calls.append(tool_call)
-                    elif full_tool_calls:
-                        last_tool_call = full_tool_calls[-1]
+                        snapshot_tool_calls.append(tool_call)
+                    elif snapshot_tool_calls:
+                        last_tool_call = snapshot_tool_calls[-1]
                         last_tool_call.function.arguments += tool_call.function.arguments
 
             response_chunk = AgentResponseChunk(
                 completion=completion_chunk,
-                content=full_content,
-                parsed_content=parsed_content,
-                tool_calls=full_tool_calls,
+                content=snapshot_content,
+                parsed=chunk_parsed,
+                tool_calls=snapshot_tool_calls,
             )
 
             yield YieldItem(AgentResponseChunkEvent(agent=agent, response_chunk=response_chunk))
 
+        snapshot_parsed: BaseModel | None = None
+        if should_parse_content and snapshot_content:
+            response_format: type[BaseModel] | None = None
+            if is_subtype(agent.llm.response_format, BaseModel):
+                response_format = agent.llm.response_format
+
+            snapshot_parsed = parse_response(
+                snapshot_content,
+                response_format=response_format,
+            )
+
         agent_response = AgentResponse(
+            id=completion_chunk.id,
             role=completion_chunk.delta.role,
             finish_reason=completion_chunk.finish_reason,
-            content=full_content,
-            parsed_content=parsed_content,
-            tool_calls=full_tool_calls,
+            content=snapshot_content,
+            parsed=snapshot_parsed,
+            tool_calls=snapshot_tool_calls,
             usage=completion_chunk.usage,
             response_cost=completion_chunk.response_cost,
         )
@@ -862,14 +845,14 @@ class Swarm:
         yield ReturnItem(agent_response)
 
     @returnable
-    async def _process_assistant_response(
+    async def _process_agent_response(
         self,
         agent: Agent,
         content: str | None,
         context_variables: ContextVariables,
         tool_calls: list[ChatCompletionDeltaToolCall] | None = None,
     ) -> AsyncStream[SwarmEvent, list[Message]]:
-        """Process assistant response and stream tool call events.
+        """Process agent response and stream tool call events.
 
         Creates messages for the response and processes any tool calls in order.
         The method handles agent switching through tool results and updates context
@@ -1040,7 +1023,7 @@ class Swarm:
                 context_variables=self._context_variables,
             )
 
-            agent_response_stream = self._process_agent_response(
+            agent_response_stream = self._stream_agent_response(
                 agent=self._active_agent,
                 messages=agent_context_messages,
                 context_variables=self._context_variables,
@@ -1068,7 +1051,7 @@ class Swarm:
             )
 
             if agent_response.content or agent_response.tool_calls:
-                new_messages_stream = self._process_assistant_response(
+                new_messages_stream = self._process_agent_response(
                     agent=self._active_agent,
                     content=agent_response.content,
                     context_variables=self._context_variables,
@@ -1113,8 +1096,8 @@ class Swarm:
             raise SwarmError("No agent response received")
 
         result = AgentExecutionResult(
-            last_agent=self._active_agent,
-            last_agent_response=agent_response,
+            agent=self._active_agent,
+            agent_response=agent_response,
             agent_responses=agent_responses,
             new_messages=current_execution_messages,
             all_messages=self._conversation_messages,
@@ -1188,32 +1171,34 @@ class Swarm:
     # MARK: Public Interface
     # ================================================
 
-    @returnable
-    async def stream(
+    def stream(
         self,
         agent: Agent,
         messages: list[Message],
         context_variables: ContextVariables | None = None,
-    ) -> AsyncStream[SwarmEvent, AgentExecutionResult]:
-        """Stream swarm events and return final execution result.
+        response_format: type[ResponseFormatPydantic] | None = None,
+    ) -> SwarmStream[ResponseFormatPydantic]:
+        """Start agent execution with provided context and stream execution events.
 
-        Main entry point for swarm execution. Processes messages through the agent,
-        streaming various events (responses, tool calls, errors) during execution.
-        Accumulates content and conversation history to produce a final result.
+        Main entry point for swarm execution. Starts agent execution with the provided
+        messages and streams various events (responses, tool calls, errors) during
+        execution. Accumulates content and conversation history to produce a final result.
 
         Args:
-            agent: Agent to execute the task.
+            agent: Agent that will process the messages.
             messages: List of conversation messages for context.
             context_variables: Optional variables for dynamic instruction resolution.
+            response_format: Optional type to parse the response into.
 
         Returns:
-            ReturnableAsyncGenerator yielding events and returning final result.
+            SwarmStream yielding events and returning final result.
 
         Raises:
             SwarmError: If execution encounters internal state inconsistencies.
             ContextLengthError: If context becomes too large to process.
             MaxAgentSwitchesError: If too many agent switches occur.
             MaxResponseContinuationsError: If response requires too many continuations.
+            TypeError: If the response format does not match the parsed response.
 
         Examples:
             Stream events and get result:
@@ -1275,28 +1260,26 @@ class Swarm:
             context_variables=context_variables,
         )
 
-        async for event in event_stream:
-            yield YieldItem(event)
-
-        result = await event_stream.get_return_value()
-        yield ReturnItem(result)
+        return SwarmStream(event_stream, response_format)
 
     async def execute(
         self,
         agent: Agent,
         messages: list[Message],
         context_variables: ContextVariables | None = None,
-    ) -> AgentExecutionResult:
-        """Execute conversation messages and return final execution result.
+        response_format: type[ResponseFormatPydantic] | None = None,
+    ) -> AgentExecutionResult[ResponseFormatPydantic]:
+        """Start agent execution and return final execution result.
 
         Convenience method that wraps stream() to provide direct result collection
-        without event handling. Processes the messages and returns the final result
-        when execution is complete.
+        without event handling. Starts agent execution with the provided messages
+        and returns the final result when execution is complete.
 
         Args:
-            agent: Agent to execute the task.
+            agent: Agent that will process the messages.
             messages: List of conversation messages for context.
             context_variables: Optional variables for dynamic instruction resolution.
+            response_format: Optional type to parse the response into.
 
         Returns:
             Complete execution result with final content and metadata.
@@ -1306,6 +1289,7 @@ class Swarm:
             ContextLengthError: If context becomes too large to process.
             MaxAgentSwitchesError: If too many agent switches occur.
             MaxResponseContinuationsError: If response requires too many continuations.
+            TypeError: If the response format does not match the parsed response.
 
         Examples:
             Basic usage:
@@ -1358,6 +1342,7 @@ class Swarm:
             agent=agent,
             messages=messages,
             context_variables=context_variables,
+            response_format=response_format,
         )
 
         return await stream.get_return_value()
