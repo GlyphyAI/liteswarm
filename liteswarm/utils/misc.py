@@ -10,6 +10,7 @@ from functools import wraps
 from textwrap import dedent
 from typing import Any, Concatenate, ParamSpec, TypeVar, overload
 
+import jiter
 import orjson
 from prompt_toolkit import PromptSession
 from prompt_toolkit.history import InMemoryHistory
@@ -34,10 +35,16 @@ Used to preserve type information for default values when
 the attribute doesn't exist or has wrong type.
 """
 
-TParams = ParamSpec("TParams")
+_TParams = ParamSpec("_TParams")
 """Type variable for parameter specification.
 
 Used to preserve type information for function parameters.
+"""
+
+_ResponseFormatT = TypeVar("_ResponseFormatT", bound=BaseModel)
+"""Type variable for response format type.
+
+Used to preserve type information for response format type.
 """
 
 
@@ -306,8 +313,8 @@ def parse_content(value: Any) -> str:
 
 @overload
 def with_prompt_session(
-    func: Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]],
-) -> Callable[TParams, Awaitable[str]]: ...
+    func: Callable[Concatenate[PromptSession[str], _TParams], Awaitable[str]],
+) -> Callable[_TParams, Awaitable[str]]: ...
 
 
 @overload
@@ -316,13 +323,13 @@ def with_prompt_session(
     *,
     session: PromptSession[str],
 ) -> Callable[
-    [Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]]],
-    Callable[TParams, Awaitable[str]],
+    [Callable[Concatenate[PromptSession[str], _TParams], Awaitable[str]]],
+    Callable[_TParams, Awaitable[str]],
 ]: ...
 
 
 def with_prompt_session(
-    func: Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]] | None = None,
+    func: Callable[Concatenate[PromptSession[str], _TParams], Awaitable[str]] | None = None,
     *,
     session: PromptSession[str] | None = None,
 ) -> Any:
@@ -378,8 +385,8 @@ def with_prompt_session(
     """
 
     def decorator(
-        f: Callable[Concatenate[PromptSession[str], TParams], Awaitable[str]],
-    ) -> Callable[TParams, Awaitable[str]]:
+        f: Callable[Concatenate[PromptSession[str], _TParams], Awaitable[str]],
+    ) -> Callable[_TParams, Awaitable[str]]:
         prompt_session = session or PromptSession(
             history=InMemoryHistory(),
             enable_history_search=True,
@@ -388,7 +395,7 @@ def with_prompt_session(
         )
 
         @wraps(f)
-        async def wrapper(*args: TParams.args, **kwargs: TParams.kwargs) -> str:
+        async def wrapper(*args: _TParams.args, **kwargs: _TParams.kwargs) -> str:
             with patch_stdout():
                 return await f(prompt_session, *args, **kwargs)
 
@@ -463,3 +470,48 @@ def resolve_agent_instructions(
         return agent.instructions(context_variables or ContextVariables())
 
     raise ValueError(f"Invalid instructions type: {type(agent.instructions)}")
+
+
+@overload
+def parse_response(
+    response: str,
+) -> JSON | None: ...
+
+
+@overload
+def parse_response(
+    response: str,
+    response_format: type[_ResponseFormatT] | None = None,
+) -> _ResponseFormatT | None: ...
+
+
+def parse_response(
+    response: str,
+    response_format: type[_ResponseFormatT] | None = None,
+) -> JSON | _ResponseFormatT | None:
+    """Parse agent response content into specified format.
+
+    Attempts to parse the content as JSON or a Pydantic model based on the
+    specified response format. Handles partial JSON parsing for streaming
+    responses.
+
+    Args:
+        response: Complete response content to parse.
+        response_format: Target format specification.
+
+    Returns:
+        Parsed content in specified format, or None if parsing not needed.
+
+    Raises:
+        CompletionError: If JSON parsing fails.
+    """
+    try:
+        if response_format:
+            return response_format.model_validate_json(response)
+
+        return jiter.from_json(
+            response.encode(),
+            partial_mode="trailing-strings",
+        )
+    except Exception:
+        return None
