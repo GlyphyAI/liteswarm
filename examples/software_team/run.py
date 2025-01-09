@@ -16,7 +16,7 @@ from .handlers import EventHandler
 from .planning import build_planning_agent_user_prompt, create_planning_agent
 from .tasks import create_task_definitions
 from .team import create_team_members
-from .types import FileContent, Project
+from .types import FileContent, Project, TechStack
 from .utils import create_context_from_project, extract_project_from_artifact, print_artifact
 
 enable_logging(default_level="DEBUG")
@@ -40,11 +40,11 @@ def get_project_summary(project: Project) -> str:
 def create_project() -> Project:
     """Create a new project with initial Flutter setup."""
     return Project(
-        tech_stack={
-            "platform": "mobile",
-            "languages": ["Dart"],
-            "frameworks": ["Flutter"],
-        },
+        tech_stack=TechStack(
+            platform="mobile",
+            languages=["Dart"],
+            frameworks=["Flutter"],
+        ),
         directories=["lib"],
         files=[
             FileContent(

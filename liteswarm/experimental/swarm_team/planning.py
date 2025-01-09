@@ -271,13 +271,16 @@ class LitePlanningAgent(PlanningAgent):
             Agent configured with planning instructions and GPT-4o model.
         """
         response_format = response_format or self._default_planning_response_format()
+        response_format_pydantic: type[Plan] | None = None
+        if is_subtype(response_format, Plan):
+            response_format_pydantic = response_format
 
         return Agent(
             id="agent-planner",
             instructions=PLANNING_AGENT_SYSTEM_PROMPT,
             llm=LLM(
                 model="gpt-4o",
-                response_format=response_format,
+                response_format=response_format_pydantic,
             ),
         )
 

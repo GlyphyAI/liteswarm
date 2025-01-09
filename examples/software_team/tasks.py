@@ -238,7 +238,7 @@ def parse_debug_task_response(content: str, context: ContextVariables) -> DebugO
     return DebugOutput.model_validate(json_response)
 
 
-def create_flutter_task_definition() -> TaskDefinition:
+def create_flutter_task_definition() -> TaskDefinition[FlutterTask, FlutterOutput]:
     return TaskDefinition(
         task_type=FlutterTask,
         instructions=build_flutter_task_prompt,
@@ -246,7 +246,7 @@ def create_flutter_task_definition() -> TaskDefinition:
     )
 
 
-def create_debug_task_definition() -> TaskDefinition:
+def create_debug_task_definition() -> TaskDefinition[DebugTask, DebugOutput]:
     return TaskDefinition(
         task_type=DebugTask,
         instructions=build_debug_task_prompt,

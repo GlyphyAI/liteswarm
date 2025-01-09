@@ -36,7 +36,8 @@ else:
         Returns:
             TypeVar with conditional default parameter.
         """
-        return OriginalTypeVar(name, *args, bound=bound, **kwargs)
+        kwargs.update(default=default)
+        return OriginalTypeVar(name, *args, **kwargs)
 
     TypeVar = create_typevar
 

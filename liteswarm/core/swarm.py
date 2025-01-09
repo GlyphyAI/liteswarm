@@ -8,7 +8,7 @@ import asyncio
 import sys
 from collections import deque
 from collections.abc import AsyncGenerator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import litellm
 import orjson
@@ -79,6 +79,9 @@ from liteswarm.utils.misc import (
 )
 from liteswarm.utils.retry import retry_wrapper
 from liteswarm.utils.usage import calculate_response_cost
+
+if TYPE_CHECKING:
+    from liteswarm.types.misc import JSON
 
 litellm.modify_params = True
 
@@ -799,7 +802,7 @@ class Swarm:
                 else:
                     snapshot_content += delta.content
 
-            chunk_parsed: object | None = None
+            chunk_parsed: JSON | None = None
             if should_parse_content and snapshot_content:
                 chunk_parsed = parse_response(snapshot_content)
 
@@ -1160,7 +1163,7 @@ class Swarm:
         result = await agent_execution_stream.get_return_value()
         yield YieldItem(
             AgentExecutionCompleteEvent(
-                agent=self._active_agent,
+                agent=result.agent,
                 execution_result=result,
             )
         )

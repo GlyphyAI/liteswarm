@@ -480,7 +480,7 @@ class ToolResult(BaseModel):
         return cls(
             content=content,
             context_update=ContextVariablesUpdate(
-                context_variables=context_variables,
+                context_variables=context_variables or ContextVariables(),
             ),
         )
 

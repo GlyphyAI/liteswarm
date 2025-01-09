@@ -4,7 +4,7 @@
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
-from typing import Generic, cast
+from typing import Generic
 
 from typing_extensions import override
 
@@ -125,12 +125,11 @@ class SwarmStream(
             ```
         """
         result = await super().get_return_value()
-        if self._response_format is None:
-            return cast(AgentExecutionResult[ResponseFormatPydantic], result)
+        if self._response_format:
+            parsed = result.agent_response.parsed
+            if not isinstance(parsed, self._response_format):
+                raise TypeError(
+                    f"Response format type '{self._response_format}' does not match expected type '{type(parsed)}'"
+                )
 
-        if not isinstance(result.agent_response.parsed, self._response_format):
-            raise TypeError(
-                f"Response format type '{self._response_format}' does not match expected type '{type(result.agent_response.parsed)}'"
-            )
-
-        return cast(AgentExecutionResult[ResponseFormatPydantic], result)
+        return result

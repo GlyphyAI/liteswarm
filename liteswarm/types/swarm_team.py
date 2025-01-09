@@ -15,10 +15,10 @@ from liteswarm.types.context import ContextVariables
 from liteswarm.types.swarm import Agent, Message
 from liteswarm.types.typing import TypeVar
 
-_Task = TypeVar("_Task", bound="Task", default="Task")
+_Task = TypeVar("_Task", bound="Task", default="Task", covariant=True)
 """Type variable for Task subclass in task definitions."""
 
-_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel, default=BaseModel)
+_ResponseModel = TypeVar("_ResponseModel", bound=BaseModel, default=BaseModel, covariant=True)
 """Type variable for Pydantic model used as response output."""
 
 TaskInstructions: TypeAlias = str | Callable[[_Task, ContextVariables], str]
@@ -222,7 +222,7 @@ class TaskDefinition(BaseModel, Generic[_Task, _ResponseModel]):
             ```
     """
 
-    task_type: type[Task]
+    task_type: type[_Task]
     """Task schema for validation."""
 
     instructions: TaskInstructions[_Task]

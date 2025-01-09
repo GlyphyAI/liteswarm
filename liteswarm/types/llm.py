@@ -248,6 +248,7 @@ ResponseFormatPydantic = TypeVar(
     "ResponseFormatPydantic",
     bound=BaseModel,
     default=BaseModel,
+    covariant=True,
 )
 """Type variable for Pydantic model used as response output.
 
