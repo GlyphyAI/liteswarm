@@ -203,14 +203,14 @@ For more examples, check out the [examples](examples/) directory. To learn more 
 If you use LiteSwarm in your research, please cite our work:
 
 ```bibtex
-@software{Mozharovskii_LiteSwarm_2024,
+@software{Mozharovskii_LiteSwarm_2025,
     author = {Mozharovskii, Evgenii and {GlyphyAI}},
     license = {MIT},
-    month = dec,
+    month = jan,
     title = {{LiteSwarm}},
     url = {https://github.com/glyphyai/liteswarm},
-    version = {0.4.0},
-    year = {2024}
+    version = {0.5.0},
+    year = {2025}
 }
 ``` 
 
