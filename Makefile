@@ -87,21 +87,37 @@ run-repl-example:
 run-software-team-example:
 	python -m examples.software_team.run
 
-.PHONY: run-structured-outputs-example
-run-structured-outputs-example:
-	python -m examples.structured_outputs.run
+.PHONY: run-structured-outputs-core-example
+run-structured-outputs-core-example:
+	python -m examples.structured_outputs.core.run
 
-.PHONY: run-chat-example
-run-chat-example:
-	python -m examples.chat_example.run
+.PHONY: run-structured-outputs-chat-example
+run-structured-outputs-chat-example:
+	python -m examples.structured_outputs.chat.run
 
-.PHONY: run-chat-server-example
-run-chat-server-example:
-	python -m examples.chat_server.run
+.PHONY: run-structured-outputs-playground-example
+run-structured-outputs-playground-example:
+	python -m examples.structured_outputs.playground.run
 
-.PHONY: run-chat-client-example
-run-chat-client-example:
-	python -m examples.chat_client.run
+.PHONY: run-chat-lite-chat-example
+run-chat-lite-chat-example:
+	python -m examples.chat_basic.lite_chat.run
+
+.PHONY: run-chat-lite-team-chat-example
+run-chat-lite-team-chat-example:
+	python -m examples.chat_basic.lite_team_chat.run
+
+.PHONY: run-chat-api-server
+run-chat-api-server:
+	python -m examples.chat_api.server.run
+
+.PHONY: run-chat-api-client
+run-chat-api-client:
+	python -m examples.chat_api.client.run
+
+.PHONY: run-swarm-team-basic-example
+run-swarm-team-basic-example:
+	python -m examples.swarm_team_basic.run
 
 # ================================================
 # MARK: PR utility commands
