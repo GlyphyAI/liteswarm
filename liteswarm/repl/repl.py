@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -14,25 +14,23 @@ from typing import Any, NoReturn, get_args
 from litellm import token_counter
 from typing_extensions import override
 
-from liteswarm.core.context_manager import (
-    ContextManager,
-    LiteContextManager,
-    LiteOptimizationStrategy,
-)
-from liteswarm.core.message_store import MessageStore
+from liteswarm.chat import LiteChat, LiteChatMemory, LiteChatSearch
+from liteswarm.chat.optimization import LiteChatOptimization, OptimizationStrategy
 from liteswarm.core.swarm import Swarm
-from liteswarm.repl.event_handler import ReplEventHandler
-from liteswarm.types.context_manager import RAGStrategyConfig
-from liteswarm.types.swarm import Agent, Message, ResponseCost, Usage
+from liteswarm.repl.event_handler import ConsoleEventHandler
+from liteswarm.types.chat import RAGStrategyConfig
+from liteswarm.types.swarm import Agent, AgentContext, ResponseCost, Usage
+from liteswarm.utils.logging import LogLevel, log_verbose
 from liteswarm.utils.logging import enable_logging as liteswarm_enable_logging
 from liteswarm.utils.messages import dump_messages, validate_messages
+from liteswarm.utils.misc import prompt
 
 
 class ReplArgumentParser(argparse.ArgumentParser):
-    """Custom argument parser that doesn't exit on error.
+    """Custom argument parser that raises exceptions instead of exiting.
 
-    Overrides the error handling to raise exceptions instead of
-    calling sys.exit(), making it suitable for interactive use.
+    Designed for interactive use in REPL environments where program termination
+    on error is undesirable.
     """
 
     @override
@@ -46,19 +44,12 @@ class ReplArgumentParser(argparse.ArgumentParser):
 
 
 class AgentRepl:
-    """Interactive REPL for agent conversations.
+    """Interactive REPL for agent-based conversations.
 
-    Provides a command-line interface for interacting with agents in a
-    Read-Eval-Print Loop (REPL) format. Features include:
-    - Interactive conversation with agents
-    - Command-based control (/help, /exit, etc.)
-    - Message store for storing messages
-    - Usage and cost tracking
-    - Agent state monitoring
-    - Context optimization support
-
-    The REPL maintains conversation state and provides real-time feedback
-    on agent responses, tool usage, and state changes.
+    Provides a command-line interface for interacting with agents through a
+    Read-Eval-Print Loop (REPL). Features include conversation management,
+    command-based control, message storage, usage tracking, and context
+    optimization.
 
     Example:
         ```python
@@ -87,8 +78,9 @@ class AgentRepl:
     def __init__(
         self,
         agent: Agent,
-        message_store: MessageStore[Any] | None = None,
-        context_manager: ContextManager | None = None,
+        memory: LiteChatMemory | None = None,
+        search: LiteChatSearch | None = None,
+        optimization: LiteChatOptimization | None = None,
         include_usage: bool = False,
         include_cost: bool = False,
         max_iterations: int = sys.maxsize,
@@ -97,8 +89,9 @@ class AgentRepl:
 
         Args:
             agent: Initial agent for handling conversations.
-            message_store: Optional store for messages. Defaults to None.
-            context_manager: Optional context manager for optimization. Defaults to None.
+            memory: Memory manager for the chat.
+            search: Search manager for the chat.
+            optimization: Optimization manager for the chat.
             include_usage: Whether to track token usage. Defaults to False.
             include_cost: Whether to track costs. Defaults to False.
             max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
@@ -110,34 +103,32 @@ class AgentRepl:
         """
         # Public configuration
         self.agent = agent
-        self.swarm = Swarm(
-            message_store=message_store,
-            context_manager=context_manager,
-            include_usage=include_usage,
-            include_cost=include_cost,
-            max_iterations=max_iterations,
+        self.memory = memory or LiteChatMemory()
+        self.search = search or LiteChatSearch(memory=self.memory)
+        self.optimization = optimization or LiteChatOptimization(
+            memory=self.memory,
+            search=self.search,
+        )
+        self.chat = LiteChat(
+            memory=self.memory,
+            search=self.search,
+            optimization=self.optimization,
+            swarm=Swarm(
+                include_usage=include_usage,
+                include_cost=include_cost,
+                max_iterations=max_iterations,
+            ),
         )
 
         # Internal state (private)
-        self._event_handler = ReplEventHandler()
-        self._messages: list[Message] = []
+        self._event_handler = ConsoleEventHandler()
         self._accumulated_usage: Usage | None = None
         self._accumulated_cost: ResponseCost | None = None
         self._active_agent: Agent | None = None
-        self._agent_queue: deque[Agent] = deque()
+        self._agent_queue: deque[AgentContext] = deque()
 
     async def _print_welcome(self) -> None:
-        """Print welcome message and usage instructions.
-
-        Displays:
-        - Initial greeting
-        - Starting agent information
-        - Available commands
-        - Basic usage instructions
-
-        Notes:
-            Called automatically when the REPL starts and on /help command.
-        """
+        """Display welcome message and available commands."""
         print("\n🤖 Agent REPL")
         print(f"Starting with agent: {self.agent.id}")
         print("\nCommands:")
@@ -155,42 +146,20 @@ class AgentRepl:
         print("\n" + "=" * 50 + "\n")
 
     async def _print_history(self) -> None:
-        """Print the conversation messages.
-
-        Displays all non-system messages in chronological order, including:
-        - Message roles (user, assistant, tool)
-        - Message content
-        - Visual separators for readability
-
-        Notes:
-            - System messages are filtered out for clarity
-            - Empty content is shown as [No content]
-        """
+        """Display all non-system messages in chronological order."""
         print("\n📝 Conversation Messages:")
-        for msg in self._messages:
+        messages = await self.chat.get_messages()
+        for msg in messages:
             if msg.role != "system":
                 content = msg.content or "[No content]"
                 print(f"\n[{msg.role}]: {content}")
         print("\n" + "=" * 50 + "\n")
 
     async def _print_stats(self) -> None:
-        """Print conversation statistics.
-
-        Displays comprehensive statistics about the conversation:
-        - Message counts
-        - Accumulated token usage details (if enabled)
-        - Accumulated cost information (if enabled)
-        - Active agent information
-        - Queue status
-
-        Notes:
-            - Token usage shown only if include_usage=True
-            - Costs shown only if include_cost=True
-            - Detailed breakdowns provided when available
-            - Usage and costs are accumulated across all agents
-        """
+        """Display conversation statistics including message counts, token usage, and costs."""
+        messages = await self.chat.get_messages()
         print("\n📊 Conversation Statistics:")
-        print(f"Message count: {len(self._messages)} messages")
+        print(f"Message count: {len(messages)} messages")
 
         if self._accumulated_usage:
             print("\nAccumulated Token Usage:")
@@ -198,7 +167,6 @@ class AgentRepl:
             print(f"  Completion tokens: {self._accumulated_usage.completion_tokens or 0:,}")
             print(f"  Total tokens: {self._accumulated_usage.total_tokens or 0:,}")
 
-            # Only print token details if they exist and are not empty
             if self._accumulated_usage.prompt_tokens_details:
                 print("\nPrompt Token Details:")
                 prompt_token_details = self._accumulated_usage.prompt_tokens_details
@@ -237,16 +205,13 @@ class AgentRepl:
         print("\n" + "=" * 50 + "\n")
 
     async def _save_history(self, filename: str = "conversation_memory.json") -> None:
-        """Save the conversation memory to a file.
+        """Save conversation memory to a JSON file.
 
         Args:
-            filename: The name of the file to save the conversation memory to.
-
-        Notes:
-            - Excludes system messages
-            - Includes message metadata
+            filename: The target file path.
         """
-        memory = {"messages": dump_messages(self._messages)}
+        messages = await self.chat.get_messages()
+        memory = {"messages": dump_messages(messages)}
 
         with open(filename, "w") as f:
             json.dump(memory, f, indent=2)
@@ -255,33 +220,21 @@ class AgentRepl:
         print(f"Messages: {len(memory['messages'])} messages")
 
     async def _load_history(self, filename: str = "conversation_memory.json") -> None:
-        """Load the conversation memory from a file.
+        """Load conversation memory from a JSON file.
 
         Args:
-            filename: The name of the file to load the conversation memory from.
-
-        Notes:
-            - Updates memory state
-            - Validates message format
-            - Calculates token usage
+            filename: The source file path.
         """
         try:
             with open(filename) as f:
                 memory: dict[str, Any] = json.load(f)
 
-            # Validate and load messages
             messages = validate_messages(memory.get("messages", []))
-
-            # Update internal state
-            self._messages = messages
-
-            # Update swarm message store
-            await self.swarm.message_store.set_messages(messages)
+            await self.memory.add_messages(messages)
 
             print(f"\n📥 Conversation memory loaded from {filename}")
             print(f"Messages: {len(messages)} messages")
 
-            # Calculate token usage for messages
             messages_dump = [msg.model_dump() for msg in messages if msg.role != "system"]
             prompt_tokens = token_counter(model=self.agent.llm.model, messages=messages_dump)
             print(f"Token count: {prompt_tokens:,}")
@@ -294,21 +247,14 @@ class AgentRepl:
             print(f"\n❌ Error loading memory: {str(e)}")
 
     async def _clear_history(self) -> None:
-        """Clear the conversation memory.
-
-        Resets memory and clears the swarm state.
-        """
-        self._messages = []
+        """Clear conversation memory and reset REPL state."""
         self._accumulated_usage = None
         self._accumulated_cost = None
         self._active_agent = None
         self._agent_queue.clear()
 
-        await self.swarm.cleanup(
-            clear_agents=True,
-            clear_context=True,
-            clear_messages=True,
-        )
+        await self.memory.clear()
+        await self.search.clear()
 
         print("\n🧹 Conversation memory cleared")
 
@@ -321,20 +267,14 @@ class AgentRepl:
         """Parse command arguments with error handling.
 
         Args:
-            parser: Configured argument parser.
+            parser: The argument parser to use.
             args_str: Raw argument string to parse.
             join_args: List of argument names whose values should be joined.
 
         Returns:
             Parsed arguments or None if parsing failed.
-
-        Notes:
-            - Handles quoted strings and spaces in arguments
-            - Joins multi-word values for specified arguments
-            - Provides helpful error messages on failure
         """
         try:
-            # Clean up args to handle quoted strings properly
             cleaned_args = []
             for arg in shlex.split(args_str):
                 if "=" in arg:
@@ -345,7 +285,6 @@ class AgentRepl:
 
             parsed = parser.parse_args(cleaned_args)
 
-            # Join multi-word arguments if specified
             if join_args:
                 for arg_name in join_args:
                     arg_value = getattr(parsed, arg_name, None)
@@ -370,7 +309,7 @@ class AgentRepl:
             return None
 
     def _create_optimize_parser(self) -> ReplArgumentParser:
-        """Create argument parser for optimize command."""
+        """Create argument parser for the optimize command."""
         parser = ReplArgumentParser(
             prog="/optimize",
             description="Optimize conversation context using specified strategy",
@@ -380,7 +319,7 @@ class AgentRepl:
             "--strategy",
             "-s",
             required=True,
-            choices=get_args(LiteOptimizationStrategy),
+            choices=get_args(OptimizationStrategy),
             help="Optimization strategy to use",
         )
         parser.add_argument(
@@ -391,13 +330,13 @@ class AgentRepl:
         parser.add_argument(
             "--query",
             "-q",
-            nargs="+",  # Accept multiple words
+            nargs="+",
             help="Query to use for RAG strategy",
         )
         return parser
 
     def _create_find_parser(self) -> ReplArgumentParser:
-        """Create argument parser for find command."""
+        """Create argument parser for the find command."""
         parser = ReplArgumentParser(
             prog="/find",
             description="Find messages relevant to the given query",
@@ -407,7 +346,7 @@ class AgentRepl:
             "--query",
             "-q",
             required=True,
-            nargs="+",  # Accept multiple words
+            nargs="+",
             help="Search query",
         )
         parser.add_argument(
@@ -416,11 +355,24 @@ class AgentRepl:
             type=int,
             help="Maximum number of messages to return",
         )
+        parser.add_argument(
+            "--threshold",
+            "-t",
+            type=float,
+            default=0.5,
+            help="Minimum similarity score (0.0 to 1.0)",
+        )
         return parser
 
     async def _handle_command(self, command: str) -> bool:
-        """Handle REPL commands."""
-        # Split command and arguments, preserving quoted strings
+        """Handle REPL commands and return whether to exit.
+
+        Args:
+            command: The command to handle.
+
+        Returns:
+            True if the REPL should exit, False otherwise.
+        """
         parts = shlex.split(command)
         cmd = parts[0].lower()
         args = " ".join(parts[1:])
@@ -451,10 +403,10 @@ class AgentRepl:
         return False
 
     def _update_usage(self, new_usage: Usage | None) -> None:
-        """Update accumulated usage with new usage data.
+        """Update accumulated usage statistics.
 
         Args:
-            new_usage: New usage data to add to accumulation.
+            new_usage: New usage data to add.
         """
         if not new_usage:
             return
@@ -463,18 +415,12 @@ class AgentRepl:
             self._accumulated_usage = new_usage
             return
 
-        # Prompt tokens from latest response already include all previous messages
         self._accumulated_usage.prompt_tokens = new_usage.prompt_tokens
-
-        # Accumulate completion tokens
         self._accumulated_usage.completion_tokens += new_usage.completion_tokens
-
-        # Update total tokens
         self._accumulated_usage.total_tokens = (
             self._accumulated_usage.prompt_tokens + self._accumulated_usage.completion_tokens
         )
 
-        # Update token details if available
         if new_usage.prompt_tokens_details:
             self._accumulated_usage.prompt_tokens_details = new_usage.prompt_tokens_details
 
@@ -496,10 +442,10 @@ class AgentRepl:
                         )
 
     def _update_cost(self, new_cost: ResponseCost | None) -> None:
-        """Update accumulated cost with new cost data.
+        """Update accumulated cost statistics.
 
         Args:
-            new_cost: New cost data to add to accumulation.
+            new_cost: New cost data to add.
         """
         if not new_cost:
             return
@@ -508,55 +454,40 @@ class AgentRepl:
             self._accumulated_cost = new_cost
             return
 
-        # Prompt cost from latest response already includes all previous messages
         self._accumulated_cost.prompt_tokens_cost = new_cost.prompt_tokens_cost
-
-        # Accumulate completion cost
         self._accumulated_cost.completion_tokens_cost += new_cost.completion_tokens_cost
 
     async def _process_query(self, query: str) -> None:
         """Process a user query through the agent system.
 
-        Handles the complete query processing lifecycle:
-        - Sends query to the swarm
-        - Updates conversation memory
-        - Accumulates usage and costs
-        - Maintains agent state
-        - Handles errors
-
         Args:
-            query: The user's input query to process.
-
-        Notes:
-            - Updates multiple aspects of REPL state
-            - Maintains conversation continuity
-            - Preserves error context for user feedback
-            - Accumulates statistics if enabled
+            query: The user's input query.
         """
         try:
             agent = self._active_agent or self.agent
-            result = await self.swarm.execute(
-                agent=agent,
-                prompt=query,
-                event_handler=self._event_handler,
-            )
+            stream = self.chat.send_message(query, agent=agent)
 
-            self._messages = validate_messages(await self.swarm.message_store.get_messages())
-            self._update_usage(result.usage)
-            self._update_cost(result.response_cost)
-            self._active_agent = result.agent
-            self._agent_queue = self.swarm._agent_queue
+            async for event in stream:
+                self._event_handler.on_event(event)
+                if event.type == "agent_switch":
+                    self._active_agent = event.next_agent
+
+            result = await stream.get_return_value()
+            for response in result.agent_responses:
+                if response.usage:
+                    self._update_usage(response.usage)
+                if response.response_cost:
+                    self._update_cost(response.response_cost)
+
             print("\n" + "=" * 50 + "\n")
         except Exception as e:
             print(f"\n❌ Error processing query: {str(e)}", file=sys.stderr)
 
     async def _optimize_context(self, args: str) -> None:
-        """Optimize conversation context using specified strategy.
+        """Optimize conversation context using the specified strategy.
 
-        Command format: /optimize --strategy <strategy> [--model <model>] [--query <query>]
-        - strategy: summarize, window, rag, or trim
-        - model: optional model name (defaults to agent's model)
-        - query: optional query for RAG strategy
+        Args:
+            args: Raw command arguments string.
         """
         try:
             parser = self._create_optimize_parser()
@@ -569,18 +500,14 @@ class AgentRepl:
                 print('  /optimize -s rag -q "hello world"')
                 return
 
-            # Get current messages
-            messages = await self.swarm.message_store.get_messages()
+            log_verbose(f"Optimizing context with {parsed}")
+
+            messages = await self.chat.get_messages()
             if not messages:
                 print("\n❌ No messages to optimize")
                 return
 
-            if not isinstance(self.swarm.context_manager, LiteContextManager):
-                print("\n❌ Context manager does not support optimization")
-                return
-
-            # Run optimization
-            optimized = await self.swarm.context_manager.optimize_context(
+            optimized = await self.chat.optimize_messages(
                 model=parsed.model or self.agent.llm.model,
                 strategy=parsed.strategy,
                 rag_config=RAGStrategyConfig(
@@ -589,10 +516,6 @@ class AgentRepl:
                     score_threshold=0.5,
                 ),
             )
-
-            # Update memory
-            await self.swarm.message_store.set_messages(optimized)
-            self._messages = validate_messages(optimized)
 
             print(f"\n✨ Context optimized using {parsed.strategy} strategy")
             print(f"Messages: {len(messages)} → {len(optimized)}")
@@ -608,9 +531,8 @@ class AgentRepl:
     async def _find_relevant(self, args: str) -> None:
         """Find messages relevant to the given query.
 
-        Command format: /find --query <query> [--count <n>]
-        - query: search query
-        - count: optional number of messages to return
+        Args:
+            args: Raw command arguments string.
         """
         try:
             parser = self._create_find_parser()
@@ -618,31 +540,24 @@ class AgentRepl:
             if not parsed:
                 print("\nUsage examples:")
                 print('  /find --query "calendar view" --count 5')
-                print('  /find -q "search term" -n 3')
-                print("  /find --query calendar view --count 5")
-                print("  /find -q calendar view -n 3")
+                print('  /find -q "search term" -n 3 -t 0.7')
+                print("  /find --query calendar view --threshold 0.8")
+                print("  /find -q calendar view -n 3 --threshold 0.6")
                 return
 
-            # Get current messages
-            messages = await self.swarm.message_store.get_messages()
-            if not messages:
-                print("\n❌ No messages to search")
-                return
-
-            if not isinstance(self.swarm.context_manager, LiteContextManager):
-                print("\n❌ Context manager does not support RAG")
-                return
-
-            # Find relevant messages
-            relevant = await self.swarm.context_manager.find_context(
+            messages = await self.chat.search_messages(
                 query=parsed.query,
-                max_messages=parsed.count,
-                embedding_model="text-embedding-ada-002",
+                max_results=parsed.count,
+                score_threshold=parsed.threshold,
+                index_messages=True,
             )
 
-            # Print results
-            print(f"\n🔍 Found {len(relevant)} relevant messages:")
-            for msg in relevant:
+            if not messages:
+                print("\n❌ No relevant messages found")
+                return
+
+            print(f"\n🔍 Found {len(messages)} relevant messages:")
+            for msg in messages:
                 if msg.role != "system":
                     content = msg.content or "[No content]"
                     print(f"\n[{msg.role}]: {content}")
@@ -653,52 +568,28 @@ class AgentRepl:
             print(f"\n❌ Error finding relevant messages: {str(e)}")
             print("\nUsage examples:")
             print('  /find --query "calendar view" --count 5')
-            print('  /find -q "search term" -n 3')
-            print("  /find --query calendar view --count 5")
-            print("  /find -q calendar view -n 3")
+            print('  /find -q "search term" -n 3 -t 0.7')
+            print("  /find --query calendar view --threshold 0.8")
+            print("  /find -q calendar view -n 3 --threshold 0.6")
 
     async def run(self) -> NoReturn:
-        """Run the REPL loop indefinitely.
-
-        Provides the main interaction loop:
-        - Displays welcome message
-        - Processes user input
-        - Handles commands
-        - Manages conversation flow
-        - Handles interruptions
-
-        The loop continues until explicitly terminated by:
-        - /exit command
-        - Keyboard interrupt (Ctrl+C)
-        - EOF signal (Ctrl+D)
-
-        Raises:
-            SystemExit: When the REPL is terminated.
-
-        Notes:
-            - Empty inputs are ignored
-            - Errors don't terminate the loop
-            - Graceful shutdown on interrupts
-        """
+        """Run the REPL loop until explicitly terminated."""
         await self._print_welcome()
 
         while True:
             try:
-                # Get user input
-                user_input = input("\n🗣️  Enter your query: ").strip()
+                user_input = await prompt("\n🗣️  Enter your query: ")
 
-                # Skip empty input
                 if not user_input:
                     continue
 
-                # Handle commands
                 if user_input.startswith("/"):
+                    log_verbose(f"Handling command: {user_input}")
                     if await self._handle_command(user_input):
                         sys.exit(0)
 
                     continue
 
-                # Process regular query
                 await self._process_query(user_input)
 
             except KeyboardInterrupt:
@@ -714,23 +605,27 @@ class AgentRepl:
 
 async def start_repl(
     agent: Agent,
-    message_store: MessageStore[Any] | None = None,
-    context_manager: ContextManager | None = None,
+    memory: LiteChatMemory | None = None,
+    search: LiteChatSearch | None = None,
+    optimization: LiteChatOptimization | None = None,
     include_usage: bool = False,
     include_cost: bool = False,
     max_iterations: int = sys.maxsize,
     enable_logging: bool = True,
+    log_level: LogLevel = "INFO",
 ) -> NoReturn:
-    """Start an interactive REPL session.
+    """Start an interactive REPL session with the specified agent.
 
     Args:
         agent: Initial agent for handling conversations.
-        message_store: Optional store for messages. Defaults to None.
-        context_manager: Optional context manager for optimization. Defaults to None.
-        include_usage: Whether to track token usage. Defaults to False.
-        include_cost: Whether to track costs. Defaults to False.
-        max_iterations: Maximum conversation turns. Defaults to sys.maxsize.
-        enable_logging: Whether to enable logging. Defaults to True.
+        memory: Memory manager for the chat.
+        search: Search manager for the chat.
+        optimization: Optimization manager for the chat.
+        include_usage: Whether to track token usage.
+        include_cost: Whether to track costs.
+        max_iterations: Maximum conversation turns.
+        enable_logging: Whether to enable logging.
+        log_level: Log level to use for logging.
 
     Example:
         ```python
@@ -742,20 +637,15 @@ async def start_repl(
 
         await start_repl(agent=agent, include_usage=True)
         ```
-
-    Notes:
-        - Enables logging automatically
-        - Runs until explicitly terminated
-        - State is preserved between queries
-        - Use /clear command to reset state
     """
     if enable_logging:
-        liteswarm_enable_logging()
+        liteswarm_enable_logging(default_level=log_level)
 
     repl = AgentRepl(
         agent=agent,
-        message_store=message_store,
-        context_manager=context_manager,
+        memory=memory,
+        search=search,
+        optimization=optimization,
         include_usage=include_usage,
         include_cost=include_cost,
         max_iterations=max_iterations,

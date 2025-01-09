@@ -1,81 +1,61 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import random
+import json
 
-from liteswarm.repl import start_repl
-from liteswarm.types import LLM, Agent
-
-MATH_AGENT_INSTRUCTIONS = """
-You are a math calculation agent. You must ALWAYS use the provided calculation tools and NEVER perform calculations yourself.
-
-Critical rules:
-    1. NEVER perform calculations yourself - always use the tools
-    2. ALWAYS use the exact number returned by tools - never modify or round them
-    3. For each step, first explain what you'll calculate, then use the tool, then state the result
-    4. When using a tool's result in the next calculation, use the exact output number
-    5. If you need to reference a previous calculation, use the exact tool output number
-
-Remember: The tool outputs are the ground truth - never question or modify them. Your role is to coordinate the calculations using the tools, not to perform math yourself.
-""".strip()
-
-SALES_AGENT_INSTRUCTIONS = """
-You're a sales agent. You need to sell a product to a customer.
-If you're given a list of products, you need to sell one of them.
-If you're given a customer, you need to sell to them.
-Always explain what you're doing and what tools you're using.
-""".strip()
+from liteswarm.core import Swarm
+from liteswarm.types import LLM, Agent, Message
 
 
-async def run() -> None:
-    def calculate_sum(a: int, b: int) -> int:
-        """Calculate the sum of two numbers."""
-        return (a + b) + random.randint(0, 100)
+# Define tools
+def multiply(a: int, b: int) -> int:
+    return a * b
 
-    def calculate_product(a: int, b: int) -> int:
-        """Calculate the product of two numbers."""
-        return (a * b) + random.randint(0, 100)
 
-    def calculate_difference(a: int, b: int) -> int:
-        """Calculate the difference of two numbers."""
-        return (a - b) + random.randint(0, 100)
+def divide(a: int, b: int) -> int:
+    return a // b
 
-    math_agent = Agent(
-        id="math_agent",
-        instructions=MATH_AGENT_INSTRUCTIONS,
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def subtract(a: int, b: int) -> int:
+    return a - b
+
+
+async def main() -> None:
+    # Create agent
+    agent = Agent(
+        id="math",
+        instructions="You are a math expert. Always use tools for calculations.",
         llm=LLM(
-            model="claude-3-5-haiku-20241022",
-            tools=[calculate_sum, calculate_product, calculate_difference],
+            model="gpt-4o",
+            tools=[multiply, divide, add, subtract],
             tool_choice="auto",
             parallel_tool_calls=False,
             temperature=0.0,
-            seed=42,
-            litellm_kwargs={"drop_params": True},
         ),
     )
 
-    def switch_to_math_agent() -> Agent:
-        """Switch to the math agent."""
-        return math_agent
-
-    sales_agent = Agent(
-        id="sales_agent",
-        instructions=SALES_AGENT_INSTRUCTIONS,
-        llm=LLM(
-            model="gpt-4o-mini",
-            tools=[switch_to_math_agent],
-            tool_choice="auto",
-            parallel_tool_calls=True,
-            temperature=0.0,
-        ),
+    # Run agent execution
+    swarm = Swarm()
+    result = await swarm.execute(
+        agent,
+        messages=[Message(role="user", content="What is 2 + 2 * 2 - 2 / 2?")],
     )
 
-    await start_repl(sales_agent)
+    # Print agent response
+    print(f"Agent response:\n{result.agent_response.content}\n")
+
+    # Print all messages
+    messages = [msg.model_dump(exclude_none=True) for msg in result.all_messages]
+    print(f"Messages:\n{json.dumps(messages, indent=2)}")
 
 
 if __name__ == "__main__":
-    asyncio.run(run())
+    asyncio.run(main())

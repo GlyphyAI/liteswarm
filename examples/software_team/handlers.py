@@ -1,26 +1,25 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 from typing_extensions import override
 
-from liteswarm.core.console_handler import ConsoleEventHandler
-from liteswarm.types import ContextVariables, Plan, PlanFeedbackHandler
+from liteswarm.repl.event_handler import ConsoleEventHandler
 from liteswarm.types.events import (
-    PlanCompletedEvent,
-    PlanCreatedEvent,
-    TaskCompletedEvent,
-    TaskStartedEvent,
+    PlanCreateEvent,
+    PlanExecutionCompleteEvent,
+    TaskCompleteEvent,
+    TaskStartEvent,
 )
 
 
-class SwarmEventHandler(ConsoleEventHandler):
+class EventHandler(ConsoleEventHandler):
     """Software team event handler with detailed task and plan tracking."""
 
     @override
-    async def _handle_team_plan_created(self, event: PlanCreatedEvent) -> None:
+    def _handle_plan_create(self, event: PlanCreateEvent) -> None:
         """Handle team plan created events with detailed task breakdown.
 
         Args:
@@ -42,7 +41,7 @@ class SwarmEventHandler(ConsoleEventHandler):
         print("-------------------------")
 
     @override
-    async def _handle_team_task_started(self, event: TaskStartedEvent) -> None:
+    def _handle_task_start(self, event: TaskStartEvent) -> None:
         """Handle team task started events with assignment details.
 
         Args:
@@ -56,7 +55,7 @@ class SwarmEventHandler(ConsoleEventHandler):
             print(f"Dependencies: {', '.join(event.task.dependencies)}")
 
     @override
-    async def _handle_team_task_completed(self, event: TaskCompletedEvent) -> None:
+    def _handle_task_complete(self, event: TaskCompleteEvent) -> None:
         """Handle team task completed events with results.
 
         Args:
@@ -70,7 +69,7 @@ class SwarmEventHandler(ConsoleEventHandler):
             print(event.task_result.output.model_dump_json(indent=2))
 
     @override
-    async def _handle_team_plan_completed(self, event: PlanCompletedEvent) -> None:
+    def _handle_plan_execution_complete(self, event: PlanExecutionCompleteEvent) -> None:
         """Handle team plan completed events with execution summary.
 
         Args:
@@ -83,49 +82,3 @@ class SwarmEventHandler(ConsoleEventHandler):
         if event.artifact.error:
             print(f"Error: {event.artifact.error}")
         print("\nAll tasks have been executed successfully.")
-
-
-class InteractivePlanFeedbackHandler(PlanFeedbackHandler):
-    """Interactive feedback handler for plan review and refinement."""
-
-    @override
-    async def handle(
-        self,
-        plan: Plan,
-        prompt: str,
-        context: ContextVariables | None,
-    ) -> tuple[str, ContextVariables | None] | None:
-        """Handle plan feedback interactively.
-
-        Args:
-            plan: The current plan to review.
-            prompt: The current prompt used to generate the plan.
-            context: The current context variables.
-
-        Returns:
-            None if the plan is approved, or a tuple of (new_prompt, new_context)
-            to create a new plan with the updated inputs.
-        """
-        print("\nProposed Plan:")
-        print("-" * 30)
-        print(f"Plan ID: {plan.id}")
-        for i, task in enumerate(plan.tasks, 1):
-            print(f"{i}. {task.title}")
-            if task.description:
-                print(f"   {task.description}")
-        print("-" * 30)
-
-        choice = input("\n1. Approve and execute\n2. Provide feedback\n3. Exit\n\nYour choice (1-3): ")  # fmt: skip
-
-        match choice:
-            case "1":
-                return None
-            case "2":
-                feedback = input("\nEnter your feedback: ")
-                new_prompt = f"Original request: {prompt}\n\nPrevious attempt wasn't quite right because: {feedback}\n\nPlease try again with these adjustments."
-                return new_prompt, context
-            case "3":
-                raise KeyboardInterrupt("User chose to exit")
-            case _:
-                print("Invalid choice. Please try again.")
-                return await self.handle(plan, prompt, context)

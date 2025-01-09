@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -10,8 +10,8 @@ from typing import Any
 import litellm
 from litellm.utils import token_counter
 
-from liteswarm.types.messages import MessageAdapter, MessageT, TrimmedMessages
 from liteswarm.types.swarm import Message
+from liteswarm.types.utils import MessageAdapter, MessageT, TrimMessagesResult
 from liteswarm.utils.logging import log_verbose
 
 
@@ -219,7 +219,7 @@ def trim_messages(
     model: str | None = None,
     trim_ratio: float = 0.75,
     max_tokens: int | None = None,
-) -> TrimmedMessages[MessageT]:
+) -> TrimMessagesResult[MessageT]:
     """Trim message history to fit within model's context window.
 
     Implements intelligent message trimming that:
@@ -268,7 +268,7 @@ def trim_messages(
             ```
     """
     if not messages:
-        return TrimmedMessages(messages=[], response_tokens=0)
+        return TrimMessagesResult(messages=[], response_tokens=0)
 
     try:
         # Get target token limit
@@ -278,7 +278,7 @@ def trim_messages(
                 max_tokens = model_max_tokens
 
         if not max_tokens:
-            return TrimmedMessages(messages=messages, response_tokens=0)
+            return TrimMessagesResult(messages=messages, response_tokens=0)
 
         max_tokens = int(max_tokens * trim_ratio)
 
@@ -327,7 +327,7 @@ def trim_messages(
         if current_tokens <= max_tokens:
             result = messages_to_check
             response_tokens = max_tokens - current_tokens if model else 0
-            return TrimmedMessages(messages=result, response_tokens=response_tokens)
+            return TrimMessagesResult(messages=result, response_tokens=response_tokens)
 
         log_verbose(f"Trimming messages: current={current_tokens}, max={max_tokens}")
 
@@ -351,18 +351,18 @@ def trim_messages(
         # Build final message list
         result = messages_to_check
         response_tokens = max_tokens - current_tokens if model else 0
-        return TrimmedMessages(messages=result, response_tokens=response_tokens)
+        return TrimMessagesResult(messages=result, response_tokens=response_tokens)
 
     except Exception as e:
         log_verbose(f"Error during message trimming: {str(e)}")
-        return TrimmedMessages(messages=messages, response_tokens=0)
+        return TrimMessagesResult(messages=messages, response_tokens=0)
 
 
 def validate_messages(
     messages: Any,
     strict: bool = False,
 ) -> list[Message]:
-    """Validate and convert message dictionaries to Message objects.
+    """Validate and convert message-compatible objects to Message objects.
 
     Performs type validation and conversion of message data using Pydantic.
     Handles various message formats including tool calls and responses.

@@ -1,23 +1,24 @@
 cff-version: 1.2.0
+title: LiteSwarm
 message: "If you use LiteSwarm in your research or project, please cite it as below."
+type: software
 authors:
   - family-names: "Mozharovskii"
     given-names: "Evgenii"
   - name: "GlyphyAI"
-title: "LiteSwarm: A Lightweight Framework for Building AI Agent Systems"
-version: 0.4.0
-date-released: "2024"
+repository-code: "https://github.com/glyphyai/liteswarm"
 url: "https://github.com/glyphyai/liteswarm"
-abstract: "An extensible framework for building AI agent systems with a focus on structured interactions, LLM-agnostic design, and composable architecture. Features include multi-agent orchestration, structured outputs, and provider-agnostic response parsing."
-type: software
+abstract: |
+  An extensible framework for building AI agent systems with a focus on structured
+  interactions, LLM-agnostic design, and composable architecture. Features include
+  multi-agent orchestration, structured outputs, and provider-agnostic response parsing.
+keywords:
+  - agents
+  - multi-agent
+  - ai-agents
+  - agent-framework
+  - agent-orchestration
+  - agent-ops
 license: MIT
-references:
-  - type: software
-    title: "LiteSwarm: A Lightweight Framework for Building AI Agent Systems"
-    authors:
-      - family-names: "Mozharovskii"
-        given-names: "Evgenii"
-      - name: "GlyphyAI"
-    year: 2024
-    url: "https://github.com/glyphyai/liteswarm"
-    key: mozharovskii_2024_liteswarm
+version: 0.4.0
+date-released: 2024-12-26

@@ -1,21 +1,25 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 import asyncio
 import json
-import os
 
 from pydantic import BaseModel
 
 from liteswarm.core import Swarm
-from liteswarm.types import LLM, Agent, ContextVariables, ToolResult
-from liteswarm.utils.logging import enable_logging
-from liteswarm.utils.messages import dump_messages
+from liteswarm.types import LLM, Agent, AgentExecutionResult, ContextVariables, Message, ToolResult
+from liteswarm.utils import dump_messages, enable_logging
+from liteswarm.utils.misc import prompt
 
-os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
+enable_logging(default_level="DEBUG")
+
+
+def get_messages_json(result: AgentExecutionResult) -> str:
+    messages = dump_messages(result.all_messages, exclude_none=True)
+    return json.dumps(messages, indent=2, ensure_ascii=False)
 
 
 async def instructions_example() -> None:
@@ -33,14 +37,13 @@ async def instructions_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    await swarm.execute(
+    result = await swarm.execute(
         agent=agent,
-        prompt="Hello!",
+        messages=[Message(role="user", content="Hello!")],
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = await swarm.message_store.get_messages()
-    print(json.dumps(dump_messages(messages), indent=2))
+    print(get_messages_json(result))
 
 
 async def agent_switching_example() -> None:
@@ -49,7 +52,7 @@ async def agent_switching_example() -> None:
         user_name: str = context_variables.get("user_name", "John")
         greeting = "Hola" if language.lower() == "es" else "Hello"
 
-        return ToolResult(
+        return ToolResult.update_context(
             content=f"{greeting}, {user_name}!",
             context_variables=ContextVariables(language=language),
         )
@@ -66,9 +69,9 @@ async def agent_switching_example() -> None:
 
     def switch_to_speak_agent() -> ToolResult:
         """Switch to the speak agent."""
-        return ToolResult(
-            content="Switched to speak agent",
+        return ToolResult.switch_agent(
             agent=speak_agent,
+            content="Switched to speak agent",
         )
 
     welcome_agent = Agent(
@@ -85,14 +88,13 @@ async def agent_switching_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    await swarm.execute(
+    result = await swarm.execute(
         agent=welcome_agent,
-        prompt="Hola!",
+        messages=[Message(role="user", content="Hola!")],
         context_variables=ContextVariables(user_name="John"),
     )
 
-    messages = await swarm.message_store.get_messages()
-    print(json.dumps(dump_messages(messages), indent=2, ensure_ascii=False))
+    print(get_messages_json(result))
 
 
 async def error_handling_example() -> None:
@@ -114,13 +116,12 @@ async def error_handling_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    await swarm.execute(
+    result = await swarm.execute(
         agent=agent,
-        prompt="What is the weather in Orgrimmar?",
+        messages=[Message(role="user", content="What is the weather in Orgrimmar?")],
     )
 
-    messages = await swarm.message_store.get_messages()
-    print(json.dumps(dump_messages(messages), indent=2))
+    print(get_messages_json(result))
 
 
 class User(BaseModel):
@@ -145,13 +146,12 @@ async def pydantic_example() -> None:
     )
 
     swarm = Swarm(include_usage=True)
-    await swarm.execute(
+    result = await swarm.execute(
         agent=agent,
-        prompt="What is the name of a user with id 1?",
+        messages=[Message(role="user", content="What is the name of a user with id 1?")],
     )
 
-    messages = await swarm.message_store.get_messages()
-    print(json.dumps(dump_messages(messages), indent=2))
+    print(get_messages_json(result))
 
 
 async def run_selected_example() -> None:
@@ -161,7 +161,7 @@ async def run_selected_example() -> None:
     print("2. Agent switching")
     print("3. Error handling")
     print("4. Pydantic output")
-    choice = input("Enter the number of the example to run: ")
+    choice = await prompt("Enter the number of the example to run: ")
 
     match choice:
         case "1":
@@ -177,5 +177,4 @@ async def run_selected_example() -> None:
 
 
 if __name__ == "__main__":
-    enable_logging()
     asyncio.run(run_selected_example())

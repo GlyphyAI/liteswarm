@@ -1,16 +1,13 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
 
 import asyncio
-import os
 
 from liteswarm.repl import start_repl
 from liteswarm.types import LLM, Agent, AgentTool
-
-os.environ["LITESWARM_LOG_LEVEL"] = "DEBUG"
 
 ROUTER_INSTRUCTIONS = """You are an intelligent routing agent that coordinates the Flutter app development team.
 
@@ -169,7 +166,7 @@ async def run() -> None:
             id="router",
             instructions=ROUTER_INSTRUCTIONS,
             llm=LLM(
-                model="gpt-4o-mini",
+                model="claude-3-5-sonnet-20241022",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -180,7 +177,7 @@ async def run() -> None:
             id="product_manager",
             instructions=PRODUCT_MANAGER_INSTRUCTIONS,
             llm=LLM(
-                model="gpt-4o-mini",
+                model="claude-3-5-sonnet-20241022",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -191,7 +188,7 @@ async def run() -> None:
             id="designer",
             instructions=DESIGNER_INSTRUCTIONS,
             llm=LLM(
-                model="gpt-4o-mini",
+                model="claude-3-5-sonnet-20241022",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -213,7 +210,7 @@ async def run() -> None:
             id="qa",
             instructions=QA_INSTRUCTIONS,
             llm=LLM(
-                model="gpt-4o-mini",
+                model="claude-3-5-sonnet-20241022",
                 tools=[],
                 tool_choice="auto",
                 temperature=0.0,
@@ -242,9 +239,10 @@ async def run() -> None:
     agents = create_flutter_team()
 
     await start_repl(
-        agents["router"],
+        agent=agents["router"],
         include_usage=True,
         include_cost=True,
+        log_level="DEBUG",
     )
 
 

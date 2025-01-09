@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -37,12 +37,12 @@ def combine_dicts(
             ```python
             result = combine_dicts(
                 {"a": 1, "b": "text"},
-                {"a": 2, "c": 3}
+                {"a": 2, "c": 3},
             )
             assert result == {
-                "a": 3,        # Numbers added
-                "b": "text",   # Non-numeric preserved
-                "c": 3         # Unique key included
+                "a": 3,  # Numbers added
+                "b": "text",  # Non-numeric preserved
+                "c": 3,  # Unique key included
             }
             ```
 
@@ -57,11 +57,11 @@ def combine_dicts(
             ```python
             result = combine_dicts(
                 {"count": 1, "name": "test"},
-                {"count": 2, "name": "other"}
+                {"count": 2, "name": "other"},
             )
             assert result == {
-                "count": 3,     # Numbers added
-                "name": "test"  # Left value preserved
+                "count": 3,  # Numbers added
+                "name": "test",  # Left value preserved
             }
             ```
     """
@@ -110,12 +110,12 @@ def combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
             usage1 = Usage(
                 prompt_tokens=10,
                 completion_tokens=5,
-                total_tokens=15
+                total_tokens=15,
             )
             usage2 = Usage(
                 prompt_tokens=20,
                 completion_tokens=10,
-                total_tokens=30
+                total_tokens=30,
             )
             total = combine_usage(usage1, usage2)
             assert total.prompt_tokens == 30
@@ -128,24 +128,15 @@ def combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
             usage1 = Usage(
                 prompt_tokens=10,
                 completion_tokens=5,
-                prompt_tokens_details={
-                    "system": 3,
-                    "user": 7
-                }
+                prompt_tokens_details={"system": 3, "user": 7},
             )
             usage2 = Usage(
                 prompt_tokens=15,
                 completion_tokens=8,
-                prompt_tokens_details={
-                    "system": 5,
-                    "user": 10
-                }
+                prompt_tokens_details={"system": 5, "user": 10},
             )
             total = combine_usage(usage1, usage2)
-            assert total.prompt_tokens_details == {
-                "system": 8,
-                "user": 17
-            }
+            assert total.prompt_tokens_details == {"system": 8, "user": 17}
             ```
     """
     if left is None:
@@ -186,7 +177,7 @@ def combine_usage(left: Usage | None, right: Usage | None) -> Usage | None:
     )
 
 
-def combine_response_cost(
+def combine_cost(
     left: ResponseCost | None,
     right: ResponseCost | None,
 ) -> ResponseCost | None:
@@ -207,27 +198,24 @@ def combine_response_cost(
             ```python
             cost1 = ResponseCost(
                 prompt_tokens_cost=0.001,
-                completion_tokens_cost=0.002
+                completion_tokens_cost=0.002,
             )
             cost2 = ResponseCost(
                 prompt_tokens_cost=0.003,
-                completion_tokens_cost=0.004
+                completion_tokens_cost=0.004,
             )
-            total = combine_response_cost(cost1, cost2)
+            total = combine_cost(cost1, cost2)
             assert total.prompt_tokens_cost == 0.004
             assert total.completion_tokens_cost == 0.006
             ```
 
         None handling:
             ```python
-            assert combine_response_cost(None, None) is None
+            assert combine_cost(None, None) is None
 
-            cost = ResponseCost(
-                prompt_tokens_cost=0.001,
-                completion_tokens_cost=0.002
-            )
-            assert combine_response_cost(cost, None) == cost
-            assert combine_response_cost(None, cost) == cost
+            cost = ResponseCost(prompt_tokens_cost=0.001, completion_tokens_cost=0.002)
+            assert combine_cost(cost, None) == cost
+            assert combine_cost(None, cost) == cost
             ```
     """
     if left is None:
@@ -239,6 +227,7 @@ def combine_response_cost(
     return ResponseCost(
         prompt_tokens_cost=left.prompt_tokens_cost + right.prompt_tokens_cost,
         completion_tokens_cost=left.completion_tokens_cost + right.completion_tokens_cost,
+        total_tokens_cost=left.total_tokens_cost + right.total_tokens_cost,
     )
 
 
@@ -261,7 +250,7 @@ def calculate_response_cost(model: str, usage: Usage) -> ResponseCost:
             usage = Usage(
                 prompt_tokens=100,
                 completion_tokens=50,
-                total_tokens=150
+                total_tokens=150,
             )
             cost = calculate_response_cost("gpt-4o", usage)
             # Costs based on current pricing:
@@ -276,12 +265,9 @@ def calculate_response_cost(model: str, usage: Usage) -> ResponseCost:
             usage = Usage(
                 prompt_tokens=1000,
                 completion_tokens=500,
-                total_tokens=1500
+                total_tokens=1500,
             )
-            cost = calculate_response_cost(
-                "gpt-4o-mini",
-                usage
-            )
+            cost = calculate_response_cost("gpt-4o-mini", usage)
             # Costs based on current pricing:
             # prompt: $0.150/1M tokens
             # completion: $0.600/1M tokens
@@ -297,4 +283,5 @@ def calculate_response_cost(model: str, usage: Usage) -> ResponseCost:
     return ResponseCost(
         prompt_tokens_cost=prompt_tokens_cost,
         completion_tokens_cost=completion_tokens_cost,
+        total_tokens_cost=prompt_tokens_cost + completion_tokens_cost,
     )

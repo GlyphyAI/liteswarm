@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -7,8 +7,8 @@
 from typing import Any
 
 from liteswarm.types.swarm_team import Plan, Task
+from liteswarm.types.typing import union
 from liteswarm.utils.pydantic import change_field_type
-from liteswarm.utils.typing import union
 
 
 def create_plan_with_tasks(task_types: list[type[Task]]) -> type[Plan]:

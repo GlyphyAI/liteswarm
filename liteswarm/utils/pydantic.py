@@ -1,5 +1,5 @@
-# Copyright 2024 GlyphyAI
-
+# Copyright 2025 GlyphyAI
+#
 # Use of this source code is governed by an MIT-style
 # license that can be found in the LICENSE file or at
 # https://opensource.org/licenses/MIT.
@@ -25,7 +25,7 @@ from pydantic.fields import FieldInfo, _FromFieldInfoInputs
 from pydantic_core import PydanticUndefined
 from typing_extensions import override
 
-from liteswarm.utils.typing import is_subtype, union
+from liteswarm.types.typing import is_subtype, union
 
 T = TypeVar("T", bound=BaseModel)
 V = TypeVar("V", bound=BaseModel)
@@ -728,7 +728,7 @@ def replace_default_values(
     return target_model_with_placeholders
 
 
-def change_field_type(  # noqa: PLR0913
+def change_field_type(
     model_type: type[T],
     field_name: str,
     new_type: Any,
